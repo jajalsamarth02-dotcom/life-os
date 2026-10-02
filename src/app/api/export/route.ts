@@ -10,7 +10,8 @@ export const dynamic = "force-dynamic";
  * user's own personal data. This endpoint exports it in one portable file.
  *
  * NEVER included: ErpConnection.secretEnc / sessionCookieEnc (encrypted
- * credentials) and internal demo-simulator state (settings keys "demo.*").
+ * credentials), any *.enc setting row (e.g. notify.wa.enc - the encrypted
+ * WhatsApp CallMeBot config) and internal demo-simulator state ("demo.*").
  */
 export async function GET() {
   try {
@@ -33,7 +34,7 @@ export async function GET() {
         app: "erp-sync",
         schemaVersion: 1,
         exportedAt: new Date().toISOString(),
-        note: "Read-only mirror of the ERP + personal data. Encrypted credentials are never exported.",
+        note: "Read-only mirror of the ERP + personal data. Encrypted credentials and *.enc settings are never exported.",
       },
       subjects: subjects.map((s) => ({
         code: s.code,
@@ -88,7 +89,7 @@ export async function GET() {
         createdAt: n.createdAt,
       })),
       settings: settings
-        .filter((s) => !s.key.startsWith("demo."))
+        .filter((s) => !s.key.startsWith("demo.") && !s.key.endsWith(".enc"))
         .map((s) => ({ key: s.key, value: s.value })),
       erpConnection: conn
         ? {

@@ -10,6 +10,9 @@ import {
   BellRing,
   CalendarClock,
   CheckCircle2,
+  Database,
+  Download,
+  FileSpreadsheet,
   FlaskConical,
   GraduationCap,
   Info,
@@ -85,6 +88,7 @@ import {
 import {
   connectErp,
   disconnectErp,
+  downloadBackup,
   fetchAttendance,
   fetchErpStatus,
   fetchSemesters,
@@ -101,6 +105,7 @@ import {
   qk,
 } from "./api";
 import { CustomTargetChip, fmtDT, syncLogIcon } from "./shared";
+import { downloadCsv } from "./trend-chart";
 import type { AppSettings, ErpConnectFailure, SubjectView } from "./types";
 
 /* ------------------------------------------------------------------ */
@@ -1314,6 +1319,126 @@ function SyncHistoryCard() {
 }
 
 /* ------------------------------------------------------------------ */
+/* Data & backups card                                                 */
+/* ------------------------------------------------------------------ */
+
+function DataBackupCard() {
+  const { data: att } = useQuery({ queryKey: qk.attendance, queryFn: fetchAttendance });
+  const [busy, setBusy] = useState<null | "backup" | "csv">(null);
+
+  /* Full JSON backup via GET /api/export — the portable copy of everything the
+     local mirror knows. Encrypted credentials are excluded server-side. */
+  const runBackup = async () => {
+    setBusy("backup");
+    try {
+      const filename = await downloadBackup();
+      toast.success("Backup downloaded", { description: filename });
+    } catch (e) {
+      toast.error("Backup failed", {
+        description: e instanceof Error ? e.message : "Could not build the backup",
+      });
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  /* One-row-per-subject CSV of the live attendance snapshot. */
+  const runCsv = () => {
+    if (!att) return;
+    setBusy("csv");
+    try {
+      const stamp = new Date().toISOString().slice(0, 10);
+      downloadCsv(
+        `attendance-${stamp}.csv`,
+        ["Code", "Subject", "Present", "Held", "Attendance %", "Target %", "Status", "Custom target"],
+        att.subjects.map((s) => [
+          s.code,
+          s.name,
+          s.present,
+          s.total,
+          s.percentage.toFixed(2),
+          s.targetPct,
+          s.status,
+          s.hasCustomTarget ? "yes" : "no",
+        ])
+      );
+      toast.success("Subjects CSV exported", {
+        description: `${att.subjects.length} subjects · overall ${att.overall.percentage.toFixed(2)}%`,
+      });
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  return (
+    <Card className="rounded-xl border-border/60">
+      <CardHeader className="pb-3">
+        <CardTitle className="flex items-center gap-2 text-base tracking-tight">
+          <Database className="size-4 text-primary" aria-hidden="true" />
+          Data &amp; backups
+        </CardTitle>
+        <CardDescription>Your data is yours — take a portable copy any time</CardDescription>
+      </CardHeader>
+      <CardContent className="space-y-3">
+        <div className="flex items-start justify-between gap-3 rounded-lg border border-border/50 p-3 transition-colors hover:bg-muted/40">
+          <div className="min-w-0 space-y-0.5">
+            <p className="text-sm font-medium">Full backup (JSON)</p>
+            <p className="text-xs leading-relaxed text-muted-foreground">
+              Subjects, ALAs &amp; reminders, timetable, sync logs, change events, notifications and settings
+              — one portable file.
+            </p>
+          </div>
+          <Button
+            variant="outline"
+            size="sm"
+            className="h-8 shrink-0 gap-1.5"
+            onClick={runBackup}
+            disabled={busy !== null}
+            aria-label="Download the full JSON backup"
+          >
+            {busy === "backup" ? (
+              <Loader2 className="size-3.5 animate-spin" aria-hidden="true" />
+            ) : (
+              <Download className="size-3.5" aria-hidden="true" />
+            )}
+            Download
+          </Button>
+        </div>
+
+        <div className="flex items-start justify-between gap-3 rounded-lg border border-border/50 p-3 transition-colors hover:bg-muted/40">
+          <div className="min-w-0 space-y-0.5">
+            <p className="text-sm font-medium">Subjects (CSV)</p>
+            <p className="text-xs leading-relaxed text-muted-foreground">
+              One row per subject with attendance, target and status — opens in Excel or Sheets.
+            </p>
+          </div>
+          <Button
+            variant="outline"
+            size="sm"
+            className="h-8 shrink-0 gap-1.5"
+            onClick={runCsv}
+            disabled={busy !== null || !att}
+            aria-label="Export the subject attendance table as CSV"
+          >
+            {busy === "csv" ? (
+              <Loader2 className="size-3.5 animate-spin" aria-hidden="true" />
+            ) : (
+              <FileSpreadsheet className="size-3.5" aria-hidden="true" />
+            )}
+            Export
+          </Button>
+        </div>
+
+        <p className="flex items-start gap-1.5 text-xs leading-relaxed text-muted-foreground/80">
+          <ShieldCheck className="mt-0.5 size-3.5 shrink-0 text-emerald-500" aria-hidden="true" />
+          <span>Encrypted ERP credentials and WhatsApp keys are never included in any export.</span>
+        </p>
+      </CardContent>
+    </Card>
+  );
+}
+
+/* ------------------------------------------------------------------ */
 /* WhatsApp alerts card (CallMeBot)                                    */
 /* ------------------------------------------------------------------ */
 
@@ -1579,6 +1704,7 @@ export function SettingsTab() {
         <InstallAppCard />
       </div>
       <DemoModeCard liveConnected={liveConnected} />
+      <DataBackupCard />
       <SyncHistoryCard />
 
       <Card className="rounded-xl border-border/60 bg-muted/40">

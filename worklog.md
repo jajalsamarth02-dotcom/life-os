@@ -1339,3 +1339,25 @@ Unresolved issues / risks & next-phase priorities:
 4. User decisions still pending: 2nd free notification channel (Telegram ⭐ / ntfy / Discord / email) and optional fixed daily WhatsApp digest time (digestTime unset — never send test/digest to the real phone during QA).
 5. Backlog unchanged: L/H/E columns folding (server-side, needs user consent), SMTP digest (needs credentials), TZ cosmetic, per-semester scoping (schema), weekly bunk-budget (needs timetable slots — still empty).
 6. Keeper cron 430680 must stay alive; worklog protocol: append-only, three-section handover.
+
+---
+Task ID: 23
+Agent: Z.ai Code (main orchestrator)
+Task: Round task 23:15+08 — status assessment, cold-load QA, Data & backups card (backup JSON + subjects CSV) + PRIVACY FIX in /api/export. Client UI additive; one-line server filter in export route.
+
+Current project status / assessment:
+- Server healthy all round: 200s throughout; next-server RSS ~1.86GB (pre-cap instance; 900MB cap lands on next natural respawn — do NOT manual-restart, spawn reaping per Task 17). Memory ~1.6GB available after QA. No new OOM events.
+- Cold-load QA: 0 console errors. Gap analysis: notifications bell already has filter+mark-read; sync history already surfaced; reducedMotion="user" already in providers (MotionConfig); R22 resilience pack in place. Found ONE orphaned capability + one privacy issue: fetchBackup()/downloadBackup() in api.ts had NO UI caller (the /api/export endpoint was unreachable from the app), and /api/export filtered only "demo.*" settings — it INCLUDED notify.wa.enc, the AES-256-GCM-encrypted WhatsApp credential blob (ciphertext exposure = unnecessary attack surface in a portable file).
+
+Completed modifications / verified:
+1. PRIVACY FIX (src/app/api/export/route.ts): settings filter now excludes any key ending ".enc" (notify.wa.enc dropped from backups; harmless metadata keys like notify.wa.enabled/lastResult remain). Docstring + backup meta.note updated. VERIFIED via API diff: backup settings now 8 keys, no .enc; subjects 14 (all semesters — full dump by design), reminders 50.
+2. NEW FEATURE — DataBackupCard (src/components/erp/settings-tab.tsx), rendered between Demo-mode and Sync-history cards: (a) "Full backup (JSON)" — wires the previously orphaned downloadBackup(), pending spinner, success toast with the generated filename, honest error toast; (b) "Subjects (CSV)" — one row per subject (code, name, present, held, %, target, status, custom-target flag) via existing downloadCsv, success toast with subject count + overall %; (c) ShieldCheck privacy note ("Encrypted ERP credentials and WhatsApp keys are never included"). Hover-tinted action rows, disabled states while busy.
+3. Verification: tsc --noEmit → zero errors under src/. agent-browser CDP QA: opened /#settings, card found; clicked Download → toast "Backup downloaded · erp-sync-backup-2026-10-02-15-17.json"; clicked Export → toast "Subjects CSV exported · 8 subjects · overall 66.67%" (matches live semester-5 view); /api/export 200; screenshots light+dark /tmp/qa-r23-backup*.png visually verified (card, rows, buttons, note, toast). Console 0 errors. Browser CLOSED immediately; server 200 after.
+
+Unresolved issues / risks & next-phase priorities:
+1. Pre-cap instance RSS ~1.86GB and creeping (was 1.69GB last round) — if the supervisor kill line hits, expect a capped respawn ≤3 min; leave it alone. If RSS keeps climbing across days, prefer a quiet-window `rm -rf .next` + keeper respawn over any manual restart.
+2. next.config.ts unrecognized turbopack key — unchanged Task 17 guidance.
+3. User decisions still pending: 2nd free notification channel (Telegram ⭐ / ntfy / Discord / email) and optional fixed daily WhatsApp digest time (digestTime unset — never send test/digest to the real phone during QA).
+4. Backup RESTORE (import) deliberately NOT built — would need a write endpoint and data-clobber rules; suggest asking the user before adding.
+5. Backlog unchanged: L/H/E columns folding (needs user consent), SMTP digest (needs credentials), TZ cosmetic, per-semester scoping (schema), weekly bunk-budget (needs timetable slots — still empty).
+6. Keeper cron 430680 must stay alive; worklog protocol: append-only, three-section handover.
