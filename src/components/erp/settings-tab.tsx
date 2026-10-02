@@ -104,6 +104,7 @@ import {
   fetchSettings,
   fetchNtfyStatus,
   fetchSyncLogs,
+  fetchTimetable,
   fetchWaStatus,
   postDemoEvolve,
   postDemoReset,
@@ -120,7 +121,7 @@ import {
 import { CustomTargetChip, erpAssignmentUrl, fmtDT, syncLogIcon } from "./shared";
 import { TextSizeCard } from "./text-size-card";
 import { downloadCsv } from "./trend-chart";
-import { alaUid, buildDeadlineIcs, reminderUid } from "./ics";
+import { alaUid, buildClassEvents, buildDeadlineIcs, reminderUid } from "./ics";
 import type { AppSettings, ErpConnectFailure, SubjectView } from "./types";
 
 /* ------------------------------------------------------------------ */
@@ -1539,9 +1540,20 @@ function DataBackupCard() {
   };
 
   /* Deadline calendar (.ics): active ALA deadlines + dated reminders as
-     VEVENTs with stable UIDs (re-import updates, never duplicates). */
-  const icsEvents = React.useMemo(() => {
-    const items: { uid: string; title: string; description: string | null; dueAt: string; url: string | null }[] = [];
+     VEVENTs with stable UIDs (re-import updates, never duplicates) — plus
+     the weekly class routine as RRULE:FREQ=WEEKLY floating-IST events.
+     Classes share buildClassEvents with the live feed (event identity —
+     UID, times, recurrence — is byte-identical between the two paths;
+     only the display-name source can differ, which is cosmetic). */
+  const slotsQ = useQuery({ queryKey: qk.timetable, queryFn: fetchTimetable });
+  const icsBuild = React.useMemo(() => {
+    const items: {
+      uid: string;
+      title: string;
+      description: string | null;
+      dueAt: string;
+      url: string | null;
+    }[] = [];
     const courseNames = alaQ.data?.courseNames;
     for (const a of alaQ.data?.assignments ?? []) {
       if (a.status !== "ACTIVE") continue;
@@ -1570,8 +1582,11 @@ function DataBackupCard() {
         url: null,
       });
     }
-    return items;
-  }, [alaQ.data, remQ.data]);
+    const datedCount = items.length;
+    const classEvents = buildClassEvents(slotsQ.data ?? [], (code) => courseNames?.[code] ?? null);
+    return { events: [...items, ...classEvents], datedCount, classCount: classEvents.length };
+  }, [alaQ.data, remQ.data, slotsQ.data]);
+  const icsEvents = icsBuild.events;
 
   const runIcs = () => {
     if (icsEvents.length === 0) return;
@@ -1579,7 +1594,7 @@ function DataBackupCard() {
     try {
       const { text, total, future, past } = buildDeadlineIcs(icsEvents);
       const stamp = new Date().toISOString().slice(0, 10);
-      const filename = `erp-sync-deadlines-${stamp}.ics`;
+      const filename = `erp-sync-calendar-${stamp}.ics`;
       downloadText(filename, text, "text/calendar");
       toast.success(`Calendar exported — ${total} event${total === 1 ? "" : "s"}`, {
         description:
@@ -1776,11 +1791,11 @@ function DataBackupCard() {
               <CalendarClock className="size-4" aria-hidden="true" />
             </span>
             <div className="min-w-0 space-y-0.5">
-              <p className="text-sm font-medium">Deadlines calendar (.ics)</p>
+              <p className="text-sm font-medium">Deadlines & classes calendar (.ics)</p>
               <p className="text-xs leading-relaxed text-muted-foreground">
                 {icsEvents.length > 0
-                  ? `${icsEvents.length} dated item${icsEvents.length === 1 ? "" : "s"} right now — active ALA deadlines + reminders, 24-hour alarms included. Imports into Google, Apple or Outlook; re-importing updates the same events.`
-                  : "Exports every active ALA deadline and reminder as calendar events for Google, Apple or Outlook — nothing dated to export yet."}
+                  ? `${icsBuild.datedCount} dated item${icsBuild.datedCount === 1 ? "" : "s"} + ${icsBuild.classCount} weekly class${icsBuild.classCount === 1 ? "" : "es"} right now. 24-hour alarms on deadlines only — classes repeat silently every week. Imports into Google, Apple or Outlook; re-importing updates the same events.`
+                  : "Exports every active ALA deadline, reminder and weekly class as calendar events for Google, Apple or Outlook — nothing to export yet."}
               </p>
             </div>
           </div>
@@ -1816,7 +1831,7 @@ function DataBackupCard() {
             </p>
             {calUrl && (
               <span className="text-[10px] text-muted-foreground">
-                {icsEvents.length} dated item{icsEvents.length === 1 ? "" : "s"}
+                {icsBuild.datedCount} dated + {icsBuild.classCount} weekly class{icsBuild.classCount === 1 ? "" : "es"}
               </span>
             )}
           </div>
@@ -1915,7 +1930,7 @@ function DataBackupCard() {
             <>
               <p className="text-[11px] leading-snug text-muted-foreground">
                 Subscribe once from Google/Apple/Outlook “add calendar by URL” — the link always reflects the
-                latest synced deadlines. No manual re-export, ever.
+                latest synced deadlines and your weekly class schedule. No manual re-export, ever.
               </p>
               <Button
                 variant="outline"

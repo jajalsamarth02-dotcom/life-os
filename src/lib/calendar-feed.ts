@@ -2,7 +2,7 @@ import { randomBytes } from "crypto";
 import { db } from "@/lib/db";
 import { ASSIGNMENT_EXT_PREFIX } from "@/lib/sync/engine";
 import { withSubjectMeta } from "@/lib/reminders";
-import { alaUid, buildDeadlineIcs, reminderUid, type IcsEventInput } from "@/components/erp/ics";
+import { alaUid, buildClassEvents, buildDeadlineIcs, reminderUid, type IcsEventInput } from "@/components/erp/ics";
 
 /**
  * LIVE calendar subscription feed (server-side twin of the Settings export).
@@ -148,6 +148,20 @@ export async function buildCalendarFeed(now: Date = new Date()): Promise<Calenda
       url: null,
     });
   }
+
+  // Pass 3 — weekly class slots from the synced ERP Class Routine (RRULE
+  // FREQ=WEEKLY, floating IST wall times, no alarms). Shares buildClassEvents
+  // with the Settings one-shot export so event identity (UID, time, rule)
+  // can never drift between the two paths. Dedupe lives inside the builder
+  // (parallel batches can share a wall time).
+  const slotRows = await db.timetableSlot.findMany({ orderBy: [{ dayOfWeek: "asc" }, { startMin: "asc" }] });
+  items.push(
+    ...buildClassEvents(
+      slotRows,
+      (code) => subjectNameByCode.get(code) ?? courseNames[code] ?? null,
+      now
+    )
+  );
 
   return buildDeadlineIcs(items, now);
 }

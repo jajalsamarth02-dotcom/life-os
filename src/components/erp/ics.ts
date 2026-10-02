@@ -1,11 +1,12 @@
 /**
  * Deadlines calendar (.ics) builder — RFC 5545 subset.
  *
- * Turns active ALA/assignment deadlines and dated reminders into a
- * standards-correct VCALENDAR that imports into Google Calendar, Apple
- * Calendar and Outlook. UIDs are derived from the stable ERP externalId
- * (or the local reminder id), so RE-IMPORTING a newer export updates the
- * same events instead of duplicating them.
+ * Turns active ALA/assignment deadlines, dated reminders AND the weekly
+ * class routine into a standards-correct VCALENDAR that imports into
+ * Google Calendar, Apple Calendar and Outlook. UIDs are derived from the
+ * stable ERP externalId (or the local reminder id, or the class slot's
+ * content), so RE-IMPORTING a newer export updates the same events instead
+ * of duplicating them.
  *
  * Formatting details that matter for real-world parsers:
  *  - CRLF line endings and 75-octet folding (continuation = space),
@@ -22,10 +23,21 @@ export interface IcsEventInput {
   title: string;
   /** DESCRIPTION — plain text (escaped here). */
   description?: string | null;
-  /** ISO timestamp of the deadline. */
+  /** ISO timestamp of the deadline (for weekly classes: the NEXT occurrence). */
   dueAt: string;
   /** Optional deep link (ERP assignment page) — goes to URL + DESCRIPTION. */
   url?: string | null;
+  /** RRULE content, e.g. "FREQ=WEEKLY" — emitted after DTEND (non-TEXT, raw). */
+  rrule?: string | null;
+  /** Event length in minutes (deadlines default to 1 hour). */
+  durationMin?: number;
+  /** Emit DTSTART/DTEND as FLOATING wall times (IST wall clock, no "Z") so a
+   *  recurring class always fires at the same wall time on the student's
+   *  phone regardless of how calendar apps handle the timezone. */
+  floating?: boolean;
+  /** Set false to suppress the 24-hour VALARM (weekly classes carry none —
+   *  a day-before ping for every class of the week is pure noise). */
+  alarm?: boolean;
 }
 
 export interface IcsResult {
@@ -46,6 +58,19 @@ function icsStamp(d: Date): string {
   return (
     `${d.getUTCFullYear()}${pad(d.getUTCMonth() + 1)}${pad(d.getUTCDate())}` +
     `T${pad(d.getUTCHours())}${pad(d.getUTCMinutes())}${pad(d.getUTCSeconds())}Z`
+  );
+}
+
+/** IST wall-clock offset in minutes (India does not observe DST). */
+export const IST_OFFSET_MIN = 330;
+
+/** Date → FLOATING local (IST wall clock) stamp, e.g. 20261010T110000 — no Z.
+ *  Used for recurring class events so they repeat at the same wall time. */
+function icsStampLocal(d: Date): string {
+  const ist = new Date(d.getTime() + IST_OFFSET_MIN * 60_000);
+  return (
+    `${ist.getUTCFullYear()}${pad(ist.getUTCMonth() + 1)}${pad(ist.getUTCDate())}` +
+    `T${pad(ist.getUTCHours())}${pad(ist.getUTCMinutes())}${pad(ist.getUTCSeconds())}`
   );
 }
 
@@ -79,7 +104,7 @@ export function buildDeadlineIcs(events: IcsEventInput[], now: Date = new Date()
     "PRODID:-//ERP Sync//Student Deadlines//EN",
     "CALSCALE:GREGORIAN",
     "METHOD:PUBLISH",
-    "X-WR-CALNAME:ERP Sync - deadlines",
+    "X-WR-CALNAME:ERP Sync - classes & deadlines",
     "X-WR-TIMEZONE:Asia/Kolkata",
   ];
 
@@ -100,7 +125,10 @@ export function buildDeadlineIcs(events: IcsEventInput[], now: Date = new Date()
     if (isFuture) future += 1;
     else past += 1;
 
-    const end = new Date(due.getTime() + 3600_000);
+    const durMin = ev.durationMin ?? 60;
+    const end = new Date(due.getTime() + durMin * 60_000);
+    const stampStart = ev.floating ? icsStampLocal(due) : icsStamp(due);
+    const stampEnd = ev.floating ? icsStampLocal(end) : icsStamp(end);
     const descParts: string[] = [];
     if (ev.description && ev.description.trim()) descParts.push(ev.description.trim());
     if (ev.url) descParts.push(`Open: ${ev.url}`);
@@ -109,13 +137,14 @@ export function buildDeadlineIcs(events: IcsEventInput[], now: Date = new Date()
     lines.push("BEGIN:VEVENT");
     lines.push(`UID:${esc(ev.uid)}`);
     lines.push(`DTSTAMP:${icsStamp(now)}`);
-    lines.push(`DTSTART:${icsStamp(due)}`);
-    lines.push(`DTEND:${icsStamp(end)}`);
+    lines.push(`DTSTART:${stampStart}`);
+    lines.push(`DTEND:${stampEnd}`);
+    if (ev.rrule) lines.push(`RRULE:${ev.rrule}`);
     lines.push(`SUMMARY:${esc(ev.title)}`);
     lines.push(`DESCRIPTION:${esc(descParts.join("\n"))}`);
     if (ev.url) lines.push(`URL:${esc(ev.url)}`);
     lines.push("STATUS:CONFIRMED");
-    if (isFuture) {
+    if (isFuture && ev.alarm !== false) {
       lines.push("BEGIN:VALARM");
       lines.push("TRIGGER:-P1D");
       lines.push("ACTION:DISPLAY");
@@ -138,4 +167,88 @@ export function alaUid(externalId: string): string {
 export function reminderUid(externalId: string | null, id: string): string {
   if (externalId) return `${externalId.replace(/[^a-zA-Z0-9-]/g, "-")}@erp-sync`;
   return `rem-${id}@erp-sync`;
+}
+
+/* ------------------------------------------------------------------ */
+/* Weekly class events (the synced ERP Class Routine)                  */
+/* ------------------------------------------------------------------ */
+
+/** Minimal slot shape — structurally the TimetableSlot row. */
+export interface ClassSlotInput {
+  dayOfWeek: number;
+  startMin: number;
+  endMin: number;
+  subjectCode: string;
+}
+
+/**
+ * STABLE class UID derived from slot CONTENT (day, times, subject), never
+ * from the row id: the sync engine replaces slot rows wholesale, so ids
+ * churn while the actual schedule stays put. Same class → same UID →
+ * re-imports and feed refreshes UPDATE instead of duplicating. If the ERP
+ * genuinely moves a class, the UID changes and the subscribed calendar
+ * drops the stale occurrence together with the feed refresh.
+ */
+export function classSlotUid(s: ClassSlotInput): string {
+  const p = (m: number) => `${String(Math.floor(m / 60)).padStart(2, "0")}${String(m % 60).padStart(2, "0")}`;
+  const code = s.subjectCode.replace(/[^A-Za-z0-9-]+/g, "-");
+  return `cls-${s.dayOfWeek}-${p(s.startMin)}-${p(s.endMin)}-${code}@erp-sync`;
+}
+
+/**
+ * UTC instant of the NEXT occurrence of a weekly class at an IST wall time
+ * (today counts if the start time is still ahead; otherwise next week).
+ * IST is DST-free, so a fixed offset is exact here.
+ */
+export function nextWeeklyInstant(dayOfWeek: number, startMin: number, now: Date = new Date()): Date {
+  const ist = new Date(now.getTime() + IST_OFFSET_MIN * 60_000);
+  const istNowMin = ist.getUTCHours() * 60 + ist.getUTCMinutes();
+  let ahead = (dayOfWeek - ist.getUTCDay() + 7) % 7;
+  if (ahead === 0 && startMin <= istNowMin) ahead = 7;
+  const wall = Date.UTC(
+    ist.getUTCFullYear(),
+    ist.getUTCMonth(),
+    ist.getUTCDate() + ahead,
+    Math.floor(startMin / 60),
+    startMin % 60,
+    0,
+    0
+  );
+  return new Date(wall - IST_OFFSET_MIN * 60_000);
+}
+
+const DAY_NAMES_ICS = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
+
+/**
+ * Pure builder for the weekly class events — the SHARED core of the live
+ * feed (server) and the Settings one-shot export (client), so the two can
+ * never drift apart in event identity (UID, time, recurrence).
+ * `nameOf` resolves a subject display name; `null` falls back to the code.
+ */
+export function buildClassEvents(
+  slots: ClassSlotInput[],
+  nameOf: (code: string) => string | null,
+  now: Date = new Date()
+): IcsEventInput[] {
+  const seen = new Set<string>();
+  const out: IcsEventInput[] = [];
+  for (const s of slots) {
+    if (!Number.isInteger(s.dayOfWeek) || s.dayOfWeek < 0 || s.dayOfWeek > 6) continue;
+    if (s.endMin <= s.startMin) continue;
+    const uid = classSlotUid(s);
+    if (seen.has(uid)) continue; // parallel batches can share the wall time
+    seen.add(uid);
+    const name = nameOf(s.subjectCode);
+    out.push({
+      uid,
+      title: `[${s.subjectCode}] Class${name ? ` — ${name}` : ""}`,
+      description: `Weekly class from the synced ERP class routine. Repeats every ${DAY_NAMES_ICS[s.dayOfWeek]} — the subscription keeps it current automatically.`,
+      dueAt: nextWeeklyInstant(s.dayOfWeek, s.startMin, now).toISOString(),
+      durationMin: s.endMin - s.startMin,
+      rrule: "FREQ=WEEKLY",
+      floating: true,
+      alarm: false,
+    });
+  }
+  return out;
 }

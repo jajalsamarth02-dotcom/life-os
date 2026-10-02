@@ -205,8 +205,8 @@ export function SetupChecklist({ onOpenStep }: { onOpenStep?: (f: SettingsFocus)
         title: "Calendar subscription",
         state: done ? "done" : "todo",
         desc: done
-          ? "Your phone's calendar updates itself from the live feed"
-          : "Deadlines appear in your phone's calendar and auto-update",
+          ? "Your phone's calendar updates itself — classes and deadlines, auto-refreshing"
+          : "Classes and deadlines appear in your phone's calendar, auto-updating",
         target: "backup",
         icon: CalendarClock,
         chipClass: "bg-violet-500/10 text-violet-600 dark:text-violet-400",
