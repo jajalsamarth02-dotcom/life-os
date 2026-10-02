@@ -1247,3 +1247,26 @@ Unresolved issues / risks & next-phase priorities:
 3. User decisions still pending: 2nd free notification channel (Telegram ⭐ / ntfy / Discord / email) and optional fixed daily WhatsApp digest time (WhatsApp enabled, digestTime unset — never send test/digest to the real phone during QA).
 4. Feature candidates if the student fills the timetable later: weekly bunk-budget per day (slots × canSkip). Backlog unchanged: L/H/E columns folding, SMTP digest, TZ cosmetic, per-semester scoping.
 5. Keeper cron 430680 must stay alive; worklog protocol: append-only, three-section handover.
+
+---
+Task ID: 19
+Agent: Z.ai Code (main orchestrator)
+Task: Round task 22:15+08 — status assessment, cold-load QA, hash deep-linking + PWA shortcuts feature, animated tab bar styling. All client-side, no schema/API changes.
+
+Current project status / assessment:
+- Server healthy all round: 200s throughout, RSS ~1559MB (pre-cap instance; 900MB cap activates on next natural respawn — do NOT manual-restart). Memory ~1.95GB available before QA, no degradation after. No new OOM events.
+- Cold-load QA at round start: 0 console errors/warnings. Sync-failure surfacing already exists (SyncFailureBanner + header freshness chip fresh/stale/degraded) — no gap there. Command palette already covers nav/sync/theme/semester/subjects; keyboard shortcuts 1-4/S/T/? already wired. Chose genuinely-missing feature set: URL deep-linking.
+
+Completed modifications / verified:
+1. NEW FEATURE — hash deep-linking (src/app/page.tsx): every tab switch writes a shareable URL (/#attendance, /#reminders, /#settings) via history.replaceState (no history pollution); on load AND on hashchange, a valid hash selects the tab (PWA shortcuts, shared links, back/forward all work). Hydration-safe: initial state stays "dashboard", hash applied post-hydration in useEffect — no SSR mismatch.
+2. NEW — PWA manifest shortcuts (public/manifest.json): long-press app icon now offers Attendance / Reminders / Settings deep links into the hash routes above.
+3. STYLING — animated tab bar: active pill is now a framer-motion layoutId thumb that springs between tabs (unique "erp-tab-thumb"); active trigger bg made transparent (light+dark overrides, twMerge-safe) and content wrapped in a z-10 layer; replaces the instant bg swap with a smooth slide.
+4. Verification: tsc --noEmit → zero errors under src/ (pre-existing non-src findings unchanged). agent-browser: opened http://localhost:3000/#attendance COLD → Attendance tab selected (deep link works); clicked Reminders → location.hash = "#reminders" (verified via eval); screenshot /tmp/qa-tabs.png visually verified (thumb pill renders on Reminders, ALA list intact: 41 pending/6 submitted, 20-overdue banner). Console 0 errors/warnings. Browser CLOSED immediately after; server 200 after.
+
+Unresolved issues / risks & next-phase priorities:
+1. Pre-cap next-server RSS ~1559MB near the observed kill line — if it dies, expect a capped (900MB heap) respawn via keeper/harness within ~3 min; leave it alone.
+2. next.config.ts unrecognized turbopack key + .next cache regrowth — unchanged Task 17 guidance.
+3. User decisions still pending: 2nd free notification channel (Telegram ⭐ / ntfy / Discord / email) and optional fixed daily WhatsApp digest time (digestTime unset — never send test/digest to the real phone during QA).
+4. Note: student's live data now shows 20 overdue ALAs across 4 subjects (worst COMPUTER NETWORKS, 6) — the overdue banner + WhatsApp digest already cover this; no action needed from us.
+5. Feature idea parked pending timetable data: weekly bunk-budget per day (slots × canSkip) — timetable is still empty; deep-linked PWA shortcuts should make the app more accessible on the student's phone meanwhile.
+6. Keeper cron 430680 must stay alive; worklog protocol: append-only, three-section handover.

@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { motion } from "framer-motion";
 import { useTheme } from "next-themes";
@@ -46,6 +46,15 @@ const TAB_ITEMS: { key: TabKey; label: string; icon: React.ElementType }[] = [
   { key: "reminders", label: "Reminders", icon: CalendarClock },
   { key: "settings", label: "Settings", icon: SettingsIcon },
 ];
+
+const TAB_KEYS: string[] = TAB_ITEMS.map((t) => t.key);
+
+/** Resolve a URL hash like "#attendance" to a tab, or null when absent/unknown. */
+function tabFromHash(): TabKey | null {
+  if (typeof window === "undefined") return null;
+  const h = window.location.hash.replace(/^#/, "");
+  return TAB_KEYS.includes(h) ? (h as TabKey) : null;
+}
 
 const SHORTCUTS: { keys: string[]; description: string }[] = [
   { keys: ["⌘K"], description: "Open the command palette" },
@@ -154,7 +163,30 @@ function DemoStrip({ onOpenSettings }: { onOpenSettings: () => void }) {
 }
 
 export default function Home() {
-  const [tab, setTab] = useState<TabKey>("dashboard");
+  const [tab, setTabState] = useState<TabKey>("dashboard");
+
+  /* Tab → URL hash: every navigation leaves a shareable deep link
+     (/#attendance …). replaceState keeps the browser history clean. */
+  const setTab = useCallback((t: TabKey) => {
+    setTabState(t);
+    if (window.location.hash !== `#${t}`) {
+      window.history.replaceState(null, "", `#${t}`);
+    }
+  }, []);
+
+  /* URL → tab: honors deep links from PWA shortcuts / shared links on first
+     load, then follows manual hash edits and history traversal live. Runs
+     post-hydration so the server-rendered markup never mismatches. */
+  useEffect(() => {
+    const applyHash = () => {
+      const t = tabFromHash();
+      if (t) setTabState(t);
+    };
+    applyHash();
+    window.addEventListener("hashchange", applyHash);
+    return () => window.removeEventListener("hashchange", applyHash);
+  }, []);
+
   const [showShortcuts, setShowShortcuts] = useState(false);
   const [paletteOpen, setPaletteOpen] = useState(false);
   const qc = useQueryClient();
@@ -257,12 +289,21 @@ export default function Home() {
                 <TabsTrigger
                   key={key}
                   value={key}
-                  className="gap-1.5 rounded-lg px-3 py-2.5 text-xs font-medium tracking-tight data-[state=active]:shadow-sm sm:text-sm"
+                  className="relative gap-1.5 rounded-lg px-3 py-2.5 text-xs font-medium tracking-tight data-[state=active]:bg-transparent data-[state=active]:shadow-none sm:text-sm dark:data-[state=active]:bg-transparent"
                   aria-label={`${label} tab`}
                 >
-                  <Icon className="size-4 shrink-0" aria-hidden="true" />
-                  {label}
-                  <kbd className="kbd kbd-hint" aria-hidden="true">{i + 1}</kbd>
+                  {key === tab && (
+                    <motion.span
+                      layoutId="erp-tab-thumb"
+                      className="absolute inset-0 rounded-lg bg-background shadow-sm dark:bg-input/30"
+                      transition={{ type: "spring", stiffness: 500, damping: 40 }}
+                    />
+                  )}
+                  <span className="relative z-10 inline-flex items-center gap-1.5">
+                    <Icon className="size-4 shrink-0" aria-hidden="true" />
+                    {label}
+                    <kbd className="kbd kbd-hint" aria-hidden="true">{i + 1}</kbd>
+                  </span>
                 </TabsTrigger>
               ))}
             </TabsList>
