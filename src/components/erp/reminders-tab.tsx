@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { motion } from "framer-motion";
 import {
@@ -24,11 +24,13 @@ import {
   Clock,
   Download,
   ExternalLink,
+  Flag,
   Link2,
   Loader2,
   Lock,
   Plus,
   Search,
+  StickyNote,
   Trash2,
   TriangleAlert,
   Upload,
@@ -75,6 +77,7 @@ import {
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import {
   Select,
   SelectContent,
@@ -96,11 +99,13 @@ import {
 import {
   createReminder,
   deleteReminder,
+  fetchAlaNotes,
   fetchAssignments,
   fetchAttendance,
   fetchReminders,
   qk,
   snoozeReminder,
+  saveAlaNote,
   submitAlaToErp,
   updateReminderStatus,
   updateReminderSubject,
@@ -109,7 +114,7 @@ import {
 import { dueGroup, ERP_BASE, erpAssignmentUrl, fmtDT, fmtDay, GROUP_META, SourceBadge, TypeIcon, typeLabel, useNow } from "./shared";
 import { downloadCsv } from "./trend-chart";
 import type { DueGroup } from "./shared";
-import type { RemindersFilter, Reminder, ReminderType } from "./types";
+import type { AlaNoteRow, RemindersFilter, Reminder, ReminderType } from "./types";
 
 /* ------------------------------------------------------------------ */
 
@@ -640,6 +645,167 @@ function relDue(dueMs: number, now: number): string {
 
 const ALA_FILE_ACCEPT = ".pdf,.docx,.zip,.xlsx,.ppt,.csv,.mp4,.png,.jpg,.jpeg,.pptx,.odp";
 
+/* ---------------- Local note/priority overlay on ALA rows ---------------- */
+
+const ALA_NOTE_MAX = 2000;
+
+/** Priority levels 1–3 with their visual identity (0 = "None" = no visuals). */
+const ALA_PRIORITY_META: Record<
+  number,
+  { label: string; chip: string; border: string; activeBtn: string }
+> = {
+  3: {
+    label: "High",
+    chip: "bg-red-500/10 text-red-700 dark:text-red-400",
+    border: "border-l-red-500/80",
+    activeBtn: "bg-red-500/15 text-red-700 ring-1 ring-red-500/40 dark:text-red-400",
+  },
+  2: {
+    label: "Medium",
+    chip: "bg-violet-500/10 text-violet-700 dark:text-violet-400",
+    border: "border-l-violet-500/80",
+    activeBtn: "bg-violet-500/15 text-violet-700 ring-1 ring-violet-500/40 dark:text-violet-400",
+  },
+  1: {
+    label: "Low",
+    chip: "bg-sky-500/10 text-sky-700 dark:text-sky-400",
+    border: "border-l-sky-500/80",
+    activeBtn: "bg-sky-500/15 text-sky-700 ring-1 ring-sky-500/40 dark:text-sky-400",
+  },
+};
+
+function alaPriorityOf(p: number | undefined) {
+  return (p != null && ALA_PRIORITY_META[p]) || null;
+}
+
+/**
+ * Popover editor for one ALA row's LOCAL note + triage priority. Purely a
+ * local overlay (table AlaNote, keyed by the row's stable externalId): the
+ * sync engine never reads it and nothing is ever sent back to the ERP.
+ * Saving an empty note with priority "None" deletes the overlay row.
+ */
+function AlaNoteEditor({
+  row,
+  existing,
+  onSave,
+  children,
+}: {
+  row: Reminder;
+  existing: AlaNoteRow | null;
+  /** Receives the saved row from the server, or null when the overlay was cleared. */
+  onSave: (externalId: string, note: string, priority: number) => Promise<void>;
+  children: React.ReactNode;
+}) {
+  const [open, setOpen] = useState(false);
+  const [draft, setDraft] = useState("");
+  const [priority, setPriority] = useState(0);
+  const [busy, setBusy] = useState(false);
+
+  // Re-seed the draft from the saved state each time the popover opens.
+  useEffect(() => {
+    if (open) {
+      setDraft(existing?.note ?? "");
+      setPriority(existing?.priority ?? 0);
+    }
+  }, [open, existing]);
+
+  const dirty = draft !== (existing?.note ?? "") || priority !== (existing?.priority ?? 0);
+
+  const commit = async (nextNote: string, nextPriority: number) => {
+    setBusy(true);
+    try {
+      await onSave(row.externalId ?? "", nextNote, nextPriority);
+      setOpen(false);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <Popover open={open} onOpenChange={setOpen}>
+      <PopoverTrigger asChild>{children}</PopoverTrigger>
+      <PopoverContent align="end" className="w-80 p-3" onOpenAutoFocus={(e) => e.preventDefault()}>
+        <p className="text-xs font-semibold leading-none">Local note</p>
+        <p className="mt-1 text-[11px] leading-snug text-muted-foreground">
+          Private to this device&apos;s database — never shown on the ERP.
+        </p>
+        <Textarea
+          value={draft}
+          onChange={(e) => setDraft(e.target.value.slice(0, ALA_NOTE_MAX))}
+          onKeyDown={(e) => {
+            if ((e.metaKey || e.ctrlKey) && e.key === "Enter" && !busy) {
+              e.preventDefault();
+              void commit(draft, priority);
+            }
+          }}
+          rows={3}
+          maxLength={ALA_NOTE_MAX}
+          placeholder="e.g. wait for faculty's second slide deck before submitting…"
+          aria-label={`Note for ${row.title}`}
+          className="mt-2 min-h-16 resize-y text-xs"
+        />
+        <div className="mt-2">
+          <p className="text-[11px] font-medium text-muted-foreground">Priority</p>
+          <div role="group" aria-label={`Priority for ${row.title}`} className="mt-1 flex gap-1">
+            {[0, 1, 2, 3].map((p) => {
+              const meta = alaPriorityOf(p);
+              const active = priority === p;
+              return (
+                <button
+                  key={p}
+                  type="button"
+                  aria-pressed={active}
+                  onClick={() => setPriority(p)}
+                  className={cn(
+                    "flex-1 rounded-md px-1.5 py-1 text-[11px] font-semibold transition-colors",
+                    active && meta
+                      ? meta.activeBtn
+                      : active
+                        ? "bg-muted text-foreground ring-1 ring-border"
+                        : "text-muted-foreground hover:bg-muted/60"
+                  )}
+                >
+                  {meta ? meta.label : "None"}
+                </button>
+              );
+            })}
+          </div>
+        </div>
+        <div className="mt-2.5 flex items-center gap-1.5">
+          <span className={cn("text-[10px] tabular-nums", draft.length >= ALA_NOTE_MAX ? "text-red-600" : "text-muted-foreground")}>
+            {draft.length}/{ALA_NOTE_MAX}
+          </span>
+          <span className="flex-1" />
+          {(existing?.note || (existing?.priority ?? 0) > 0) && (
+            <Button
+              variant="ghost"
+              size="sm"
+              className="h-7 gap-1 px-2 text-[11px] text-muted-foreground"
+              disabled={busy}
+              onClick={() => void commit("", 0)}
+              aria-label={`Clear your note for ${row.title}`}
+            >
+              <Trash2 className="size-3" aria-hidden="true" />
+              Clear
+            </Button>
+          )}
+          <Button
+            size="sm"
+            className="h-7 gap-1 px-2.5 text-[11px]"
+            disabled={busy || !dirty}
+            onClick={() => void commit(draft, priority)}
+            aria-label={`Save your note for ${row.title}`}
+          >
+            {busy ? <Loader2 className="size-3 animate-spin" aria-hidden="true" /> : <Check className="size-3" aria-hidden="true" />}
+            Save
+          </Button>
+        </div>
+        <p className="mt-1.5 text-[10px] text-muted-foreground/70">Ctrl+Enter saves · Esc closes</p>
+      </PopoverContent>
+    </Popover>
+  );
+}
+
 type SubmitPhase = "idle" | "sending" | "done";
 
 /**
@@ -824,10 +990,15 @@ function AlaSubjectGroup({
   group,
   open,
   onOpenChange,
+  notes,
+  onSaveNote,
 }: {
   group: AlaGroup;
   open: boolean;
   onOpenChange: (o: boolean) => void;
+  /** Local note/priority overlays keyed by the row's stable externalId. */
+  notes: Map<string, AlaNoteRow>;
+  onSaveNote: (externalId: string, note: string, priority: number) => Promise<void>;
 }) {
   const now = useNow();
   const [submitRow, setSubmitRow] = useState<Reminder | null>(null);
@@ -913,6 +1084,11 @@ function AlaSubjectGroup({
               // Overdue aging tier — the pill deepens as the deadline recedes further away.
               const lateDays = overdue ? Math.floor((now - dueMs) / 86_400_000) : 0;
               const isAla = /\bala/i.test(a.title);
+              // Local overlay: private note + triage priority (never synced to the ERP).
+              // externalId is typed string|null — "" never matches an overlay (all are erp:assign:*).
+              const noteRow = (a.externalId && notes.get(a.externalId)) || null;
+              const prio = alaPriorityOf(noteRow?.priority);
+              const hasNote = !!noteRow?.note;
               return (
                 <motion.li
                   key={a.id}
@@ -927,6 +1103,8 @@ function AlaSubjectGroup({
                       : overdue
                         ? "border-red-500/30 bg-red-500/[0.04]"
                         : "border-amber-500/25 bg-amber-500/[0.04]",
+                    prio && "border-l-[3px]",
+                    prio?.border,
                     done && "opacity-75"
                   )}
                 >
@@ -964,6 +1142,18 @@ function AlaSubjectGroup({
                           ALA
                         </Badge>
                       )}
+                      {prio && (
+                        <span
+                          title={`Marked ${prio.label.toLowerCase()} priority (local only)`}
+                          className={cn(
+                            "inline-flex items-center gap-0.5 rounded-full px-1.5 py-0 text-[9px] font-bold uppercase tracking-wider",
+                            prio.chip
+                          )}
+                        >
+                          <Flag className="size-2.5" aria-hidden="true" />
+                          {prio.label}
+                        </span>
+                      )}
                     </div>
                     {a.description && (
                       <p
@@ -971,6 +1161,15 @@ function AlaSubjectGroup({
                         title={a.description}
                       >
                         {a.description}
+                      </p>
+                    )}
+                    {hasNote && (
+                      <p
+                        className="mt-0.5 flex items-start gap-1 line-clamp-2 text-[11px] italic leading-snug text-foreground/70"
+                        title={noteRow!.note}
+                      >
+                        <StickyNote className="mt-0.5 size-3 shrink-0 text-primary/70" aria-hidden="true" />
+                        <span className="min-w-0">{noteRow!.note}</span>
                       </p>
                     )}
                     <p className="mt-0.5 text-[11px]">
@@ -1014,6 +1213,29 @@ function AlaSubjectGroup({
                       )}
                     </p>
                   </div>
+                  <AlaNoteEditor row={a} existing={noteRow} onSave={onSaveNote}>
+                    <button
+                      type="button"
+                      aria-label={
+                        hasNote || prio
+                          ? `Edit your note for ${a.title}${prio ? ` (currently ${prio.label.toLowerCase()} priority)` : ""}`
+                          : `Add a private note to ${a.title}`
+                      }
+                      title={
+                        hasNote || prio
+                          ? `Your note${prio ? ` · ${prio.label} priority` : ""} — click to edit`
+                          : "Add a private note / priority (local only, never shown on the ERP)"
+                      }
+                      className={cn(
+                        "mt-0.5 flex size-7 shrink-0 items-center justify-center rounded-lg border transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+                        hasNote || prio
+                          ? "border-primary/40 bg-primary/10 text-primary"
+                          : "border-border/50 text-muted-foreground hover:border-primary/40 hover:bg-primary/10 hover:text-primary"
+                      )}
+                    >
+                      <StickyNote className="size-3.5" aria-hidden="true" />
+                    </button>
+                  </AlaNoteEditor>
                   {!done && (
                     <Button
                       variant="outline"
@@ -1061,7 +1283,7 @@ function AlaSubjectGroup({
  * palette quick-filter events (erp:filter-ala), scope-aware .ics export and a
  * one-click .ics export of every not-yet-submitted deadline.
  */
-type AlaStatusFilter = "all" | "overdue" | "soon" | "pending" | "submitted";
+type AlaStatusFilter = "all" | "overdue" | "soon" | "pending" | "submitted" | "noted";
 type AlaSort = "deadline" | "course" | "overdue";
 
 const ALA_STATUS_META: { key: AlaStatusFilter; label: string; activeClass: string }[] = [
@@ -1069,6 +1291,7 @@ const ALA_STATUS_META: { key: AlaStatusFilter; label: string; activeClass: strin
   { key: "overdue", label: "Overdue", activeClass: "bg-red-500/15 text-red-700 dark:text-red-300 border-red-500/50" },
   { key: "soon", label: "Due ≤7d", activeClass: "bg-amber-500/20 text-amber-800 dark:text-amber-300 border-amber-500/50" },
   { key: "pending", label: "Pending", activeClass: "bg-sky-500/15 text-sky-700 dark:text-sky-300 border-sky-500/50" },
+  { key: "noted", label: "Noted", activeClass: "bg-primary/10 text-primary border-primary/40" },
   { key: "submitted", label: "Submitted", activeClass: "bg-emerald-500/15 text-emerald-700 dark:text-emerald-300 border-emerald-500/50" },
 ];
 
@@ -1877,6 +2100,50 @@ function AlaSection() {
     staleTime: 10_000,
   });
 
+  const qc = useQueryClient();
+  /* Local-only note/priority overlay (AlaNote table) — fetched separately so
+     ERP sync refetches never churn it; keyed by the row's stable externalId. */
+  const { data: alaNotes } = useQuery({
+    queryKey: qk.alaNotes,
+    queryFn: fetchAlaNotes,
+    staleTime: 30_000,
+  });
+  const noteMap = useMemo(
+    () => new Map((alaNotes ?? []).map((n) => [n.externalId, n])),
+    [alaNotes]
+  );
+
+  /** Optimistic save + rollback; throws so the editor popover stays open on failure. */
+  const saveNote = useCallback(
+    async (externalId: string, note: string, priority: number) => {
+      const prev = qc.getQueryData<AlaNoteRow[]>(qk.alaNotes) ?? [];
+      const clean = note.trim();
+      const optimistic: AlaNoteRow[] =
+        clean === "" && priority === 0
+          ? prev.filter((n) => n.externalId !== externalId)
+          : [
+              ...prev.filter((n) => n.externalId !== externalId),
+              {
+                externalId,
+                note: clean,
+                priority,
+                createdAt: new Date().toISOString(),
+                updatedAt: new Date().toISOString(),
+              },
+            ];
+      qc.setQueryData<AlaNoteRow[]>(qk.alaNotes, optimistic);
+      try {
+        await saveAlaNote({ externalId, note: clean, priority });
+        qc.invalidateQueries({ queryKey: qk.alaNotes });
+      } catch (e) {
+        qc.setQueryData<AlaNoteRow[]>(qk.alaNotes, prev);
+        toast.error(e instanceof ApiError ? e.message : "Could not save the note — try again");
+        throw e;
+      }
+    },
+    [qc]
+  );
+
   const now = useNow();
   const [query, setQuery] = useState("");
   const [status, setStatus] = useState<AlaStatusFilter>("all");
@@ -1910,7 +2177,7 @@ function AlaSection() {
   useEffect(() => {
     const handler = (e: Event) => {
       const s = (e as CustomEvent<string>).detail;
-      if (s === "all" || s === "overdue" || s === "soon" || s === "pending" || s === "submitted") {
+      if (s === "all" || s === "overdue" || s === "soon" || s === "pending" || s === "submitted" || s === "noted") {
         setQuery("");
         setStatus(s);
         setSubject(null);
@@ -1974,8 +2241,9 @@ function AlaSection() {
         }
       } else submitted++;
     }
-    return { all: (data?.assignments.length ?? 0) as number, pending, overdue, soon, submitted };
-  }, [data, now]);
+    const notedCount = [...(data?.assignments ?? [])].filter((a) => !!a.externalId && noteMap.has(a.externalId)).length;
+    return { all: (data?.assignments.length ?? 0) as number, pending, overdue, soon, submitted, noted: notedCount };
+  }, [data, now, noteMap]);
 
   /* Search + status filter + radar day drill-down — applied per row, then empty groups drop out. */
   const dayStartMs = useMemo(() => {
@@ -2017,6 +2285,7 @@ function AlaSection() {
             }
             if (status === "all") return true;
             const done = a.status !== "ACTIVE";
+            if (status === "noted") return !!a.externalId && noteMap.has(a.externalId);
             if (status === "submitted") return done;
             if (done) return false;
             const dueMs = new Date(a.dueAt).getTime();
@@ -2051,7 +2320,7 @@ function AlaSection() {
       );
     }
     return list;
-  }, [groups, query, status, subject, sort, now, dayStartMs]);
+  }, [groups, query, status, subject, sort, now, dayStartMs, noteMap]);
 
   const total = data?.assignments.length ?? 0;
   const submitted = counts.submitted;
@@ -2466,6 +2735,8 @@ function AlaSection() {
                       return next;
                     })
                   }
+                  notes={noteMap}
+                  onSaveNote={saveNote}
                 />
               ))
             )}

@@ -22,6 +22,7 @@ const EXPECTED_MODELS = [
   "notification",
   "attendanceSnapshot",
   "timetableSlot",
+  "alaNote",
 ] as const;
 
 /** Fields that must exist on the cached client (guards schema evolution). */

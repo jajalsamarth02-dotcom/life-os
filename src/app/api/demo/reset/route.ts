@@ -27,7 +27,7 @@ export async function POST() {
     );
   }
 
-  const [timetableSlots, snapshots, changeEvents, syncLogs, notifications, erpReminders, subjects] =
+  const [timetableSlots, snapshots, changeEvents, syncLogs, notifications, erpReminders, subjects, alaNotes] =
     await db.$transaction([
       db.timetableSlot.deleteMany(),
       db.attendanceSnapshot.deleteMany(),
@@ -36,6 +36,9 @@ export async function POST() {
       db.notification.deleteMany(),
       db.reminder.deleteMany({ where: { source: "ERP" } }),
       db.subject.deleteMany(),
+      // Local ALA overlays die with the demo ERP rows that spawned them
+      // (demo reset rebuilds a fresh simulated ERP — notes would orphan).
+      db.alaNote.deleteMany(),
     ]);
 
   // Remove the simulator state + timetable seed flag; both consumers treat a
@@ -59,6 +62,7 @@ export async function POST() {
       notifications: notifications.count,
       erpReminders: erpReminders.count,
       subjects: subjects.count,
+      alaNotes: alaNotes.count,
     },
   });
 }

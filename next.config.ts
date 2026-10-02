@@ -7,6 +7,12 @@ const nextConfig: NextConfig = {
     ignoreBuildErrors: true,
   },
   reactStrictMode: false,
+  /* Dev-only: force a config-driven server restart after prisma generate +
+     .next/dev cache wipe (2026-10-03), so the bundler reloads the regenerated
+     Prisma client (adds the AlaNote delegate). Harmless in production. */
+  env: {
+    NEXT_PUBLIC_SCHEMA_REV: "2026-10-03-ala-notes",
+  },
   /*
    * Ops stability (added after the 2026-10-02 memory incident): the sandbox
    * supervisor silently SIGTERMs next-server once its RSS crosses a watermark

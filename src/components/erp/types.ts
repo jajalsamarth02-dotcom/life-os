@@ -206,6 +206,23 @@ export interface TimetableResponse {
  */
 export type AssignmentRow = Reminder;
 
+/**
+ * Local-only note/priority overlay on an ALA row (table AlaNote, keyed by the
+ * row's stable externalId). Never synced to the ERP; survives sync upserts.
+ */
+export interface AlaNoteRow {
+  externalId: string;
+  note: string;
+  /** 0 = none, 1 = low, 2 = medium, 3 = high. */
+  priority: number;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface AlaNotesResponse {
+  notes: AlaNoteRow[];
+}
+
 export interface AssignmentsResponse {
   assignments: AssignmentRow[];
   /** ERP course-code → course-name map resolved from assignment detail pages. */

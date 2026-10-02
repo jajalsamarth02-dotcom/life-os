@@ -134,3 +134,16 @@ model TimetableSlot {
 
   @@index([dayOfWeek, startMin])
 }
+
+// Local-only overlay on ERP ALA/assignment rows: the student's private note
+// and triage priority. Keyed by the row's stable externalId (erp:assign:{id})
+// so the overlay survives every sync upsert (the sync engine never touches
+// this table); if the ERP removes and later re-adds the row, the note
+// silently reattaches. Never sent back to the ERP.
+model AlaNote {
+  externalId String   @id
+  note       String   @default("")
+  priority   Int      @default(0) // 0 = none, 1 = low, 2 = medium, 3 = high
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+}

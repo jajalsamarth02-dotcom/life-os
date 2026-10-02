@@ -2,6 +2,8 @@
  * Typed fetch helpers + TanStack Query keys. All requests use relative paths.
  */
 import type {
+  AlaNoteRow,
+  AlaNotesResponse,
   AppSettings,
   AssignmentsResponse,
   AttendanceResponse,
@@ -74,6 +76,7 @@ export const qk = {
   reminders: (filter: RemindersFilter, includeDone: boolean) =>
     ["reminders", filter, includeDone] as const,
   assignments: ["assignments"] as const,
+  alaNotes: ["ala-notes"] as const,
   settings: ["settings"] as const,
   semesters: ["semesters"] as const,
   sync: ["sync"] as const,
@@ -116,6 +119,21 @@ export const fetchReminders = (filter: RemindersFilter, includeDone: boolean) =>
   ).then((r) => r.reminders);
 /** ERP-synced ALA/assignment rows, subject-wise (includes Submitted rows). */
 export const fetchAssignments = () => api<AssignmentsResponse>("/api/assignments");
+/** Local-only note/priority overlay on ALA rows (never synced to the ERP). */
+export const fetchAlaNotes = () => api<AlaNotesResponse>("/api/ala-notes").then((r) => r.notes);
+/**
+ * Upsert one ALA row's overlay. Saving an empty note with priority 0 clears
+ * (deletes) the overlay row server-side; the response echoes the new state.
+ */
+export const saveAlaNote = (payload: {
+  externalId: string;
+  note: string;
+  priority: number;
+}) =>
+  api<{ ok: boolean; deleted?: boolean; note: AlaNoteRow }>("/api/ala-notes", {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
 export const fetchSettings = () => api<AppSettings>("/api/settings");
 export const fetchSemesters = () => api<SemestersResponse>("/api/semesters");
 export const fetchSyncLogs = () => api<SyncLogsResponse>("/api/sync");

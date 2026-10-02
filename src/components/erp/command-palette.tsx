@@ -22,6 +22,7 @@ import {
   Printer,
   RefreshCw,
   Settings as SettingsIcon,
+  StickyNote,
   Sun,
   Target,
   Timer,
@@ -39,7 +40,7 @@ import {
 } from "@/components/ui/command";
 import { cn } from "@/lib/utils";
 import { cycleTextSize, TEXT_SIZES } from "@/lib/text-size";
-import { fetchAssignments, postDemoEvolve, postSync, putSelectedSemester, qk } from "./api";
+import { fetchAlaNotes, fetchAssignments, postDemoEvolve, postSync, putSelectedSemester, qk } from "./api";
 import { ERP_BASE } from "./shared";
 import type { AttendanceStatus, SubjectView } from "./types";
 import { useTextSize } from "./text-size-card";
@@ -126,6 +127,12 @@ export function CommandPalette({
   /* Deadline launcher — joins the shared assignments query cache (already
      polled by the ALA section and the app badge), so it costs no extra fetch. */
   const assignmentsQ = useQuery({ queryKey: qk.assignments, queryFn: fetchAssignments, staleTime: 15_000 });
+  /* Local note overlay — powers the "Show noted ALAs" palette command's live count. */
+  const alaNotesQ = useQuery({ queryKey: qk.alaNotes, queryFn: fetchAlaNotes, staleTime: 30_000 });
+  const notedCount = React.useMemo(() => {
+    const noted = new Set((alaNotesQ.data ?? []).map((n) => n.externalId));
+    return (assignmentsQ.data?.assignments ?? []).filter((a) => !!a.externalId && noted.has(a.externalId)).length;
+  }, [assignmentsQ.data, alaNotesQ.data]);
   const nowMs = React.useMemo(() => Date.now(), [assignmentsQ.data]);
   const { deadlineItems, activeDeadlineCount, overdueCount, soonCount } = React.useMemo(() => {
     const active = (assignmentsQ.data?.assignments ?? []).filter((a) => a.status === "ACTIVE");
@@ -303,6 +310,17 @@ export function CommandPalette({
                 <span>Show overdue ALAs</span>
                 <span className="ml-auto rounded-full bg-red-500/10 px-1.5 text-[10px] font-bold tabular-nums text-red-600 dark:text-red-400">
                   {overdueCount}
+                </span>
+              </CommandItem>
+              <CommandItem
+                value="ala noted filter my notes priority annotated private"
+                onSelect={() => filterAla("noted")}
+                disabled={notedCount === 0}
+              >
+                <StickyNote className="size-4 shrink-0 text-primary" aria-hidden="true" />
+                <span>Show noted ALAs — your private annotations</span>
+                <span className="ml-auto rounded-full bg-primary/10 px-1.5 text-[10px] font-bold tabular-nums text-primary">
+                  {notedCount}
                 </span>
               </CommandItem>
               <CommandItem
