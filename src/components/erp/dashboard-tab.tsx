@@ -161,17 +161,22 @@ function deadlinePill(dueAt: string, now: number): { label: string; className: s
  * Top of the open ALA/assignment deadline queue, mirrored straight from the
  * ERP sync (Reminder rows with the assignment externalId prefix). Every row
  * deep-links into the Reminders tab, where the subject-wise list lives.
+ * Rows the student privately flagged carry their priority flag chip so the
+ * triage language follows them across every surface (card, palette, list).
  */
 function AlaDeadlinePanel({
   rows,
   pending,
   total,
   onOpenReminders,
+  flagPriorities,
 }: {
   rows: AlaUpcomingRow[];
   pending: number;
   total: number;
   onOpenReminders: () => void;
+  /** externalId → priority (1–3) from the local AlaNote overlay. */
+  flagPriorities: Map<string, number>;
 }) {
   const now = useNow();
   if (rows.length === 0) return null;
@@ -191,6 +196,8 @@ function AlaDeadlinePanel({
           const hue = row.subjectCode ? hueColors(row.subjectCode) : null;
           const pill = deadlinePill(row.dueAt, now);
           const overdue = new Date(row.dueAt).getTime() < now;
+          const flag = row.externalId ? flagPriorities.get(row.externalId) : undefined;
+          const flagMeta = alaPriorityOf(flag);
           return (
             <motion.li
               key={row.id}
@@ -203,7 +210,7 @@ function AlaDeadlinePanel({
                 <button
                   type="button"
                   onClick={onOpenReminders}
-                  aria-label={`Open the subject-wise ALA list — ${row.title}`}
+                  aria-label={`Open the subject-wise ALA list — ${row.title}${flagMeta ? `, flagged ${flagMeta.label.toLowerCase()} priority` : ""}`}
                   title="Open the subject-wise list in the Reminders tab"
                   className="group/ala flex min-w-0 flex-1 items-center gap-2.5 px-3 py-2.5 text-left transition-colors hover:bg-muted/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring"
                 >
@@ -218,7 +225,15 @@ function AlaDeadlinePanel({
                     <ClipboardList className="size-3.5 shrink-0 text-muted-foreground" aria-hidden="true" />
                   )}
                   <span className="min-w-0 flex-1">
-                    <span className="block truncate text-sm font-medium leading-snug">{row.title}</span>
+                    <span className="flex min-w-0 items-center gap-1.5">
+                      <span className="min-w-0 truncate text-sm font-medium leading-snug">{row.title}</span>
+                      {flagMeta && (
+                        <Flag
+                          className={cn("size-3 shrink-0", flagMeta.icon)}
+                          aria-hidden="true"
+                        />
+                      )}
+                    </span>
                     {row.subjectName && (
                       <span className="block truncate text-[11px] text-muted-foreground">{row.subjectName}</span>
                     )}
@@ -409,7 +424,14 @@ function FlaggedAlasCard({
   );
 }
 
-function NextUpStrip({ items }: { items: Reminder[] }) {
+function NextUpStrip({
+  items,
+  flagPriorities,
+}: {
+  items: Reminder[];
+  /** externalId → priority (1–3) from the local AlaNote overlay. */
+  flagPriorities: Map<string, number>;
+}) {
   const now = useNow();
   const upcoming = items
     .filter((r) => r.status === "ACTIVE" && r.type !== "ATTENDANCE_WARNING")
@@ -462,6 +484,12 @@ function NextUpStrip({ items }: { items: Reminder[] }) {
               {shown.subjectCode}
             </span>
           )}
+          {(() => {
+            const flagMeta = alaPriorityOf(shown.externalId ? flagPriorities.get(shown.externalId) : undefined);
+            return flagMeta ? (
+              <Flag className={cn("size-3 shrink-0", flagMeta.icon)} aria-hidden="true" />
+            ) : null;
+          })()}
           <span className="truncate text-sm font-medium">{shown.title}</span>
         </p>
       </div>
@@ -515,6 +543,7 @@ function RemindersPreview({
   alaTotal,
   alaUpcoming,
   onOpenReminders,
+  flagPriorities,
 }: {
   items: Reminder[];
   todayCount: number;
@@ -523,6 +552,8 @@ function RemindersPreview({
   alaTotal: number;
   alaUpcoming: AlaUpcomingRow[];
   onOpenReminders: () => void;
+  /** externalId → priority (1–3) from the local AlaNote overlay. */
+  flagPriorities: Map<string, number>;
 }) {
   const now = useNow();
   const groups: { key: string; label: string; className: string; items: Reminder[] }[] = [
@@ -573,6 +604,7 @@ function RemindersPreview({
           pending={alaPending}
           total={alaTotal}
           onOpenReminders={onOpenReminders}
+          flagPriorities={flagPriorities}
         />
         {alaTotal > 0 && (
           <button
@@ -1016,6 +1048,13 @@ export function DashboardTab({
           new Date(x.row.dueAt).getTime() - new Date(y.row.dueAt).getTime()
       );
   }, [alaNotesQ.data, alaQ.data]);
+  /** externalId → priority (1–3), only flagged rows — feeds the flag chips in
+   *  the deadline panel, the Next-up strip and the flagged-ALA card. */
+  const flagPriorities = useMemo(() => {
+    const m = new Map<string, number>();
+    for (const n of alaNotesQ.data ?? []) if (n.priority > 0) m.set(n.externalId, n.priority);
+    return m;
+  }, [alaNotesQ.data]);
   const now = useNow(60_000);
   const alaStats = useMemo(
     () => collectAlaStats(alaQ.data?.assignments, alaQ.data?.courseNames, now),
@@ -1187,7 +1226,7 @@ export function DashboardTab({
       />
 
       {/* Row 0 — next deadline countdown */}
-      <div className="print:hidden"><NextUpStrip items={data.reminders.items} /></div>
+      <div className="print:hidden"><NextUpStrip items={data.reminders.items} flagPriorities={flagPriorities} /></div>
 
       {/* Row 0.5 — the student's private triage layer (notes/priority flags).
          Renders nothing until at least one ALA is flagged. */}
@@ -1542,6 +1581,7 @@ export function DashboardTab({
           alaTotal={data.reminders.alaTotal}
           alaUpcoming={data.reminders.alaUpcoming}
           onOpenReminders={onOpenReminders}
+          flagPriorities={flagPriorities}
         />
         <ErpStatusCard
           connected={data.erp.connected}

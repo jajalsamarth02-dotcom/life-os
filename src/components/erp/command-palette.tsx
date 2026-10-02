@@ -13,6 +13,7 @@ import {
   CalendarClock,
   Check,
   ExternalLink,
+  Flag,
   FlaskConical,
   GraduationCap,
   Keyboard,
@@ -42,6 +43,7 @@ import { cn } from "@/lib/utils";
 import { cycleTextSize, TEXT_SIZES } from "@/lib/text-size";
 import { fetchAlaNotes, fetchAssignments, postDemoEvolve, postSync, putSelectedSemester, qk } from "./api";
 import { ERP_BASE } from "./shared";
+import { ALA_PRIORITY_META } from "./reminders-tab";
 import type { AttendanceStatus, SubjectView } from "./types";
 import { useTextSize } from "./text-size-card";
 
@@ -127,11 +129,28 @@ export function CommandPalette({
   /* Deadline launcher — joins the shared assignments query cache (already
      polled by the ALA section and the app badge), so it costs no extra fetch. */
   const assignmentsQ = useQuery({ queryKey: qk.assignments, queryFn: fetchAssignments, staleTime: 15_000 });
-  /* Local note overlay — powers the "Show noted ALAs" palette command's live count. */
+  /* Local note overlay — powers the "Your flagged ALAs" palette group. */
   const alaNotesQ = useQuery({ queryKey: qk.alaNotes, queryFn: fetchAlaNotes, staleTime: 30_000 });
-  const notedCount = React.useMemo(() => {
-    const noted = new Set((alaNotesQ.data ?? []).map((n) => n.externalId));
-    return (assignmentsQ.data?.assignments ?? []).filter((a) => !!a.externalId && noted.has(a.externalId)).length;
+  /* The student's own triage layer as palette rows — mirrors the dashboard's
+     "Your flagged ALAs" card: priority desc, then nearest deadline. Selecting
+     any row opens the Reminders tab with the Noted filter applied. */
+  const flaggedItems = React.useMemo(() => {
+    const notes = alaNotesQ.data ?? [];
+    if (notes.length === 0) return [];
+    const prio = new Map(notes.map((n) => [n.externalId, n.priority]));
+    const note = new Map(notes.map((n) => [n.externalId, n.note]));
+    return (assignmentsQ.data?.assignments ?? [])
+      .filter((a) => !!a.externalId && prio.has(a.externalId))
+      .map((a) => ({
+        a,
+        priority: prio.get(a.externalId as string) ?? 0,
+        note: note.get(a.externalId as string) ?? "",
+      }))
+      .sort(
+        (x, y) =>
+          y.priority - x.priority ||
+          new Date(x.a.dueAt).getTime() - new Date(y.a.dueAt).getTime()
+      );
   }, [assignmentsQ.data, alaNotesQ.data]);
   const nowMs = React.useMemo(() => Date.now(), [assignmentsQ.data]);
   const { deadlineItems, activeDeadlineCount, overdueCount, soonCount } = React.useMemo(() => {
@@ -299,7 +318,65 @@ export function CommandPalette({
               )}
             </CommandGroup>
             <CommandSeparator />
+          </>
+        )}
 
+        {flaggedItems.length > 0 && (
+          <>
+            <CommandGroup heading={`Your flagged ALAs · ${flaggedItems.length}`}>
+              {flaggedItems.slice(0, 3).map(({ a, priority, note }) => {
+                const due = new Date(a.dueAt).getTime();
+                const overdue = due < nowMs;
+                const soon = !overdue && due - nowMs <= 7 * 86_400_000;
+                const meta = ALA_PRIORITY_META[priority];
+                return (
+                  <CommandItem
+                    key={a.id}
+                    value={`${a.title} ${a.subjectCode ?? ""} ${note} flagged priority local triage`}
+                    onSelect={() => filterAla("noted")}
+                  >
+                    <Flag
+                      className={cn("size-4 shrink-0", meta?.icon ?? "text-muted-foreground")}
+                      aria-hidden="true"
+                    />
+                    <span className="truncate font-medium">{a.title}</span>
+                    <span className="truncate text-xs text-muted-foreground">{a.subjectCode ?? "—"}</span>
+                    <span
+                      className={cn(
+                        "ml-auto whitespace-nowrap text-xs font-medium tabular-nums",
+                        overdue
+                          ? "text-red-600 dark:text-red-400"
+                          : soon
+                            ? "text-amber-600 dark:text-amber-400"
+                            : "text-muted-foreground"
+                      )}
+                    >
+                      {overdue
+                        ? `${formatDistanceToNowStrict(new Date(a.dueAt))} overdue`
+                        : `in ${formatDistanceToNowStrict(new Date(a.dueAt))}`}
+                    </span>
+                  </CommandItem>
+                );
+              })}
+              <CommandItem
+                value="open all noted ala flags annotations private triage list"
+                onSelect={() => filterAla("noted")}
+                className="text-muted-foreground"
+              >
+                <StickyNote className="size-4 shrink-0 text-primary" aria-hidden="true" />
+                <span>
+                  Open all <b className="font-semibold tabular-nums text-foreground">{flaggedItems.length}</b> noted
+                  ALAs — your private triage
+                </span>
+                <span className="ml-auto text-xs text-muted-foreground">Reminders tab</span>
+              </CommandItem>
+            </CommandGroup>
+            <CommandSeparator />
+          </>
+        )}
+
+        {deadlineItems.length > 0 && (
+          <>
             <CommandGroup heading="ALA quick filters">
               <CommandItem
                 value="ala overdue filter late assignments triage"
@@ -310,17 +387,6 @@ export function CommandPalette({
                 <span>Show overdue ALAs</span>
                 <span className="ml-auto rounded-full bg-red-500/10 px-1.5 text-[10px] font-bold tabular-nums text-red-600 dark:text-red-400">
                   {overdueCount}
-                </span>
-              </CommandItem>
-              <CommandItem
-                value="ala noted filter my notes priority annotated private"
-                onSelect={() => filterAla("noted")}
-                disabled={notedCount === 0}
-              >
-                <StickyNote className="size-4 shrink-0 text-primary" aria-hidden="true" />
-                <span>Show noted ALAs — your private annotations</span>
-                <span className="ml-auto rounded-full bg-primary/10 px-1.5 text-[10px] font-bold tabular-nums text-primary">
-                  {notedCount}
                 </span>
               </CommandItem>
               <CommandItem

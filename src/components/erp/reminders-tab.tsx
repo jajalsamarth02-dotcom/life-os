@@ -650,11 +650,12 @@ const ALA_FILE_ACCEPT = ".pdf,.docx,.zip,.xlsx,.ppt,.csv,.mp4,.png,.jpg,.jpeg,.p
 const ALA_NOTE_MAX = 2000;
 
 /** Priority levels 1–3 with their visual identity (0 = "None" = no visuals).
- *  Exported so the dashboard's flagged-ALA glance card reuses the exact same
- *  color language instead of growing a divergent copy. */
+ *  Exported so the dashboard's flagged-ALA glance card and the command palette
+ *  reuse the exact same color language instead of growing divergent copies.
+ *  `chip`/`border`/`topAccent` tint surfaces; `icon` colors bare flag icons. */
 export const ALA_PRIORITY_META: Record<
   number,
-  { label: string; chip: string; border: string; topAccent: string; activeBtn: string }
+  { label: string; chip: string; border: string; topAccent: string; activeBtn: string; icon: string }
 > = {
   3: {
     label: "High",
@@ -662,6 +663,7 @@ export const ALA_PRIORITY_META: Record<
     border: "border-l-red-500/80",
     topAccent: "border-t-red-500/70",
     activeBtn: "bg-red-500/15 text-red-700 ring-1 ring-red-500/40 dark:text-red-400",
+    icon: "text-red-500",
   },
   2: {
     label: "Medium",
@@ -669,6 +671,7 @@ export const ALA_PRIORITY_META: Record<
     border: "border-l-violet-500/80",
     topAccent: "border-t-violet-500/70",
     activeBtn: "bg-violet-500/15 text-violet-700 ring-1 ring-violet-500/40 dark:text-violet-400",
+    icon: "text-violet-500",
   },
   1: {
     label: "Low",
@@ -676,6 +679,7 @@ export const ALA_PRIORITY_META: Record<
     border: "border-l-sky-500/80",
     topAccent: "border-t-sky-500/70",
     activeBtn: "bg-sky-500/15 text-sky-700 ring-1 ring-sky-500/40 dark:text-sky-400",
+    icon: "text-sky-500",
   },
 };
 
@@ -2105,6 +2109,8 @@ function AlaDeadlineViews({
  *  reminders filter and the dashboard subject sort (erp:alaSort). */
 const ALA_SORT_KEY = "erp:alaSort";
 const ALA_SORT_VALUES: AlaSort[] = ["deadline", "priority", "overdue", "course"];
+/** One-time-per-device key guarding the "Triage by priority?" hint toast. */
+const ALA_SORT_HINT_KEY = "erp:sortHintShown";
 
 function loadAlaSort(): AlaSort {
   if (typeof window === "undefined") return "deadline";
@@ -2145,6 +2151,26 @@ function AlaSection({
     [alaNotes]
   );
 
+  /* Sort starts at the default and hydrates from localStorage after mount
+     (SSR renders "deadline", so a saved choice swaps in post-paint — no
+     hydration mismatch). Declared BEFORE saveNote so the hint toast's
+     dependency array can reference setSort. */
+  const [sort, setSortState] = useState<AlaSort>("deadline");
+  useEffect(() => {
+    setSortState(loadAlaSort());
+  }, []);
+  /* UI-driven changes persist; programmatic resets (palette deep-focus, the
+     cross-tab jump) call setSortState directly so a transient action never
+     overwrites the saved preference. */
+  const setSort = useCallback((s: AlaSort) => {
+    setSortState(s);
+    try {
+      window.localStorage.setItem(ALA_SORT_KEY, s);
+    } catch {
+      /* storage unavailable — preference applies for this session only */
+    }
+  }, []);
+
   /** Optimistic save + rollback; throws so the editor popover stays open on failure. */
   const saveNote = useCallback(
     async (externalId: string, note: string, priority: number) => {
@@ -2167,13 +2193,30 @@ function AlaSection({
       try {
         await saveAlaNote({ externalId, note: clean, priority });
         qc.invalidateQueries({ queryKey: qk.alaNotes });
+        /* One-time nudge: a fresh Medium/High flag is the perfect moment to
+           teach the priority sort. Fires at most once per device, and only
+           while the saved sort isn't already "priority". */
+        if (priority >= 2) {
+          try {
+            if (window.localStorage.getItem(ALA_SORT_HINT_KEY) !== "1" && loadAlaSort() !== "priority") {
+              window.localStorage.setItem(ALA_SORT_HINT_KEY, "1");
+              toast.info("Triage by priority?", {
+                description: "Your flag can float the hottest ALAs to the top of each subject group.",
+                action: { label: "Try it", onClick: () => setSort("priority") },
+                duration: 8000,
+              });
+            }
+          } catch {
+            /* storage unavailable — skip the hint silently */
+          }
+        }
       } catch (e) {
         qc.setQueryData<AlaNoteRow[]>(qk.alaNotes, prev);
         toast.error(e instanceof ApiError ? e.message : "Could not save the note — try again");
         throw e;
       }
     },
-    [qc]
+    [qc, setSort]
   );
 
   const now = useNow();
@@ -2181,24 +2224,6 @@ function AlaSection({
   const [status, setStatus] = useState<AlaStatusFilter>("all");
   /** Subject filter (group code) — the third axis alongside status and the radar day drill-down. */
   const [subject, setSubject] = useState<string | null>(null);
-  /* Sort starts at the default and hydrates from localStorage after mount
-     (SSR renders "deadline", so a saved choice swaps in post-paint — no
-     hydration mismatch). */
-  const [sort, setSortState] = useState<AlaSort>("deadline");
-  useEffect(() => {
-    setSortState(loadAlaSort());
-  }, []);
-  /* UI-driven changes persist; programmatic resets (palette deep-focus, the
-     cross-tab jump) call setSortState directly so a transient action never
-     overwrites the saved preference. */
-  const setSort = useCallback((s: AlaSort) => {
-    setSortState(s);
-    try {
-      window.localStorage.setItem(ALA_SORT_KEY, s);
-    } catch {
-      /* storage unavailable — preference applies for this session only */
-    }
-  }, []);
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
   /** Radar drill-down: calendar-day offset (0 = today) the list is filtered to. */
   const [dayOffset, setDayOffset] = useState<number | null>(null);
