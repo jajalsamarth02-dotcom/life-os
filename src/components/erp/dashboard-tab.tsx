@@ -11,6 +11,7 @@ import {
   CalendarClock,
   CheckCircle2,
   ChevronRight,
+  CircleDot,
   ExternalLink,
   Flag,
   FlaskConical,
@@ -37,10 +38,11 @@ import { Separator } from "@/components/ui/separator";
 import { motion } from "framer-motion";
 import { cn } from "@/lib/utils";
 import { compactErrorText } from "@/lib/compact-error";
-import { fetchAssignments, fetchDashboard, fetchHistory, fetchSyncLogs, fetchAlaNotes, qk } from "./api";
+import { fetchAssignments, fetchDashboard, fetchHistory, fetchSyncLogs, fetchAlaNotes, fetchTimetable, qk } from "./api";
 import { WeeklyDigestDialog } from "./digest-dialog";
 import { TodayCard } from "./today-card";
 import { SkipBudgetCard } from "./skip-budget-card";
+import { WeekPlanCard } from "./week-plan-card";
 import { SetupChecklist } from "./setup-checklist";
 import { MilestoneCelebration, MilestonesStrip } from "./milestones";
 import { SubjectDrawer } from "./subject-drawer";
@@ -126,6 +128,10 @@ function sortSubjects(list: SubjectView[], sort: SubjectSort): SubjectView[] {
 }
 
 /** Live countdown label for the next upcoming deadline. */
+function hhmmFromMin(min: number): string {
+  return `${String(Math.floor(min / 60)).padStart(2, "0")}:${String(min % 60).padStart(2, "0")}`;
+}
+
 function countdownLabel(dueAt: string, now: number): string {
   const diff = new Date(dueAt).getTime() - now;
   const abs = Math.abs(diff);
@@ -437,6 +443,23 @@ function NextUpStrip({
   flagPriorities: Map<string, number>;
 }) {
   const now = useNow();
+  /* Next class TODAY from the synced routine — shares the timetable query
+     cache with the week plan + timetable cards, so no extra request. */
+  const { data: slotRows } = useQuery({ queryKey: qk.timetable, queryFn: fetchTimetable });
+  const nowDay = new Date(now).getDay();
+  const nowMin = new Date(now).getHours() * 60 + new Date(now).getMinutes();
+  const classInfo = useMemo(() => {
+    const today = (slotRows ?? []).filter((s) => s.dayOfWeek === nowDay);
+    const left = today
+      .filter((s) => s.endMin > nowMin)
+      .sort((a, b) => a.startMin - b.startMin);
+    const next = left[0] ?? null;
+    return {
+      next,
+      ongoing: next !== null && next.startMin <= nowMin,
+      allDone: next === null && today.length > 0,
+    };
+  }, [slotRows, nowDay, nowMin]);
   const upcoming = items
     .filter((r) => r.status === "ACTIVE" && r.type !== "ATTENDANCE_WARNING")
     .sort((a, b) => new Date(a.dueAt).getTime() - new Date(b.dueAt).getTime());
@@ -497,6 +520,46 @@ function NextUpStrip({
           <span className="truncate text-sm font-medium">{shown.title}</span>
         </p>
       </div>
+      {/* Next class today — a glanceable bridge between deadlines and the routine.
+          Desktop-only: the week plan + timetable cards carry the schedule on mobile. */}
+      {(classInfo.next || classInfo.allDone) && (
+        <div className="hidden shrink-0 items-center gap-3 sm:flex" aria-live="off">
+          <Separator orientation="vertical" className="h-9" />
+          <div className="text-right">
+            <p className="flex items-center justify-end gap-1 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
+              {classInfo.ongoing && (
+                <CircleDot className="size-3 animate-pulse text-emerald-500" aria-hidden="true" />
+              )}
+              {classInfo.next ? (classInfo.ongoing ? "In class" : "Next class") : "Classes done"}
+            </p>
+            {classInfo.next ? (
+              <>
+                <p className="flex items-center justify-end gap-1.5 text-xs font-semibold">
+                  <span
+                    className="rounded-md px-1 py-px font-mono text-[10px]"
+                    style={(() => {
+                      const hue = hueColors(classInfo.next!.subjectCode);
+                      return { backgroundColor: hue.bg, color: hue.fg };
+                    })()}
+                  >
+                    {classInfo.next.subjectCode}
+                  </span>
+                  <span className="tabular-nums text-muted-foreground">
+                    {hhmmFromMin(classInfo.next.startMin)}
+                  </span>
+                </p>
+                <p className="text-[10px] tabular-nums text-muted-foreground">
+                  {classInfo.ongoing
+                    ? `ends in ${classInfo.next.endMin - nowMin} min`
+                    : `starts in ${classInfo.next.startMin - nowMin} min`}
+                </p>
+              </>
+            ) : (
+              <p className="text-[10px] text-muted-foreground">nothing left today</p>
+            )}
+          </div>
+        </div>
+      )}
       <div className="shrink-0 text-right">
         <p
           className={cn(
@@ -1560,6 +1623,11 @@ export function DashboardTab({
       {/* Row 1.5 — consolidated skip budget (scarcest subject first, rows open
           the subject drawer). Shares the live per-subject canSkip math. */}
       <SkipBudgetCard subjects={data.subjects} onOpenSubject={setSelectedCode} />
+
+      {/* Row 1.6 — the forward-looking twin: real routine slots × live attendance,
+          "what's left this week and what can be missed". Shares the timetable
+          query cache with the timetable card. */}
+      <WeekPlanCard subjects={data.subjects} onOpenSubject={setSelectedCode} />
 
       {/* Row 2 — subject list */}
       <Card className="rounded-xl border-border/60 transition-shadow hover:shadow-md">
