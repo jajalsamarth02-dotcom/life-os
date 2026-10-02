@@ -41,9 +41,9 @@ import {
 import { Slider } from "@/components/ui/slider";
 import { cn } from "@/lib/utils";
 import { classesCanSkip, classesToReachTarget } from "@/lib/attendance";
-import { ApiError, createSlot, fetchHistory, fetchTimetable, putSubjectTarget, qk, type SlotConflict } from "./api";
+import { ApiError, createSlot, fetchDashboard, fetchHistory, fetchTimetable, putSubjectTarget, qk, type SlotConflict } from "./api";
 import { AnimatedNumber } from "./trend-chart";
-import { CustomTargetChip, fmtDT, MiniBar, statusColors, StatusChip, useNow } from "./shared";
+import { CustomTargetChip, fmtDT, MiniBar, statusColors, StatusChip, useNow, ago } from "./shared";
 import type { AttendanceStatus, HistoryResponse, SubjectView, TimetableSlotRow } from "./types";
 
 const DAY_SHORT = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
@@ -335,6 +335,47 @@ function SubjectTargetEditor({ s, globalTarget }: { s: SubjectView; globalTarget
 /* ------------------------------------------------------------------ */
 /* Subject trend mini chart (pure SVG, no deps)                        */
 /* ------------------------------------------------------------------ */
+
+/* ------------------------------------------------------------------ */
+/* Recent ERP changes for this subject (from the change feed)          */
+/* ------------------------------------------------------------------ */
+
+function SubjectChanges({ code }: { code: string }) {
+  // Shares the header's dashboard cache (same query key) — no extra fetch.
+  const dash = useQuery({ queryKey: qk.dashboard, queryFn: fetchDashboard, enabled: true });
+  const items = (dash.data?.changes ?? [])
+    .filter((c) => c.subjectCode === code)
+    .slice(0, 5);
+
+  return (
+    <div className="rounded-xl border border-border/70 bg-muted/30 p-4">
+      <p className="flex items-center gap-1.5 text-sm font-semibold tracking-tight">
+        <History className="size-4 text-sky-500" aria-hidden="true" />
+        Recent ERP changes
+      </p>
+      {items.length === 0 ? (
+        <p className="mt-2 text-xs leading-relaxed text-muted-foreground">
+          No recorded changes for this subject yet — events appear here when the sync engine detects a
+          difference on the ERP (a class held, a mark changed, the subject added or removed).
+        </p>
+      ) : (
+        <ul className="mt-2.5 space-y-2">
+          {items.map((c) => (
+            <li key={c.id} className="flex items-start gap-2 text-xs">
+              <span className="mt-1 size-1.5 shrink-0 rounded-full bg-sky-500" aria-hidden="true" />
+              <div className="min-w-0 flex-1">
+                <p className="leading-snug">{c.detail}</p>
+                <p className="mt-0.5 text-[10px] uppercase tracking-wide text-muted-foreground">
+                  {c.kind.toLowerCase().replace(/_/g, " ")} · {ago(c.createdAt)}
+                </p>
+              </div>
+            </li>
+          ))}
+        </ul>
+      )}
+    </div>
+  );
+}
 
 function SubjectTrend({ history, code }: { history: HistoryResponse | undefined; code: string }) {
   const points = history?.subjects[code] ?? [];
@@ -693,7 +734,7 @@ export function SubjectDrawer({
               </p>
             </div>
           </div>
-          <MiniBar percentage={subject.percentage} status={subject.status} className="relative mt-3.5 h-2.5" />
+          <MiniBar percentage={subject.percentage} status={subject.status} target={subject.targetPct} className="relative mt-3.5 h-2.5" />
         </div>
 
         <div className="space-y-4 p-5">
@@ -731,6 +772,9 @@ export function SubjectDrawer({
           <SubjectTargetEditor s={subject} globalTarget={globalTarget} />
 
           <SubjectTrend history={history.data} code={subject.code} />
+
+          <SubjectChanges code={subject.code} />
+
           <SubjectTimetable slots={mySlots} subjectCode={subject.code} subjectName={subject.name} />
 
           <Separator />

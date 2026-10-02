@@ -36,7 +36,7 @@ export async function GET() {
 
     const conn = await db.erpConnection.findFirst({ orderBy: { createdAt: "desc" } });
 
-    const changes = await db.changeEvent.findMany({ orderBy: { createdAt: "desc" }, take: 8 });
+    const changes = await db.changeEvent.findMany({ orderBy: { createdAt: "desc" }, take: 40 });
 
     const todayEnd = new Date();
     todayEnd.setHours(23, 59, 59, 999);

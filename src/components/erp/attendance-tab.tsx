@@ -139,7 +139,7 @@ function SubjectCard({
             </div>
           </div>
 
-          <MiniBar percentage={s.percentage} status={s.status} />
+          <MiniBar percentage={s.percentage} status={s.status} target={s.targetPct} />
 
           <div className="flex flex-wrap items-center gap-2">
             <StatusChip status={s.status} target={s.targetPct} />

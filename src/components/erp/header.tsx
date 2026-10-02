@@ -414,6 +414,13 @@ export function AppHeader({ onOpenPalette }: { onOpenPalette?: () => void }) {
               <TooltipContent>
                 <p>{fmtDT(lastSyncAt)}</p>
                 <p className="text-muted-foreground">{freshnessLabel}</p>
+                <p className="text-muted-foreground">
+                  {isSyncing
+                    ? "Syncing with the ERP now…"
+                    : sync?.nextScheduledSyncAt
+                      ? `Next auto-sync ${format(new Date(sync.nextScheduledSyncAt), "h:mm a")}`
+                      : "Auto-sync schedule unavailable."}
+                </p>
               </TooltipContent>
             </Tooltip>
           ) : (

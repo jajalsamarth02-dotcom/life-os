@@ -334,7 +334,7 @@ function SubjectRow({ s, onOpen, shimmer }: { s: SubjectView; onOpen: () => void
           <span className={cn("shrink-0 text-sm font-bold tabular-nums", c.text)}>{s.percentage.toFixed(2)}%</span>
         </div>
         <div className="mt-1.5 flex items-center gap-2">
-          <MiniBar percentage={s.percentage} status={s.status} className="flex-1" shimmer={shimmer} />
+          <MiniBar percentage={s.percentage} status={s.status} target={s.targetPct} className="flex-1" shimmer={shimmer} />
           {s.status !== "safe" && s.classesToTarget > 0 ? (
             <span className="shrink-0 text-[11px] font-medium text-amber-600 dark:text-amber-400">
               ⚠ needs {s.classesToTarget} more {s.classesToTarget === 1 ? "class" : "classes"}

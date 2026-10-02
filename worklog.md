@@ -661,3 +661,50 @@ Unresolved issues / risks & next-phase priorities:
 3. Backlog: L/H/E columns not folded into totals (pending real rows of that shape); digest email
    delivery (needs SMTP); TZ-aware calendar events; per-semester scoping stored on slots themselves.
 4. dev-server-keeper cron must stay alive; preview Caddy 502 self-heals within ≤5 min.
+
+---
+Task ID: 10 (webDevReview round 7, trace 1a0fc2dd5ff09b15-cron-agent-loop-202610021933)
+Agent: Z.ai Code (main orchestrator)
+Task: Status assessment + agent-browser QA of the LIVE app + drawer change-feed feature + next-sync countdown + target-tick styling
+
+Current project status / assessment:
+- LIVE mode healthy (real account, demo OFF, Sem 5, 8 real subjects, overall 66.67% = 2/3,
+  auto-sync cadence firing every 15 min, freshness dot green). QA sweep found NO regressions:
+  the earlier "MA-305" text sighting is the honest change-feed entry "Discrete Mathematics no
+  longer on the ERP · 29 minutes ago" (demo→live transition history), not the removed fake chip.
+  Proceeded to features + styling.
+
+Completed modifications / verified:
+1. FEATURE — PER-SUBJECT "RECENT ERP CHANGES" IN THE SUBJECT DRAWER: new SubjectChanges section
+   (between trend and weekly schedule) listing up to 5 change events whose subjectCode matches
+   the open subject, each with detail + kind ("subject added") + relative time; empty state
+   explains when events appear (spec-honest wording). Reads the shared qk.dashboard cache (the
+   header already polls it) — zero extra network traffic. To make per-subject events actually
+   visible, /api/dashboard change feed cap raised 8 → 40 (the old cap hid everything except the
+   demo-transition events; real per-subject events like "ADVANCED MOBILE APPLICATION DEVELOPMENT
+   — 0/0 classes · Sem 5 · subject added" now surface).
+2. FEATURE — NEXT AUTO-SYNC COUNTDOWN: the header "Last ERP sync" tooltip now has a third line —
+   "Syncing with the ERP now…" while a sync runs, else "Next auto-sync 7:51 PM" from
+   sync.nextScheduledSyncAt, or an honest "Auto-sync schedule unavailable." Verified by real
+   hover (radix tooltip): all three lines render.
+3. STYLING (mandatory) — TARGET TICK ON EVERY ATTENDANCE BAR: MiniBar gained an optional `target`
+   prop rendering a faint dashed vertical tick (1px, 45% foreground) at the target %, only when
+   the target sits ahead of the current value inside the bar range. Wired into all three call
+   sites: dashboard subject rows, attendance-tab subject cards, subject-drawer header bar — so
+   every progress bar now shows headroom to ITS effective target (custom targets included),
+   matching the sparkline-tick language from round 4.
+
+Verification results:
+- bun run lint: clean. agent-browser: 0 console/page errors; mobile 390px scrollWidth 390/390 on
+  all four tabs; dark + light verified visually (mobile dark screenshot clean). Browser-verified:
+  drawer changes section with a real event ("subject added · 32 min ago"), empty-state copy,
+  MiniBar ticks present, tooltip countdown correct against the sync schedule. No dev-server
+  restart, no production build; keeper cron untouched.
+
+Unresolved issues / risks & next-phase priorities:
+1. Change feed now returns up to 40 events; the dashboard "Recent activity" card still slices 8 —
+   consider a "show more" affordance or per-subject deep link from feed rows to drawers.
+2. Backlog unchanged: L/H/E columns not folded into totals (pending real rows of that shape);
+   digest email delivery (needs SMTP); TZ-aware calendar events; per-semester scoping stored on
+   slots themselves (schema change → needs a controlled dev-server restart after client regen).
+3. dev-server-keeper cron (job 430680) must stay alive; preview Caddy 502 self-heals ≤5 min.

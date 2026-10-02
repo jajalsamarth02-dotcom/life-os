@@ -291,21 +291,33 @@ export function MiniBar({
   status,
   className,
   shimmer = false,
+  target,
 }: {
   percentage: number;
   status: AttendanceStatus;
   className?: string;
   shimmer?: boolean;
+  /** Optional attendance target (%) — draws a faint dashed tick on the bar. */
+  target?: number;
 }) {
   const c = statusColors(status);
+  const showTick =
+    typeof target === "number" && target > 0 && target > percentage && target < 100;
   return (
-    <div className={cn("h-2 w-full overflow-hidden rounded-full bg-muted", className)}>
+    <div className={cn("relative h-2 w-full overflow-hidden rounded-full bg-muted", className)}>
       <motion.div
         className={cn("h-full rounded-full", c.bar, shimmer && "erp-shimmer")}
         initial={{ width: 0 }}
         animate={{ width: `${Math.max(0, Math.min(100, percentage))}%` }}
         transition={{ duration: 0.6, ease: [0.22, 1, 0.36, 1] }}
       />
+      {showTick && (
+        <span
+          aria-hidden="true"
+          className="absolute inset-y-0 w-px border-l border-dashed border-foreground/45"
+          style={{ left: `${target}%` }}
+        />
+      )}
     </div>
   );
 }
