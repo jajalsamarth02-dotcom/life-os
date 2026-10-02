@@ -1162,3 +1162,25 @@ Unresolved issues / risks & next-phase priorities:
 3. Backlog unchanged: L/H/E columns folding, SMTP email digest, TZ anchor cosmetic, per-semester slot scoping (schema change → controlled restart).
 4. User freeze is in effect: NO further code changes unless they ask or a bug is reproducible on fresh load.
 5. dev-server-keeper cron (430680) must stay alive; preview Caddy 502 self-heals ≤5 min.
+
+---
+Task ID: 17 (webDevReview round 13, trace 1a0fc2dd5ff09b15-cron-agent-loop-202610022136 + incident window)
+Agent: Z.ai Code (main orchestrator)
+Task: Incident response & stabilization. User messages: "Application error: a client-side exception", "not working pls help", standing freeze "dont change and runnn". NO app code changes this task (freeze honored) — ops + diagnosis only.
+
+Current project status / assessment:
+- STABLE at round end: server 200, next-server RSS 1.1GB (V8 heap capped via NODE_OPTIONS=--max-old-space-size=1024), ~2.2-2.4GB available, LIVE mode, 66.67%, 41/47 pending, sync idle with 1 honest recorded failure.
+- ROOT CAUSE CHAIN (now fully understood): (1) ERP began hanging login/GET responses ~12:56-13:13Z (rate-limit suspected after ~200 successful syncs today) → one scheduled sync hung ~16.7min (SyncLog durationMs=999999, started 13:13:48Z, no errorCode) leaving SyncState stuck "syncing"; (2) hung-sync memory + QA Chromium concurrently → kernel OOM killed next-server (dmesg event, anon-rss 1.9GB); (3) repeated keeper restarts each hit the past-due nextScheduledSyncAt → immediate sync attempts while ERP still hanging; (4) user's open preview tab held stale Turbopack chunks across restarts → "Application error: a client-side exception" (NOT a code bug — fresh load + 4 tabs = 0 console errors, verified twice).
+- Ops actions taken: SyncState reset to idle (failures=1 kept for honesty), stale sync.lock cleared, next sync pushed +15min (rest for the ERP), server restarted ONCE (pkill "next dev" then relaunch with heap cap — justified by user's explicit help request; no other kills), Chromium closed and now ALWAYS closed after QA (new protocol).
+
+Completed modifications / verified:
+- NONE in app code (user freeze). Verification only: curl health (200, API consistent), 60s+ uptime watch with RSS sampling (stable 1.6GB pre-cap instance, then 1.1GB capped instance), browser smoke test (Dashboard renders, 66.67% visible, 0 console errors) with immediate close, memory confirmed 2.2GB+ free after.
+
+Unresolved issues / risks & next-phase priorities:
+1. NEXT SYNC ~13:51Z (19:21 IST) is the ERP-recovery test: if it fails, backoff (backoffMinutes) lengthens automatically — verify SyncLog shows a clean typed errorCode (UNREACHABLE/timeouts) rather than another hang; if it hangs again >60s, consider raising REQUEST_TIMEOUT_MS review or longer manual cooldown (no code change yet — observe first).
+2. If OOM recurs WITHOUT Chromium open: drop Turbopack cache (rm -rf .next) during a quiet minute, or reduce sync frequency via Settings (user action) to cut ERP pressure.
+3. Keeper-spawned instances died unusually fast during the incident window (20-45s) — likely the same memory pressure; watch whether keeper instances survive now that the heap is capped and Chromium stays closed.
+4. User decisions still pending: free 2nd notification channel (Telegram ⭐ / ntfy / Discord / email) and optional fixed daily digest time (their WhatsApp is enabled; digestTime unset).
+5. Backlog unchanged: L/H/E columns folding, SMTP email digest, TZ anchor cosmetic, per-semester slot scoping.
+6. User freeze: NO code changes unless a fresh-load-reproducible bug appears or the user asks.
+7. dev-server-keeper cron (430680) must stay alive; preview Caddy 502 self-heals ≤5 min.
