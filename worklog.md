@@ -835,3 +835,73 @@ Stage Summary / verification:
   previously wedged; keeper cron untouched and still active.
 - Next-phase suggestions: subject filter chip inside By-subject view; per-subject ALA deep-link
   from dashboard card; fold L/H/E columns when real rows appear; digest email (SMTP).
+
+---
+Task ID: 12 (webDevReview round 8, trace 1a0fc2dd5ff09b15-cron-agent-loop-202610022002)
+Agent: Z.ai Code (main orchestrator)
+Task: Status assessment + agent-browser QA of the LIVE app + ALA search/filter/sort/ics-export + dashboard change-feed deep-link & show-more + styling polish
+
+Current project status / assessment:
+- LIVE mode healthy (real account, demo OFF, Sem 5, 8 real subjects, overall 66.67% = 2/3, sync
+  idle with 0 consecutive failures, next auto-sync on schedule, freshness dot green). Pre-work QA
+  sweep: 0 console/page errors on all four tabs; /api/dashboard (34 changes, 47 ALA rows,
+  alaPending 41/47) and /api/assignments (47 rows, 7 course names) verified. No regressions found
+  → proceeded to features + styling.
+
+Completed modifications / verified:
+1. FEATURE — ALA LIST: SEARCH + STATUS FILTER + SORT + EXPAND/COLLAPSE-ALL (reminders-tab.tsx,
+   AlaSection): control row with a search input (matches title, course code, course name,
+   description; clear ✕ button), four status filter chips with live counts (All 47 / Pending 21 /
+   Overdue 20 / Submitted 6 — "Pending" excludes overdue so the Overdue chip is meaningful),
+   a sort Select (Nearest deadline / Course A–Z; default nearest) and an Expand/Collapse toggle
+   (per-group open state lifted into a collapsed-Set; groups force-open while searching so
+   matches are always visible). Honest "Nothing matches" empty state with a one-click
+   "Reset search & filters" button. Directly mitigates the Oct 30–31 "overdue wall" backlog item.
+2. FEATURE — ALA .ICS EXPORT: header download button exports every not-yet-Submitted ALA row as
+   a timed VEVENT (SUMMARY "CODE · TITLE", 30-min block at the End Date) via the existing
+   lib/ics.ts; toast confirms "41 open deadlines". Fixed downloadRemindersIcs() to pass a
+   calendarName through to buildRemindersIcs (previously ignored — "ALA & assignment deadlines
+   (ERP Sync)" now lands as X-WR-CALNAME). Browser-verified: downloaded file has 41 VEVENTs with
+   correct DTSTARTs (16 Jul, 31 Jul, 18 Aug … 12:00) and code-prefixed summaries.
+3. FEATURE — DASHBOARD CHANGE-FEED DEEP LINK (dashboard-tab.tsx ChangeRow): rows whose
+   subjectCode matches a LIVE subject render as buttons (hover border/bg, chevron slide, tooltip
+   "Open CODE — attendance, trend and what-if planner") that open the subject drawer via the
+   existing selectedCode state — zero extra queries. Rows for codes no longer on the ERP (e.g.
+   demo-era "MA-305 no longer on the ERP") stay non-clickable — honest affordance, no silent
+   no-ops. Card description now says "tap a code to open the subject" only when at least one
+   live-code row exists. Code badges on rows got deterministic per-subject hues via new shared
+   hueColors()/subjectHue() (moved the hue hash into shared.tsx so tabs stay consistent).
+4. FEATURE — SHOW-MORE TOGGLES: "Recent ERP changes" now offers "Show all 34 events / Show less"
+   (was hard-sliced to 8 of the 40 the API returns — closes the round-7 backlog item); matching
+   "Show all 10 / Show less" added to "Recent notifications" (was sliced to 5).
+5. STYLING (mandatory): ALA group header "next last date" became a colored pill (red when
+   overdue, amber ≤7d, muted otherwise); per-row relative-deadline pills added ("78d overdue",
+   "due today", "in 12d" — red/amber/muted by urgency); ALA card header stacks vertically on
+   mobile (badges + export button wrap below the title instead of squeezing); group containers
+   got overflow-hidden + hover border transition; sort trigger widened so "Nearest deadline"
+   isn't truncated; filter chips use aria-pressed + count pills with active color states.
+
+Verification results:
+- bun run lint: clean. agent-browser E2E: search "COCOMO" → 1 row in SE group; COCOMO+Submitted →
+  honest empty state → reset works; Overdue chip → only overdue rows; Collapse/Expand-all flips
+  every group; feed row "SOFTWARE ENGINEERING — 0/0 classes" click opened the correct drawer;
+  "Show all 34 events"/"Show all 10" toggle both directions; .ics file validated (41 VEVENTs);
+  mobile 390px scrollWidth 390/390 (no overflow), desktop 1280 light + dark screenshots clean;
+  0 console/page errors after reload across Dashboard/Attendance/Reminders/Settings.
+- Incident + fix: a stale agent-browser ref click (element refs shift on react-query refetch)
+  landed on reminder-row action icons and (a) deleted the "QA persistence probe" PERSONAL
+  reminder and (b) fired one "Subject link removed". Restored the probe via POST /api/reminders
+  (id cmuqxckzh001iljx3zx3nan4b, due 8 Oct 10:00 AM IST, type OTHER). "Submit project report"
+  shows no subject chip in before/after screenshots, so it likely was never linked; the unlink
+  (if it targeted it) is unrecoverable — no audit log for personal reminder edits. Lesson
+  recorded: re-snapshot immediately before every click on dynamic lists.
+
+Unresolved issues / risks & next-phase priorities:
+1. ALA rows are pinned to the ERP-detected current semester (Sem 5) regardless of the app's
+   semester partition — switching partition still shows this list (ERP publishes only one).
+2. If faculty never flips Submission Status, ~20 overdue rows keep growing — a per-group
+   "all overdue" digest or a digest-email nudge (needs SMTP) is the natural next step.
+3. Backlog: L/H/E columns not folded into totals (pending real rows of that shape); TZ-aware
+   calendar events; per-semester scoping stored on slots themselves (schema change → controlled
+   dev-server restart after client regen).
+4. dev-server-keeper cron (job 430680) must stay alive; preview Caddy 502 self-heals ≤5 min.

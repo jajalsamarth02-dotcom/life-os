@@ -200,10 +200,13 @@ export function buildRemindersIcs(
 }
 
 /** Download active reminders as a .ics calendar file. Returns the filename. */
-export function downloadRemindersIcs(reminders: IcsReminder[]): string {
+export function downloadRemindersIcs(
+  reminders: IcsReminder[],
+  calendarName = "Deadlines & exams (ERP Sync)"
+): string {
   const d = new Date();
   const filename = `deadlines-${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}.ics`;
-  const blob = new Blob([buildRemindersIcs(reminders)], {
+  const blob = new Blob([buildRemindersIcs(reminders, calendarName)], {
     type: "text/calendar;charset=utf-8",
   });
   const url = URL.createObjectURL(blob);

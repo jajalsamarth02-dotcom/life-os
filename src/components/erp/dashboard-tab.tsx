@@ -755,7 +755,9 @@ export function DashboardTab({
           <CardHeader className="pb-3">
             <CardTitle className="text-base tracking-tight">Recent ERP changes</CardTitle>
             <CardDescription className="text-xs">
-              Detected automatically by the sync engine{data.changes.some((c) => c.subjectCode) && " — tap a code to open the subject"}
+              Detected automatically by the sync engine
+              {data.changes.some((c) => c.subjectCode && data.subjects.some((s) => s.code === c.subjectCode)) &&
+                " — tap a code to open the subject"}
             </CardDescription>
           </CardHeader>
           <CardContent>
@@ -765,7 +767,17 @@ export function DashboardTab({
               <>
                 <ul className="max-h-96 space-y-1.5 overflow-y-auto pr-1">
                   {(showAllChanges ? data.changes : data.changes.slice(0, 8)).map((c) => (
-                    <ChangeRow key={c.id} c={c} onOpen={setSelectedCode} />
+                    <ChangeRow
+                      key={c.id}
+                      c={c}
+                      /* Only rows whose subject still exists are clickable — a code that
+                         no longer matches a live subject would open nothing (honest affordance). */
+                      onOpen={
+                        c.subjectCode && data.subjects.some((s) => s.code === c.subjectCode)
+                          ? setSelectedCode
+                          : undefined
+                      }
+                    />
                   ))}
                 </ul>
                 {data.changes.length > 8 && (

@@ -975,7 +975,7 @@ function AlaSection() {
 
   return (
     <Card className="rounded-xl border-border/60">
-      <CardHeader className="flex flex-row items-start justify-between space-y-0 pb-3">
+      <CardHeader className="flex flex-col gap-3 space-y-0 pb-3 sm:flex-row sm:items-start sm:justify-between">
         <div>
           <CardTitle className="flex items-center gap-2 text-base tracking-tight">
             <ClipboardList className="size-4.5 text-primary" aria-hidden="true" />
@@ -1081,7 +1081,7 @@ function AlaSection() {
               <div className="flex items-center gap-1.5">
                 <Select value={sort} onValueChange={(v) => setSort(v as AlaSort)}>
                   <SelectTrigger
-                    className="h-8 w-[132px] shrink-0 gap-1 bg-background text-xs"
+                    className="h-8 w-[150px] shrink-0 gap-1 bg-background text-xs"
                     aria-label="Sort ALA groups"
                   >
                     <ArrowDownUp className="size-3.5 shrink-0 text-muted-foreground" aria-hidden="true" />
