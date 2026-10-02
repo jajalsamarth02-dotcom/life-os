@@ -84,8 +84,26 @@ export const fetchDigest = (days = 7) =>
 export const fetchAttendance = () => api<AttendanceResponse>("/api/attendance");
 export const fetchHistory = () => api<HistoryResponse>("/api/history");
 export const fetchTimetable = () => api<TimetableResponse>("/api/timetable").then((r) => r.slots);
-export const createSlot = (payload: { dayOfWeek: number; start: string; end: string; subjectCode: string }) =>
-  api<{ slot: unknown }>("/api/timetable", { method: "POST", body: JSON.stringify(payload) });
+export const createSlot = (payload: {
+  dayOfWeek: number;
+  start: string;
+  end: string;
+  subjectCode: string;
+  /** Accept overlapping slots deliberately (server answers 409 without it). */
+  force?: boolean;
+}) => api<{ slot: unknown; conflicts?: SlotConflict[] }>("/api/timetable", {
+  method: "POST",
+  body: JSON.stringify(payload),
+});
+
+/** Another class occupying the same time window (returned by a 409). */
+export interface SlotConflict {
+  id: string;
+  subjectCode: string;
+  start: string;
+  end: string;
+  source: string;
+}
 export const deleteSlot = (id: string) => api<{ ok: boolean }>(`/api/timetable/${id}`, { method: "DELETE" });
 export const fetchReminders = (filter: RemindersFilter, includeDone: boolean) =>
   api<{ reminders: Reminder[] }>(
@@ -125,6 +143,39 @@ export const updateReminderStatus = (id: string, status: string) =>
     method: "PATCH",
     body: JSON.stringify({ status }),
   });
+
+/** Snooze/reschedule a PERSONAL reminder (ERP reminders are sync-owned). */
+export const snoozeReminder = (id: string, dueAt: string) =>
+  api<{ reminder: Reminder }>(`/api/reminders/${id}`, {
+    method: "PATCH",
+    body: JSON.stringify({ dueAt }),
+  });
+
+/** Fetch the full JSON backup produced by GET /api/export. */
+export async function fetchBackup(): Promise<{ blob: Blob; filename: string }> {
+  const res = await fetch("/api/export");
+  if (!res.ok) throw new ApiError(res.status, {}, "Could not build the backup");
+  const disposition = res.headers.get("Content-Disposition") ?? "";
+  const match = /filename="?([^";]+)"?/.exec(disposition);
+  return {
+    blob: await res.blob(),
+    filename: match?.[1] ?? "erp-sync-backup.json",
+  };
+}
+
+/** Download the JSON backup via a temporary object URL. */
+export async function downloadBackup(): Promise<string> {
+  const { blob, filename } = await fetchBackup();
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  URL.revokeObjectURL(url);
+  return filename;
+}
 
 export const deleteReminder = (id: string) =>
   api<{ ok: boolean }>(`/api/reminders/${id}`, { method: "DELETE" });

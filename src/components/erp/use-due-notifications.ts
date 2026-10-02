@@ -10,7 +10,7 @@ import {
   markNotified,
   permissionState,
   showSystemNotification,
-  wasNotified,
+  wasNotifiedFor,
   type PermissionState,
 } from "@/lib/browser-reminders";
 import type { Reminder } from "./types";
@@ -58,7 +58,8 @@ export function useDueNotifications() {
       const t = new Date(r.dueAt).getTime();
       // Fire when due; on first sight only consider things overdue < 24h
       // (avoids a burst for long-past items imported from history).
-      return t <= now && now - t < 24 * 3_600_000 && !wasNotified(r.id);
+      // Keyed by (id, dueAt): a snoozed reminder re-arms for its new date.
+      return t <= now && now - t < 24 * 3_600_000 && !wasNotifiedFor(r.id, r.dueAt);
     });
 
     for (const r of due) {

@@ -9,6 +9,7 @@ import {
   CalendarClock,
   CheckCircle2,
   ChevronDown,
+  Clock,
   Loader2,
   Lock,
   Plus,
@@ -31,6 +32,14 @@ import {
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import {
   Collapsible,
   CollapsibleContent,
@@ -70,6 +79,7 @@ import {
   deleteReminder,
   fetchReminders,
   qk,
+  snoozeReminder,
   updateReminderStatus,
   ApiError,
 } from "./api";
@@ -81,6 +91,25 @@ import type { RemindersFilter, Reminder, ReminderType } from "./types";
 /* ------------------------------------------------------------------ */
 
 const NEW_TYPES: ReminderType[] = ["EXAM", "PRACTICAL_EXAM", "VIVA", "ASSIGNMENT", "SUBMISSION", "OTHER"];
+
+/** Compute a snooze target from "now" for the given preset. */
+function snoozeTarget(preset: "h1" | "h3" | "tomorrow" | "week"): Date {
+  const d = new Date();
+  switch (preset) {
+    case "h1":
+      return new Date(d.getTime() + 60 * 60_000);
+    case "h3":
+      return new Date(d.getTime() + 3 * 60 * 60_000);
+    case "tomorrow":
+      d.setDate(d.getDate() + 1);
+      d.setHours(9, 0, 0, 0);
+      return d;
+    case "week":
+      d.setDate(d.getDate() + 7);
+      d.setHours(9, 0, 0, 0);
+      return d;
+  }
+}
 
 function ReminderRow({ r, onDeleted }: { r: Reminder; onDeleted: (r: Reminder) => void }) {
   const qc = useQueryClient();
@@ -114,6 +143,22 @@ function ReminderRow({ r, onDeleted }: { r: Reminder; onDeleted: (r: Reminder) =
       toast.error("Cannot delete reminder", { description: msg });
     },
   });
+
+  /* Snooze (personal reminders only — ERP owns its own due dates). */
+  const snooze = useMutation({
+    mutationFn: (preset: "h1" | "h3" | "tomorrow" | "week") =>
+      snoozeReminder(r.id, snoozeTarget(preset).toISOString()),
+    onSuccess: (_res, preset) => {
+      qc.invalidateQueries();
+      const target = snoozeTarget(preset);
+      toast.success(`Snoozed until ${fmtDT(target.toISOString())}`);
+    },
+    onError: (e) => {
+      qc.invalidateQueries();
+      toast.error("Could not snooze reminder", { description: e.message });
+    },
+  });
+  const canSnooze = r.source === "PERSONAL" && !done && r.type !== "ATTENDANCE_WARNING";
 
   return (
     <motion.li
@@ -182,6 +227,51 @@ function ReminderRow({ r, onDeleted }: { r: Reminder; onDeleted: (r: Reminder) =
             <Undo2 className="size-4" aria-hidden="true" />
           </Button>
         ) : null}
+        {canSnooze && (
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button
+                variant="ghost"
+                size="icon"
+                className="size-8 text-muted-foreground hover:bg-amber-500/10 hover:text-amber-600 dark:hover:text-amber-400"
+                aria-label={`Snooze ${r.title}`}
+                disabled={snooze.isPending}
+              >
+                {snooze.isPending ? (
+                  <Loader2 className="size-4 animate-spin" aria-hidden="true" />
+                ) : (
+                  <Clock className="size-4" aria-hidden="true" />
+                )}
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end" className="w-48">
+              <DropdownMenuLabel className="text-[11px]">Snooze until…</DropdownMenuLabel>
+              <DropdownMenuSeparator />
+              <DropdownMenuItem onClick={() => snooze.mutate("h1")}>
+                <Clock className="size-3.5 text-muted-foreground" aria-hidden="true" />
+                In 1 hour
+                <span className="ml-auto text-[10px] tabular-nums text-muted-foreground">
+                  {fmtDT(snoozeTarget("h1").toISOString())}
+                </span>
+              </DropdownMenuItem>
+              <DropdownMenuItem onClick={() => snooze.mutate("h3")}>
+                <Clock className="size-3.5 text-muted-foreground" aria-hidden="true" />
+                In 3 hours
+                <span className="ml-auto text-[10px] tabular-nums text-muted-foreground">
+                  {fmtDT(snoozeTarget("h3").toISOString())}
+                </span>
+              </DropdownMenuItem>
+              <DropdownMenuItem onClick={() => snooze.mutate("tomorrow")}>
+                <CalendarClock className="size-3.5 text-muted-foreground" aria-hidden="true" />
+                Tomorrow 09:00
+              </DropdownMenuItem>
+              <DropdownMenuItem onClick={() => snooze.mutate("week")}>
+                <CalendarClock className="size-3.5 text-muted-foreground" aria-hidden="true" />
+                Next week
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
+        )}
         <Button
           variant="ghost"
           size="icon"

@@ -4,21 +4,55 @@ import { db } from "@/lib/db";
 export const dynamic = "force-dynamic";
 
 /**
- * PATCH /api/reminders/:id — body { status: "ACTIVE" | "DONE" | "DISMISSED" }
- * Works for both ERP and personal reminders (ERP ones are re-synced from the
- * source of truth when the ERP changes them).
+ * PATCH /api/reminders/:id
+ * Body: { status: "ACTIVE" | "DONE" | "DISMISSED" } and/or { dueAt: ISO string }
+ *
+ * - status: works for both ERP and personal reminders (ERP ones are re-synced
+ *   from the source of truth when the ERP changes them).
+ * - dueAt (snooze/reschedule): PERSONAL reminders only — the ERP owns the due
+ *   dates of its own reminders, so the app never rewrites them locally.
  */
 export async function PATCH(req: Request, { params }: { params: Promise<{ id: string }> }) {
   try {
     const { id } = await params;
-    const body = await req.json();
-    const status = body.status;
-    if (!["ACTIVE", "DONE", "DISMISSED"].includes(status)) {
+    const body = await req.json().catch(() => ({}) as Record<string, unknown>);
+
+    const status = typeof body.status === "string" ? body.status : undefined;
+    if (status !== undefined && !["ACTIVE", "DONE", "DISMISSED"].includes(status)) {
       return NextResponse.json({ error: "Invalid status" }, { status: 400 });
     }
+
+    const hasDueAt = body.dueAt !== undefined && body.dueAt !== null;
+    let dueAtDate: Date | null = null;
+    if (hasDueAt) {
+      const t = new Date(String(body.dueAt));
+      if (Number.isNaN(t.getTime())) {
+        return NextResponse.json({ error: "dueAt must be a valid ISO date" }, { status: 400 });
+      }
+      dueAtDate = t;
+    }
+
+    if (status === undefined && !hasDueAt) {
+      return NextResponse.json({ error: "Nothing to update: provide status and/or dueAt" }, { status: 400 });
+    }
+
+    const existing = await db.reminder.findUnique({ where: { id } });
+    if (!existing) {
+      return NextResponse.json({ error: "Reminder not found" }, { status: 404 });
+    }
+    if (hasDueAt && existing.source !== "PERSONAL") {
+      return NextResponse.json(
+        { error: "ERP reminders are owned by synchronization — their due dates come from the ERP and cannot be changed manually." },
+        { status: 400 }
+      );
+    }
+
     const reminder = await db.reminder.update({
       where: { id },
-      data: { status },
+      data: {
+        ...(status !== undefined ? { status } : {}),
+        ...(dueAtDate ? { dueAt: dueAtDate } : {}),
+      },
     });
     return NextResponse.json({ reminder });
   } catch (e) {

@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { db } from "@/lib/db";
-import { ensureDemoTimetable, listSlots, minutesFromHHMM } from "@/lib/timetable";
+import { ensureDemoTimetable, listSlots, minutesFromHHMM, HHMMFromMinutes } from "@/lib/timetable";
 
 export const dynamic = "force-dynamic";
 
@@ -22,7 +22,11 @@ export async function GET() {
 
 /**
  * POST /api/timetable — add a personal slot.
- * Body: { dayOfWeek: 0-6, start: "HH:MM", end: "HH:MM", subjectCode }
+ * Body: { dayOfWeek: 0-6, start: "HH:MM", end: "HH:MM", subjectCode, force?: boolean }
+ *
+ * Conflict detection: overlapping slots on the same day are refused with 409
+ * and the list of conflicts. The client may retry with force: true to accept
+ * the overlap deliberately (e.g. lab tuts that share a time window).
  */
 export async function POST(req: Request) {
   try {
@@ -31,6 +35,7 @@ export async function POST(req: Request) {
     const start = typeof body.start === "string" ? body.start : "";
     const end = typeof body.end === "string" ? body.end : "";
     const subjectCode = typeof body.subjectCode === "string" ? body.subjectCode.trim() : "";
+    const force = body.force === true;
 
     if (!Number.isInteger(dayOfWeek) || dayOfWeek < 0 || dayOfWeek > 6) {
       return NextResponse.json({ error: "dayOfWeek must be 0 (Sun) – 6 (Sat)" }, { status: 400 });
@@ -48,10 +53,37 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: "Unknown subject code" }, { status: 400 });
     }
 
+    const sameDay = await db.timetableSlot.findMany({
+      where: { dayOfWeek },
+      orderBy: { startMin: "asc" },
+    });
+    const conflicts = sameDay
+      .filter((s) => startMin < s.endMin && endMin > s.startMin)
+      .map((s) => ({
+        id: s.id,
+        subjectCode: s.subjectCode,
+        start: HHMMFromMinutes(s.startMin),
+        end: HHMMFromMinutes(s.endMin),
+        source: s.source,
+      }));
+
+    if (!force && conflicts.length > 0) {
+      return NextResponse.json(
+        {
+          error:
+            conflicts.length === 1
+              ? `This class overlaps ${conflicts[0].subjectCode} (${conflicts[0].start}–${conflicts[0].end}).`
+              : `This class overlaps ${conflicts.length} scheduled classes.`,
+          conflicts,
+        },
+        { status: 409 }
+      );
+    }
+
     const slot = await db.timetableSlot.create({
       data: { dayOfWeek, startMin, endMin, subjectCode, source: "personal" },
     });
-    return NextResponse.json({ slot }, { status: 201 });
+    return NextResponse.json({ slot, conflicts }, { status: 201 });
   } catch (e) {
     return NextResponse.json(
       { error: e instanceof Error ? e.message : "Failed to create slot" },

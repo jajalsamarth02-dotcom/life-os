@@ -48,6 +48,37 @@ export function useNow(intervalMs = 30_000): number {
   return now;
 }
 
+/* ------------------------------------------------------------------ */
+/* Timetable conflict helper (client-side preview)                     */
+/* ------------------------------------------------------------------ */
+
+export interface LocalSlotConflict {
+  subjectCode: string;
+  startMin: number;
+  endMin: number;
+}
+
+/**
+ * Slots already scheduled in the same day/time window (pure function so both
+ * timetable forms can preview conflicts live while the user types).
+ */
+export function findSlotConflicts(
+  slots: { id: string; dayOfWeek: number; startMin: number; endMin: number; subjectCode: string }[],
+  dayOfWeek: number,
+  startMin: number,
+  endMin: number
+): LocalSlotConflict[] {
+  return slots
+    .filter((s) => s.dayOfWeek === dayOfWeek && startMin < s.endMin && endMin > s.startMin)
+    .map((s) => ({ subjectCode: s.subjectCode, startMin: s.startMin, endMin: s.endMin }))
+    .sort((a, b) => a.startMin - b.startMin);
+}
+
+export function minutesFromHHMMClient(hhmm: string): number {
+  const [h, m] = hhmm.split(":").map((x) => parseInt(x, 10));
+  return (Number.isFinite(h) ? h : 0) * 60 + (Number.isFinite(m) ? m : 0);
+}
+
 export function fmtDT(iso: string | null | undefined): string {
   if (!iso) return "—";
   const d = new Date(iso);

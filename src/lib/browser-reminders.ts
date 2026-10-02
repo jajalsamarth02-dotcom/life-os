@@ -77,6 +77,25 @@ export function wasNotified(reminderId: string): boolean {
   }
 }
 
+/**
+ * True when THIS reminder has already fired for THIS due date. Keyed by
+ * (id, dueAt) so a snoozed/rescheduled reminder (new dueAt) is eligible to
+ * notify again when it becomes due.
+ */
+export function wasNotifiedFor(reminderId: string, dueAtIso: string): boolean {
+  try {
+    const map = readNotified();
+    const at = map[reminderId];
+    if (at === undefined) return false;
+    const stored = new Date(at).getTime();
+    const current = new Date(dueAtIso).getTime();
+    if (!Number.isNaN(stored) && !Number.isNaN(current) && stored !== current) return false;
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 export function markNotified(reminderId: string, dueAtIso: string): void {
   try {
     const map = readNotified();
