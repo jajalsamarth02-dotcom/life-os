@@ -652,24 +652,27 @@ const ALA_NOTE_MAX = 2000;
 /** Priority levels 1–3 with their visual identity (0 = "None" = no visuals). */
 const ALA_PRIORITY_META: Record<
   number,
-  { label: string; chip: string; border: string; activeBtn: string }
+  { label: string; chip: string; border: string; topAccent: string; activeBtn: string }
 > = {
   3: {
     label: "High",
     chip: "bg-red-500/10 text-red-700 dark:text-red-400",
     border: "border-l-red-500/80",
+    topAccent: "border-t-red-500/70",
     activeBtn: "bg-red-500/15 text-red-700 ring-1 ring-red-500/40 dark:text-red-400",
   },
   2: {
     label: "Medium",
     chip: "bg-violet-500/10 text-violet-700 dark:text-violet-400",
     border: "border-l-violet-500/80",
+    topAccent: "border-t-violet-500/70",
     activeBtn: "bg-violet-500/15 text-violet-700 ring-1 ring-violet-500/40 dark:text-violet-400",
   },
   1: {
     label: "Low",
     chip: "bg-sky-500/10 text-sky-700 dark:text-sky-400",
     border: "border-l-sky-500/80",
+    topAccent: "border-t-sky-500/70",
     activeBtn: "bg-sky-500/15 text-sky-700 ring-1 ring-sky-500/40 dark:text-sky-400",
   },
 };
@@ -724,7 +727,11 @@ function AlaNoteEditor({
   return (
     <Popover open={open} onOpenChange={setOpen}>
       <PopoverTrigger asChild>{children}</PopoverTrigger>
-      <PopoverContent align="end" className="w-80 p-3" onOpenAutoFocus={(e) => e.preventDefault()}>
+      <PopoverContent
+        align="end"
+        className={cn("w-80 border-t-2 p-3 transition-colors", alaPriorityOf(priority)?.topAccent ?? "border-t-transparent")}
+        onOpenAutoFocus={(e) => e.preventDefault()}
+      >
         <p className="text-xs font-semibold leading-none">Local note</p>
         <p className="mt-1 text-[11px] leading-snug text-muted-foreground">
           Private to this device&apos;s database — never shown on the ERP.
@@ -1284,7 +1291,7 @@ function AlaSubjectGroup({
  * one-click .ics export of every not-yet-submitted deadline.
  */
 type AlaStatusFilter = "all" | "overdue" | "soon" | "pending" | "submitted" | "noted";
-type AlaSort = "deadline" | "course" | "overdue";
+type AlaSort = "deadline" | "priority" | "course" | "overdue";
 
 const ALA_STATUS_META: { key: AlaStatusFilter; label: string; activeClass: string }[] = [
   { key: "all", label: "All", activeClass: "bg-primary text-primary-foreground" },
@@ -2308,7 +2315,27 @@ function AlaSection() {
         })
         .filter((g): g is AlaGroup => g !== null);
     }
-    if (sort === "course") {
+    if (sort === "priority") {
+      /* Your flags first: rows ordered by local priority (High → None), then
+         deadline; groups ranked by their best flagged row. Unflagged rows keep
+         their deadline order inside each group. */
+      const prioOf = (a: Reminder) => (a.externalId ? noteMap.get(a.externalId)?.priority ?? 0 : 0);
+      const bestOf = (g: AlaGroup) => g.items.reduce((m, a) => Math.max(m, prioOf(a)), 0);
+      list = [...list]
+        .map((g) => ({
+          ...g,
+          items: [...g.items].sort(
+            (a, b) =>
+              prioOf(b) - prioOf(a) || new Date(a.dueAt).getTime() - new Date(b.dueAt).getTime()
+          ),
+        }))
+        .sort(
+          (x, y) =>
+            bestOf(y) - bestOf(x) ||
+            (x.nextPendingMs ?? Number.POSITIVE_INFINITY) - (y.nextPendingMs ?? Number.POSITIVE_INFINITY) ||
+            (x.name ?? x.code).localeCompare(y.name ?? y.code)
+        );
+    } else if (sort === "course") {
       list = [...list].sort((x, y) => (x.name ?? x.code).localeCompare(y.name ?? y.code));
     } else if (sort === "overdue") {
       // Triage view: the heaviest overdue walls first, then nearest deadline, then A–Z.
@@ -2537,6 +2564,7 @@ function AlaSection() {
               <div className="flex items-center gap-1.5">
                 <Select value={sort} onValueChange={(v) => setSort(v as AlaSort)}>
                   <SelectTrigger
+                    data-testid="ala-sort-select"
                     className="h-8 w-[150px] shrink-0 gap-1 bg-background text-xs"
                     aria-label="Sort ALA groups"
                   >
@@ -2545,6 +2573,7 @@ function AlaSection() {
                   </SelectTrigger>
                   <SelectContent>
                     <SelectItem value="deadline" className="text-xs">Nearest deadline</SelectItem>
+                    <SelectItem value="priority" className="text-xs">Highest priority</SelectItem>
                     <SelectItem value="overdue" className="text-xs">Most overdue</SelectItem>
                     <SelectItem value="course" className="text-xs">Course A–Z</SelectItem>
                   </SelectContent>
@@ -2658,6 +2687,31 @@ function AlaSection() {
                 })}
               </div>
             )}
+
+            {/* Priority legend — teaches the local-flag color language; the rows
+               themselves carry the full tooltips (aria-hidden is enough here). */}
+            <div
+              className="flex flex-wrap items-center gap-x-3 gap-y-1 px-1 text-[10px] text-muted-foreground"
+              aria-hidden="true"
+            >
+              <span className="inline-flex items-center gap-1">
+                <Flag className="size-2.5 text-red-500" />
+                High
+              </span>
+              <span className="inline-flex items-center gap-1">
+                <Flag className="size-2.5 text-violet-500" />
+                Medium
+              </span>
+              <span className="inline-flex items-center gap-1">
+                <Flag className="size-2.5 text-sky-500" />
+                Low
+              </span>
+              <span className="inline-flex items-center gap-1">
+                <StickyNote className="size-2.5 text-primary/70" />
+                private note
+              </span>
+              <span className="text-muted-foreground/60">— your local triage layer, never shown on the ERP</span>
+            </div>
 
             {/* Live result count + clear-all — only while any filter axis is engaged */}
             {(searching || dayOffset != null) && (

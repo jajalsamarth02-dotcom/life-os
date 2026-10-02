@@ -1789,3 +1789,29 @@ Unresolved issues / risks & next-phase priorities:
 5. The next.config.ts env marker (NEXT_PUBLIC_SCHEMA_REV) is intentional — keep it or bump the value whenever prisma generate + cache-wipe is needed again; it is the clean restart trigger.
 6. Dashboard subject sparklines still dormant — activates automatically at ≥2 snapshots.
 7. Keeper cron 430680 must stay alive; worklog protocol: append-only, three-section handover; tsc at most ONCE per round.
+
+---
+Task ID: 40
+Agent: Z.ai Code (main orchestrator)
+Task: Round task 03:45+08 — tsc confirmation of Task 39's type fixes, priority-aware ALA sorting (new sort axis making the flag system actionable), styling detail pass (priority legend + live editor accent + select testability), full browser QA with seeded-then-cleared proof data.
+
+Current project status / assessment:
+- Server UP all round (same instance as Task 39, RSS ~1.42GB — near the kill watermark but survived; reaper quiet this round). LIVE data unchanged: 47 ALA rows / 41 active, 6/47 submitted, Sem 5, sync fresh ("11 minutes ago"). Console 0 errors. Browser CLOSED after QA.
+- tsc --noEmit ran ONCE at round start (before browser opened, per memory discipline): ZERO errors under src/ — Task 39's 5 runtime-verified type fixes are now type-confirmed too. Only remaining output is the known unrelated noise (skills/image-edit, examples/websocket, scripts/test-parse — all non-app).
+
+Completed modifications / verified:
+1. tsc CONFIRMATION — all clear (see assessment). The tsc-once rule held.
+2. NEW FEATURE — "Highest priority" ALA sort (reminders-tab.tsx): AlaSort += "priority"; new SelectItem (second in the dropdown, after "Nearest deadline"); sort logic: ROWS within each group ordered by local priority desc (High → None, tie-break nearest deadline), GROUPS ranked by their best flagged row's priority, then nearest pending deadline, then A–Z. Unflagged rows keep deadline order — flags surface, deadlines stay the tie-breaker so the sort stays useful even with zero flags. noteMap already in the visibleGroups dep array (Task 39) — zero extra fetches.
+3. STYLING — priority legend row under the subject chips (aria-hidden, text-[10px] muted): ⚑High (red) / ⚑Medium (violet) / ⚑Low (sky) / sticky-note "private note" + "— your local triage layer, never shown on the ERP". Teaches the flag color language at a glance; rows carry the full tooltips.
+4. STYLING — the note editor popover now has a LIVE priority-tinted top border (border-t-2): red/violet/sky per draft priority, border-t-transparent when None, transition-colors — the border re-tints INSTANTLY as you click priority chips (ALA_PRIORITY_META gained a topAccent field). Verified live: opened the High CN row's editor → border-t-red-500/70 → clicked Low → border-t-sky-500/70 in the same open popover (draft-only change, Escape discarded, server untouched).
+5. STYLING/TESTABILITY — the ALA sort SelectTrigger now carries data-testid="ala-sort-select" (Task 38's backlog seed: Radix Select triggers are automation-hostile; the testid makes palette-less QA clicks reliable — used it this very round to open the dropdown via eval click).
+6. FULL BROWSER QA (all green): (a) legend renders with exact copy; (b) testid present; (c) Noted chip counted 2 after seeding; (d) PRIORITY SORT REVERSAL PROVEN — seeded High on a COMPUTER NETWORKS row (erp:assign:473797, due 31 Jul) + Medium on a SOFTWARE ENGINEERING row (erp:assign:390660, due 16 Jul — earliest deadline): under "Nearest deadline" SE leads; switching to "Highest priority" put COMPUTER NETWORKS first with the HIGH-flagged "ALA 1 (CN)" row on top, unflagged CN rows in deadline order below (screenshot /tmp/qa-r40-priosort.png light + /tmp/qa-r40-dark-legend.png dark — both clean, red accent + HIGH chip + italic preview readable in dark); (e) live editor accent red→sky verified; (f) console 0 errors; (g) QA data CLEARED via the clear-deletes API path — GET /api/ala-notes returns {"notes":[]}, student starts clean.
+7. QA JOURNEY NOTES: (a) agent-browser snapshot refs go stale across Escape/re-render — re-snapshot before each click burst; (b) the popper wrapper div ([data-radix-popper-content-wrapper]) holds only positioning classes — the styled content is its CHILD ("> div"); class assertions must target the child or they false-negative; (c) clicking a priority chip inside the editor only changes the DRAFT — Escape discards (verified: server p3 intact after the accent test).
+
+Unresolved issues / risks & next-phase priorities:
+1. MilestoneCelebration real target-crossing still pending live data (needs 1 attended class → 3/4 = 75%). Watch on next sync.
+2. User decisions still pending: 2nd free notification channel (Telegram ⭐ / ntfy / Discord / email) and optional fixed daily WhatsApp digest time (digestTime unset — never send test/digest to the real phone during QA).
+3. Sort preference NOT persisted (only the deadline/course/overdue/priority choice lives in component state — deliberately, matching includeDone's non-persistence; persist to localStorage as erp:alaSort if the user wants it remembered — same hydration pattern as erp:subjectSort).
+4. Feature seeds not yet built: per-semester scoping (schema); weekly bunk-budget (timetable slots still empty); backup restore (needs user consent for a write endpoint); L/H/E columns folding (needs user consent); SMTP digest (needs credentials); dashboard-level "flagged ALAs" glance card (could reuse noteMap + qk.alaNotes on the dashboard tab).
+5. Server RSS ~1.42GB — if the reaper takes it, first recompiles will be slower (cache was wiped in Task 39 but has regrown since); warm /api/dashboard + /api/assignments with curl retries before browser work.
+6. Keeper cron 430680 must stay alive; worklog protocol: append-only, three-section handover; tsc at most ONCE per round.
