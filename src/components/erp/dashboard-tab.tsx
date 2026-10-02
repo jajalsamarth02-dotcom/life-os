@@ -25,6 +25,7 @@ import {
   Share2,
   WifiOff,
   XCircle,
+  Footprints,
 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -878,6 +879,19 @@ export function DashboardTab({
   const { overall, subjects, target, mode } = data;
   const sorted = sortSubjects(subjects, sort);
 
+  /* Stat-card compositions (derived from the SAME polled payload — no extra fetches):
+     subjects split by status for the mini composition bar, the worst below-target
+     subject for the warning card, and the reminders/ALA split for the bell card. */
+  const safeCount = subjects.filter((s) => s.status === "safe").length;
+  const warnCount = subjects.filter((s) => s.status === "warning").length;
+  const dangerCount = subjects.filter((s) => s.status === "danger").length;
+  const noneCount = subjects.filter((s) => s.status === "none").length;
+  const belowCount = warnCount + dangerCount;
+  const worst = subjects
+    .filter((s) => s.status !== "none" && s.percentage < s.targetPct)
+    .sort((a, b) => a.percentage - b.percentage)[0];
+  const compTotal = Math.max(subjects.length, 1);
+
   if (mode === "none") {
     return (
       <EmptyHero
@@ -1056,14 +1070,126 @@ export function DashboardTab({
           </CardContent>
         </Card>
 
-        <StatCard icon={Layers} label="Subjects" value={subjects.length} tone="emerald" />
+        <StatCard
+          icon={Layers}
+          label="Subjects"
+          value={subjects.length}
+          tone="emerald"
+          onClick={() => {
+            window.location.hash = "attendance";
+          }}
+          ariaLabel="Subjects — jump to the attendance tab"
+        >
+          {/* Composition bar: danger / warning / safe / no-classes-yet, sized by share */}
+          <div
+            className="flex h-1.5 w-full overflow-hidden rounded-full bg-muted"
+            role="img"
+            aria-label={`${safeCount} at target, ${belowCount} below target, ${noneCount} with no classes yet`}
+          >
+            {dangerCount > 0 && (
+              <span
+                className="h-full bg-red-500 transition-all duration-500"
+                style={{ width: `${(dangerCount / compTotal) * 100}%` }}
+              />
+            )}
+            {warnCount > 0 && (
+              <span
+                className="h-full bg-amber-500 transition-all duration-500"
+                style={{ width: `${(warnCount / compTotal) * 100}%` }}
+              />
+            )}
+            {safeCount > 0 && (
+              <span
+                className="h-full bg-emerald-500 transition-all duration-500"
+                style={{ width: `${(safeCount / compTotal) * 100}%` }}
+              />
+            )}
+            {noneCount > 0 && (
+              <span
+                className="h-full bg-slate-300 transition-all duration-500 dark:bg-slate-600"
+                style={{ width: `${(noneCount / compTotal) * 100}%` }}
+              />
+            )}
+          </div>
+          <p className="mt-1.5 text-[11px] leading-tight text-muted-foreground">
+            <span className="font-medium text-emerald-600 dark:text-emerald-400">{safeCount} at target</span>
+            <span aria-hidden="true"> · </span>
+            <span className={cn("font-medium", belowCount > 0 && "text-amber-600 dark:text-amber-400")}>
+              {belowCount} below
+            </span>
+            {noneCount > 0 && <span> · {noneCount} no classes yet</span>}
+          </p>
+        </StatCard>
         <StatCard
           icon={AlertTriangle}
           label="Below target"
           value={data.warningSubjects}
-          tone={data.warningSubjects > 0 ? "amber" : "default"}
-        />
-        <StatCard icon={BellRing} label="Active reminders" value={data.reminders.items.length} />
+          tone={data.warningSubjects > 0 ? "amber" : "emerald"}
+          onClick={
+            data.warningSubjects > 0
+              ? () => {
+                  window.location.hash = "attendance";
+                }
+              : undefined
+          }
+          ariaLabel={
+            data.warningSubjects > 0
+              ? "Below target — jump to the attendance tab"
+              : "All subjects at or above target"
+          }
+        >
+          {worst ? (
+            <div className="space-y-1">
+              <p
+                className="truncate text-[11px] font-medium text-foreground/80"
+                title={`${worst.name} — ${worst.percentage.toFixed(2)}% (target ${worst.targetPct}%)`}
+              >
+                worst: {worst.name}
+              </p>
+              <p className="flex items-center gap-1 text-[11px] leading-tight text-amber-600 dark:text-amber-400">
+                <Footprints className="size-3 shrink-0" aria-hidden="true" />
+                {worst.classesToTarget > 0 ? (
+                  <span>
+                    attend <b className="tabular-nums">{worst.classesToTarget}</b> to reach {worst.targetPct}%
+                  </span>
+                ) : (
+                  <span>recover by attending upcoming classes</span>
+                )}
+              </p>
+            </div>
+          ) : (
+            <p className="flex items-center gap-1 text-[11px] leading-tight text-emerald-600 dark:text-emerald-400">
+              <CheckCircle2 className="size-3 shrink-0" aria-hidden="true" />
+              {noneCount > 0
+                ? `every graded subject is at or above target (${noneCount} await first class)`
+                : "every subject is at or above its target"}
+            </p>
+          )}
+        </StatCard>
+        <StatCard
+          icon={BellRing}
+          label="Active reminders"
+          value={data.reminders.items.length}
+          onClick={() => {
+            window.location.hash = "reminders";
+          }}
+          ariaLabel="Active reminders — jump to the reminders tab"
+        >
+          <p className="flex flex-wrap items-center gap-x-1.5 gap-y-0.5 text-[11px] leading-tight text-muted-foreground">
+            <span className="font-medium text-foreground/80">{data.reminders.todayCount} today</span>
+            <span aria-hidden="true">·</span>
+            <span>{data.reminders.weekCount} this week</span>
+            <span aria-hidden="true">·</span>
+            <span
+              className={cn(
+                "font-medium",
+                data.reminders.alaPending > 0 ? "text-amber-600 dark:text-amber-400" : ""
+              )}
+            >
+              {data.reminders.alaPending} open ALAs
+            </span>
+          </p>
+        </StatCard>
       </motion.div>
 
       {/* Milestones — best ever, days at target, streak (honest from snapshot history) */}

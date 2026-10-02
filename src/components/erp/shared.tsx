@@ -446,14 +446,22 @@ export function StatCard({
   label,
   value,
   tone = "default",
+  children,
+  onClick,
+  ariaLabel,
 }: {
   icon: React.ElementType;
   label: string;
   value: number | string;
   tone?: "default" | "amber" | "emerald";
+  /** Optional footer detail (mini-bars, breakdown captions) below the number. */
+  children?: React.ReactNode;
+  /** When set, the whole card becomes an accessible button (deep link to a tab). */
+  onClick?: () => void;
+  ariaLabel?: string;
 }) {
-  return (
-    <div className="group rounded-xl border border-border/60 bg-card p-4 transition-all duration-200 hover:-translate-y-0.5 hover:border-primary/30 hover:shadow-md">
+  const inner = (
+    <>
       <div className="flex items-center justify-between gap-2">
         <div className="min-w-0">
           <p className="truncate text-xs font-medium text-muted-foreground">{label}</p>
@@ -474,8 +482,27 @@ export function StatCard({
           <Icon className="size-4.5" aria-hidden="true" />
         </span>
       </div>
-    </div>
+      {children != null && <div className="mt-3">{children}</div>}
+    </>
   );
+  const base =
+    "group rounded-xl border border-border/60 bg-card p-4 transition-all duration-200 hover:-translate-y-0.5 hover:border-primary/30 hover:shadow-md";
+  if (onClick) {
+    return (
+      <button
+        type="button"
+        onClick={onClick}
+        aria-label={ariaLabel ?? String(label)}
+        className={cn(
+          base,
+          "w-full cursor-pointer text-left focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary active:translate-y-0"
+        )}
+      >
+        {inner}
+      </button>
+    );
+  }
+  return <div className={base}>{inner}</div>;
 }
 
 export const STAT_ICONS = { layers: Layers, alert: AlertTriangle, bell: BellRing, userCheck: UserCheck };

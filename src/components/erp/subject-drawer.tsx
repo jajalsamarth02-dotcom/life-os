@@ -9,8 +9,10 @@ import {
   CalendarDays,
   CalendarPlus,
   CheckCircle2,
+  ChevronRight,
   Footprints,
   History,
+  Hourglass,
   Loader2,
   RotateCcw,
   Target,
@@ -41,10 +43,10 @@ import {
 import { Slider } from "@/components/ui/slider";
 import { cn } from "@/lib/utils";
 import { classesCanSkip, classesToReachTarget } from "@/lib/attendance";
-import { ApiError, createSlot, fetchDashboard, fetchHistory, fetchTimetable, putSubjectTarget, qk, type SlotConflict } from "./api";
+import { ApiError, createSlot, fetchAssignments, fetchDashboard, fetchHistory, fetchTimetable, putSubjectTarget, qk, type SlotConflict } from "./api";
 import { AnimatedNumber } from "./trend-chart";
 import { CustomTargetChip, fmtDT, MiniBar, statusColors, StatusChip, useNow, ago } from "./shared";
-import type { AttendanceStatus, HistoryResponse, SubjectView, TimetableSlotRow } from "./types";
+import type { AssignmentRow, AttendanceStatus, HistoryResponse, SubjectView, TimetableSlotRow } from "./types";
 
 const DAY_SHORT = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
 const TARGET_PRESETS = [60, 65, 70, 75, 80, 85];
@@ -53,6 +55,112 @@ function hhmm(min: number): string {
   const h = Math.floor(min / 60);
   const m = min % 60;
   return `${String(h).padStart(2, "0")}:${String(m).padStart(2, "0")}`;
+}
+
+/* ------------------------------------------------------------------ */
+/* Subject deadlines — open ALAs linked to THIS subject                 */
+/* ------------------------------------------------------------------ */
+
+function SubjectDeadlines({
+  items,
+  loading,
+  onJump,
+}: {
+  items: AssignmentRow[];
+  loading: boolean;
+  onJump: (title: string) => void;
+}) {
+  const now = useNow(30_000);
+  const overdue = items.filter((a) => new Date(a.dueAt).getTime() < now).length;
+  return (
+    <section
+      aria-label="Active deadlines for this subject"
+      className="rounded-xl border border-border/60 bg-card/50 p-3"
+    >
+      <div className="flex items-center justify-between gap-2">
+        <h3 className="flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+          <CalendarDays className="size-3.5" aria-hidden="true" />
+          Active deadlines
+        </h3>
+        <span className="flex items-center gap-1.5">
+          {overdue > 0 && (
+            <span className="rounded-full bg-red-500/10 px-2 py-0.5 text-[10px] font-semibold text-red-600 dark:text-red-400">
+              {overdue} overdue
+            </span>
+          )}
+          <span
+            className="rounded-full bg-muted px-2 py-0.5 text-[10px] font-semibold tabular-nums text-muted-foreground"
+            aria-label={`${items.length} open deadlines`}
+          >
+            {items.length}
+          </span>
+        </span>
+      </div>
+
+      {loading && items.length === 0 ? (
+        <p className="mt-2 flex items-center gap-1.5 text-xs text-muted-foreground">
+          <Loader2 className="size-3 animate-spin" aria-hidden="true" /> Loading deadlines…
+        </p>
+      ) : items.length === 0 ? (
+        <p className="mt-2 text-xs leading-relaxed text-muted-foreground">
+          No open ALA/assignment deadlines are linked to this subject right now. Deadlines appear here as soon as
+          the ERP queue records them.
+        </p>
+      ) : (
+        <ul className="mt-2 space-y-1.5">
+          {items.map((a) => {
+            const due = new Date(a.dueAt).getTime();
+            const isOverdue = due < now;
+            const soon = !isOverdue && due - now <= 48 * 3_600_000;
+            return (
+              <li key={a.id}>
+                <button
+                  type="button"
+                  onClick={() => onJump(a.title)}
+                  className={cn(
+                    "group/ala flex w-full items-start gap-2 rounded-lg border-l-2 bg-background/60 px-2.5 py-1.5 text-left transition-colors hover:bg-muted/60 focus-visible:outline-2 focus-visible:outline-primary",
+                    isOverdue ? "border-red-500/70" : soon ? "border-amber-500/70" : "border-border"
+                  )}
+                  title="Open in the Reminders tab"
+                >
+                  <span className="mt-0.5 shrink-0" aria-hidden="true">
+                    {isOverdue ? (
+                      <TriangleAlert className="size-3.5 text-red-500" />
+                    ) : soon ? (
+                      <Hourglass className="size-3.5 text-amber-500" />
+                    ) : (
+                      <CalendarDays className="size-3.5 text-muted-foreground" />
+                    )}
+                  </span>
+                  <span className="min-w-0 flex-1">
+                    <span className="block truncate text-xs font-medium text-foreground group-hover/ala:underline">
+                      {a.title}
+                    </span>
+                    <span
+                      className={cn(
+                        "mt-0.5 block text-[10px]",
+                        isOverdue
+                          ? "font-semibold text-red-600 dark:text-red-400"
+                          : soon
+                            ? "font-semibold text-amber-600 dark:text-amber-400"
+                            : "text-muted-foreground"
+                      )}
+                    >
+                      {isOverdue ? `Overdue · due ${fmtDT(a.dueAt)}` : soon ? `Due soon · ${fmtDT(a.dueAt)}` : `Due ${fmtDT(a.dueAt)}`}
+                    </span>
+                  </span>
+                  <ChevronRight
+                    className="mt-0.5 size-3.5 shrink-0 text-muted-foreground/60 transition-transform group-hover/ala:translate-x-0.5"
+                    aria-hidden="true"
+                  />
+                </button>
+              </li>
+            );
+          })}
+        </ul>
+      )}
+    </section>
+  );
 }
 
 /* ------------------------------------------------------------------ */
@@ -695,6 +803,31 @@ export function SubjectDrawer({
     enabled: open,
     refetchInterval: 120_000,
   });
+  /* The full ALA/assignment queue — deduped with the page-level badge poll via the
+     shared qk.assignments cache (zero extra traffic). Filtered per subject below
+     using the ERP course-code → name map, because ALA rows carry real university
+     course codes (BETCE15315) while tracked subjects use slug codes. */
+  const assignmentsQ = useQuery({
+    queryKey: qk.assignments,
+    queryFn: fetchAssignments,
+    enabled: open,
+    refetchInterval: 60_000,
+  });
+
+  const myDeadlines = useMemo(() => {
+    if (!subject) return [] as AssignmentRow[];
+    const res = assignmentsQ.data;
+    if (!res?.assignments) return [] as AssignmentRow[];
+    const name = subject.name.trim().toLowerCase();
+    const codes = new Set(
+      Object.entries(res.courseNames ?? {})
+        .filter(([, n]) => (n ?? "").trim().toLowerCase() === name)
+        .map(([c]) => c)
+    );
+    return res.assignments
+      .filter((a) => a.status === "ACTIVE" && a.subjectCode != null && codes.has(a.subjectCode))
+      .sort((a, b) => new Date(a.dueAt).getTime() - new Date(b.dueAt).getTime());
+  }, [assignmentsQ.data, subject]);
 
   if (!subject) return null;
   const c = statusColors(subject.status);
@@ -796,6 +929,18 @@ export function SubjectDrawer({
               </p>
             </div>
           </div>
+
+          <SubjectDeadlines
+            items={myDeadlines}
+            loading={assignmentsQ.isPending && open}
+            onJump={(title) => {
+              onOpenChange(false);
+              window.location.hash = "reminders";
+              window.setTimeout(() => {
+                window.dispatchEvent(new CustomEvent("erp:focus-ala", { detail: title }));
+              }, 150);
+            }}
+          />
 
           <WhatIfPlanner key={subject.id} s={subject} target={subject.targetPct} />
 
