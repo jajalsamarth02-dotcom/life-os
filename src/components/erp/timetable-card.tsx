@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { motion, AnimatePresence } from "framer-motion";
 import {
@@ -85,24 +85,37 @@ function SlotChip({
   nowDay,
   nowMin,
   compact = false,
+  state = "attending",
 }: {
   slot: TimetableSlotRow;
   color: string;
   nowDay: number;
   nowMin: number;
   compact?: boolean;
+  /** Pick awareness in the full-week grid: alternatives the student didn't
+   *  pick and same-batch duplicates are dimmed (counted once either way). */
+  state?: "attending" | "alternative" | "duplicate";
 }) {
   const st = slotStatus(slot, nowDay, nowMin);
   const ongoing = st.key === "ongoing";
   return (
     <div
+      title={
+        state === "alternative"
+          ? "You picked a different class for this window — not counted in your plan"
+          : state === "duplicate"
+            ? "Another batch of the same class — counted once"
+            : undefined
+      }
       className={cn(
         "group rounded-lg border px-2 py-1.5 text-left transition-colors",
         ongoing
           ? "border-emerald-500/50 bg-emerald-500/10"
           : st.key === "done"
             ? "border-border/40 bg-muted/30 opacity-55"
-            : "border-border/60 bg-card hover:bg-muted/40"
+            : "border-border/60 bg-card hover:bg-muted/40",
+        state === "alternative" && "border-dashed opacity-50",
+        state === "duplicate" && "opacity-45"
       )}
     >
       <div className="flex items-center gap-1.5">
@@ -138,12 +151,20 @@ function SlotChip({
 function ParallelClassesSection({
   slots,
   picks,
+  highlight = false,
 }: {
   slots: TimetableSlotRow[];
   picks: Record<string, string>;
+  /** True right after a deep-link open — scrolls into view + rings the section. */
+  highlight?: boolean;
 }) {
   const qc = useQueryClient();
   const cells = useMemo(() => parallelCells(slots), [slots]);
+  const sectionRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (highlight) sectionRef.current?.scrollIntoView({ block: "nearest", behavior: "smooth" });
+  }, [highlight]);
 
   const setPick = useMutation({
     mutationFn: (v: { cellKey: string; subjectCode: string | null }) => setBatchPick(v.cellKey, v.subjectCode),
@@ -161,12 +182,27 @@ function ParallelClassesSection({
 
   if (cells.length === 0) return null;
 
+  const resolvedCount = cells.filter((c) => picks[c.key]).length;
+  const allResolved = resolvedCount === cells.length;
+
   return (
-    <div className="rounded-xl border border-border/60 p-3" data-testid="parallel-classes">
+    <div
+      ref={sectionRef}
+      data-testid="parallel-classes"
+      className={cn(
+        "rounded-xl border p-3 transition-shadow",
+        highlight ? "border-sky-500/50 ring-2 ring-sky-500/40" : "border-border/60"
+      )}
+    >
       <p className="mb-1 flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
         <GitMerge className="size-3.5" aria-hidden="true" /> Parallel classes
-        <span className="rounded-full bg-muted px-1.5 py-0.5 text-[10px] font-semibold normal-case tabular-nums">
-          {cells.length} {cells.length === 1 ? "window" : "windows"}
+        <span
+          className={cn(
+            "rounded-full px-1.5 py-0.5 text-[10px] font-semibold normal-case tabular-nums",
+            allResolved ? "bg-emerald-500/15 text-emerald-700 dark:text-emerald-400" : "bg-muted"
+          )}
+        >
+          {resolvedCount}/{cells.length} resolved
         </span>
       </p>
       <p className="mb-2.5 text-[11px] leading-snug text-muted-foreground">
@@ -241,12 +277,28 @@ function ParallelClassesSection({
 function ManageTimetableDialog({
   subjects,
   mode = "demo",
+  externalOpen = false,
+  onExternalClose,
+  highlightParallel = false,
 }: {
   subjects: SubjectView[];
   mode?: AppMode;
+  /** Controlled open signal (the week plan's "Resolve now" deep-link). */
+  externalOpen?: boolean;
+  /** Fired when the dialog closes so the signal source can reset. */
+  onExternalClose?: () => void;
+  /** Rings + scrolls to the Parallel classes section after a deep-link open. */
+  highlightParallel?: boolean;
 }) {
   const qc = useQueryClient();
-  const [open, setOpen] = useState(false);
+  const [openInternal, setOpenInternal] = useState(false);
+  // The dialog is open when EITHER the trigger was used OR a deep-link
+  // signal is held; closing clears both so the signal never ghosts.
+  const open = openInternal || externalOpen;
+  const setOpen = (v: boolean) => {
+    setOpenInternal(v);
+    if (!v) onExternalClose?.();
+  };
   const [day, setDay] = useState("1");
   const [start, setStart] = useState("09:00");
   const [end, setEnd] = useState("09:50");
@@ -427,7 +479,7 @@ function ManageTimetableDialog({
         </div>
 
         <div className="space-y-2.5">
-          <ParallelClassesSection slots={slots} picks={picks} />
+          <ParallelClassesSection slots={slots} picks={picks} highlight={highlightParallel} />
           {WEEK_ORDER.map((d) => {
             const daySlots = slots.filter((s) => s.dayOfWeek === d);
             if (daySlots.length === 0) return null;
@@ -513,9 +565,16 @@ function ManageTimetableDialog({
 export function TimetableCard({
   subjects,
   mode = "demo",
+  manageOpen = false,
+  onManageClose,
+  highlightParallel = false,
 }: {
   subjects: SubjectView[];
   mode?: AppMode;
+  /** Controlled open signal forwarded to the Manage dialog (deep-link). */
+  manageOpen?: boolean;
+  onManageClose?: () => void;
+  highlightParallel?: boolean;
 }) {
   const now = useNow(30_000);
   const nowDay = new Date(now).getDay();
@@ -540,6 +599,10 @@ export function TimetableCard({
     [batch, nowDay]
   );
   const hiddenToday = batch.excluded.filter((s) => s.dayOfWeek === nowDay).length;
+  // Full-week grid pick awareness: attending rows render normally; rows the
+  // student didn't pick (excluded) and same-batch duplicates are dimmed.
+  const attendingIds = useMemo(() => new Set(batch.attending.map((s) => s.id)), [batch]);
+  const excludedIds = useMemo(() => new Set(batch.excluded.map((s) => s.id)), [batch]);
   const ongoing = todaySlots.find((s) => nowMin >= s.startMin && nowMin < s.endMin);
   const next = todaySlots.find((s) => s.startMin > nowMin);
 
@@ -556,7 +619,13 @@ export function TimetableCard({
             {todaySlots.length === 0 ? "Nothing planned" : `${todaySlots.length} class${todaySlots.length === 1 ? "" : "es"} today`}
           </p>
         </div>
-        <ManageTimetableDialog subjects={subjects} mode={mode} />
+        <ManageTimetableDialog
+          subjects={subjects}
+          mode={mode}
+          externalOpen={manageOpen}
+          onExternalClose={onManageClose}
+          highlightParallel={highlightParallel}
+        />
         <Button
           variant="ghost"
           size="icon"
@@ -722,6 +791,13 @@ export function TimetableCard({
                                   nowDay={nowDay}
                                   nowMin={nowMin}
                                   compact={d !== nowDay}
+                                  state={
+                                    attendingIds.has(s.id)
+                                      ? "attending"
+                                      : excludedIds.has(s.id)
+                                        ? "alternative"
+                                        : "duplicate"
+                                  }
                                 />
                               ))
                             )}

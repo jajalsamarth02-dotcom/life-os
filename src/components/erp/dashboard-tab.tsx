@@ -1080,6 +1080,9 @@ export function DashboardTab({
   };
   /* Store the CODE (not the object) and derive the view from fresh query data,
      so the drawer reflects updated targets/percentages after refetches. */
+  // One-shot signal: the week plan's "Resolve now" opens the timetable's
+  // Manage dialog directly on the Parallel classes picker (and highlights it).
+  const [parallelSignal, setParallelSignal] = useState(false);
   const [selectedCode, setSelectedCode] = useState<string | null>(null);
   const [digestOpen, setDigestOpen] = useState(false);
   const [showAllChanges, setShowAllChanges] = useState(false);
@@ -1631,7 +1634,11 @@ export function DashboardTab({
       {/* Row 1.6 — the forward-looking twin: real routine slots × live attendance,
           "what's left this week and what can be missed". Shares the timetable
           query cache with the timetable card. */}
-      <WeekPlanCard subjects={data.subjects} onOpenSubject={setSelectedCode} />
+      <WeekPlanCard
+        subjects={data.subjects}
+        onOpenSubject={setSelectedCode}
+        onResolvePicks={() => setParallelSignal(true)}
+      />
 
       {/* Row 2 — subject list */}
       <Card className="rounded-xl border-border/60 transition-shadow hover:shadow-md">
@@ -1703,7 +1710,15 @@ export function DashboardTab({
       </Card>
 
       {/* Row 2.5 — today's schedule / weekly timetable */}
-      {subjects.length > 0 && <TimetableCard subjects={subjects} mode={data.mode} />}
+      {subjects.length > 0 && (
+        <TimetableCard
+          subjects={subjects}
+          mode={data.mode}
+          manageOpen={parallelSignal}
+          highlightParallel={parallelSignal}
+          onManageClose={() => setParallelSignal(false)}
+        />
+      )}
 
       {/* Row 3 — reminders preview + ERP status */}
       <div className="grid gap-4 lg:grid-cols-2">

@@ -23,6 +23,7 @@ import {
   X,
   Zap,
 } from "lucide-react";
+import { applyBatchPicks } from "@/lib/batch-picks";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -578,7 +579,18 @@ function MiniAreaChart({ points }: { points: number[] }) {
 /* Weekly classes for this subject + quick add                         */
 /* ------------------------------------------------------------------ */
 
-function SubjectTimetable({ slots, subjectCode, subjectName }: { slots: TimetableSlotRow[]; subjectCode: string; subjectName: string }) {
+function SubjectTimetable({
+  slots,
+  subjectCode,
+  subjectName,
+  dimmedIds,
+}: {
+  slots: TimetableSlotRow[];
+  subjectCode: string;
+  subjectName: string;
+  /** Row ids the student's parallel picks exclude — rendered dimmed + dashed. */
+  dimmedIds?: Set<string>;
+}) {
   const now = useNow();
   const today = new Date(now).getDay();
   const qc = useQueryClient();
@@ -773,14 +785,27 @@ function SubjectTimetable({ slots, subjectCode, subjectName }: { slots: Timetabl
                 {DAY_SHORT[d]}
               </span>
               <div className="flex flex-wrap gap-1.5">
-                {byDay.get(d)!.map((slot) => (
-                  <span
-                    key={slot.id}
-                    className="rounded-md border border-border/60 bg-background px-2 py-0.5 text-[11px] tabular-nums text-foreground/80"
-                  >
-                    {hhmm(slot.startMin)}–{hhmm(slot.endMin)}
-                  </span>
-                ))}
+                {byDay.get(d)!.map((slot) => {
+                  const isAlt = dimmedIds?.has(slot.id) ?? false;
+                  return (
+                    <span
+                      key={slot.id}
+                      className={cn(
+                        "rounded-md border px-2 py-0.5 text-[11px] tabular-nums",
+                        isAlt
+                          ? "border-dashed border-border/50 bg-muted/40 text-muted-foreground/70"
+                          : "border-border/60 bg-background text-foreground/80"
+                      )}
+                      title={
+                        isAlt
+                          ? "Alternative batch — you picked a different class for this window"
+                          : undefined
+                      }
+                    >
+                      {hhmm(slot.startMin)}–{hhmm(slot.endMin)}
+                    </span>
+                  );
+                })}
               </div>
             </li>
           ))}
@@ -844,6 +869,16 @@ export function SubjectDrawer({
       .filter((a) => a.status === "ACTIVE" && a.subjectCode != null && codes.has(a.subjectCode))
       .sort((a, b) => new Date(a.dueAt).getTime() - new Date(b.dueAt).getTime());
   }, [assignmentsQ.data, subject]);
+
+  // Parallel-pick awareness: rows this subject lost to a resolved parallel
+  // window render dimmed + dashed in the timetable panel too (same math as
+  // the week plan and the timetable card — one source of truth).
+  // NOTE: stays ABOVE the `if (!subject) return null` early return — hooks
+  // must run unconditionally (a conditional useMemo crashed the drawer).
+  const altSlotIds = useMemo(
+    () => new Set(applyBatchPicks(timetable.data?.slots ?? [], timetable.data?.picks ?? {}).excluded.map((s) => s.id)),
+    [timetable.data]
+  );
 
   if (!subject) return null;
   const c = statusColors(subject.status);
@@ -985,7 +1020,12 @@ export function SubjectDrawer({
 
           <SubjectChanges code={subject.code} />
 
-          <SubjectTimetable slots={mySlots} subjectCode={subject.code} subjectName={subject.name} />
+          <SubjectTimetable
+            slots={mySlots}
+            subjectCode={subject.code}
+            subjectName={subject.name}
+            dimmedIds={altSlotIds}
+          />
 
           <Separator />
           <p className="pb-2 text-center text-[11px] leading-relaxed text-muted-foreground">

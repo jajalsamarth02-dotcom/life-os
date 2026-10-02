@@ -77,11 +77,15 @@ interface WeekRow {
 export function WeekPlanCard({
   subjects,
   onOpenSubject,
+  onResolvePicks,
   className,
 }: {
   subjects: SubjectView[];
   /** Opens the subject drawer (same drawer the skip budget uses). */
   onOpenSubject?: (code: string) => void;
+  /** Deep-link: opens the timetable's Manage dialog on the Parallel classes
+   *  picker so the amber disclosure below is resolvable in one click. */
+  onResolvePicks?: () => void;
   className?: string;
 }) {
   const slotsQuery = useQuery({ queryKey: qk.timetable, queryFn: fetchTimetable });
@@ -363,8 +367,20 @@ export function WeekPlanCard({
                     {plan.unresolvedCount} parallel time {plan.unresolvedCount === 1 ? "window" : "windows"}
                   </span>{" "}
                   {plan.unresolvedCount === 1 ? "lists" : "list"} multiple classes (lab groups / batches) — the plan
-                  counts every option until you pick yours in{" "}
-                  <span className="font-semibold">Manage → Parallel classes</span>.
+                  counts every option until you pick yours{" "}
+                  {onResolvePicks ? (
+                    <button
+                      type="button"
+                      onClick={onResolvePicks}
+                      className="inline-flex items-center gap-0.5 rounded-md px-1 font-semibold text-emerald-700 underline decoration-emerald-500/50 underline-offset-2 transition-colors hover:bg-emerald-500/10 hover:decoration-emerald-500 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring dark:text-emerald-400"
+                    >
+                      Resolve now
+                      <span aria-hidden="true">→</span>
+                    </button>
+                  ) : (
+                    <span className="font-semibold">in Manage → Parallel classes</span>
+                  )}
+                  .
                 </p>
               </div>
             )}
