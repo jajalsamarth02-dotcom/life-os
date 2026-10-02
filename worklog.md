@@ -1225,3 +1225,25 @@ Unresolved issues / risks & next-phase priorities:
 5. User-facing guidance stands: if preview shows "Application error", the server was reaped — wait ~15-30s, hard-refresh; auto-recovery ≤3 min.
 6. Backlog unchanged: L/H/E columns folding into totals, SMTP email digest, TZ anchor cosmetic, per-semester slot scoping (needs schema + controlled restart).
 7. Keeper cron 430680 must stay alive; worklog protocol: append-only, three-section handover.
+
+---
+Task ID: 18
+Agent: Z.ai Code (main orchestrator)
+Task: Round task 22:00+08 — status assessment, cold-load QA, one new feature (Recovery pace & ETA) + styling detail pass. All client-side, no schema/API/server changes.
+
+Current project status / assessment:
+- Server healthy at round start AND throughout: root+API 200, API /api/dashboard 38ms. next-server RSS 1460MB (still the PRE-cap instance — the 900MB NODE_OPTIONS cap from Task 17 activates on next natural respawn; kill line observed 1.24–1.64GB, so watch it). Memory available ~2.0GB before QA, 1974MB after — no degradation.
+- No new OOM events in dmesg (only the known 21:07-era kill). The Task 17 diagnosis stands: (a) cgroup OOM, (b) supervisor SIGTERM at RSS pressure line, (c) agent-session spawn reaping. No watchdog attempts (impossible per Task 17 experiment).
+- Timetable slots table is EMPTY ({slots:[]}) — the student never configured slots, so any timetable-dependent feature would be hollow. Chose a zero-config feature instead.
+
+Completed modifications / verified:
+1. NEW FEATURE — src/components/erp/recovery-plan.tsx (new file, client-side only): "Recovery pace" card on the Attendance tab (between summary strip and trend chart). Derives the student's real attendance pace from /api/history snapshots: consecutive-snapshot deltas of (present,total) over the last 14 days → attended/held counts + classes-per-week. For at-risk students: data-driven ETA — "attend every class → back at target% around <date>" (= classesToTarget ÷ pacePerWeek weeks), status-colored box. For safe students: cushion view (canSkip ÷ pace = weeks of bunk buffer). Per-subject recovery rows (worst 5): classes-to-go + per-subject pace ETA (or honest "no pace yet"). "History CSV" button exports the full snapshot history via existing downloadCsv. Honest empty states for <2 snapshots / zero classes in window. No config needed — fills in automatically from sync data.
+2. Styling pass (attendance-tab.tsx): WhatIfPlanner segmented control now has a spring-animated thumb (framer-motion layoutId, unique per subject) and the planner box tints to the projected status color while active (n>0). SubjectCards get hover lift (whileHover y:-2 with its OWN 0.15s transition so the entrance delay doesn't lag hover) + soft shadow. Overall summary strip gets a pinging red danger dot next to the status chip when at risk.
+3. Verification: tsc --noEmit clean for src/ (remaining findings are pre-existing, outside the app: examples/, skills/, scripts/, and the known next.config.ts turbopack key). agent-browser cold-load: Dashboard + Attendance tabs, ZERO console errors/warnings; card renders with REAL data and the math is exact — 2 attended of 2 held in 14d = 1.0/week; overall 2/3=66.67% → 1 class to reach 75% (3/4); ETA Oct 9 (1 week). Screenshot /tmp/qa-recovery2.png visually verified (integers 2/2/1.0 after a decimals={0} fix — AnimatedNumber defaulted to 2 decimals on count tiles). Browser CLOSED immediately after; server 200 after.
+
+Unresolved issues / risks & next-phase priorities:
+1. next-server RSS 1460MB on the pre-cap instance — if it dies, the respawn carries the 900MB heap cap (already in package.json dev script). Do NOT manual-restart from agent sessions (spawn reaping).
+2. .next cache regrowth / next.config.ts unrecognized key — unchanged guidance from Task 17 (rm -rf .next + quiet-window edit with controlled restart).
+3. User decisions still pending: 2nd free notification channel (Telegram ⭐ / ntfy / Discord / email) and optional fixed daily WhatsApp digest time (WhatsApp enabled, digestTime unset — never send test/digest to the real phone during QA).
+4. Feature candidates if the student fills the timetable later: weekly bunk-budget per day (slots × canSkip). Backlog unchanged: L/H/E columns folding, SMTP digest, TZ cosmetic, per-semester scoping.
+5. Keeper cron 430680 must stay alive; worklog protocol: append-only, three-section handover.

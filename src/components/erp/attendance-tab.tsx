@@ -12,6 +12,7 @@ import { cn } from "@/lib/utils";
 import { attendanceStatus } from "@/lib/attendance";
 import { fetchAttendance, fetchHistory, qk } from "./api";
 import { HistoryHeatmap } from "./history-heatmap";
+import { RecoveryPlan } from "./recovery-plan";
 import { SubjectDrawer } from "./subject-drawer";
 import {
   CustomTargetChip,
@@ -48,9 +49,15 @@ function WhatIfPlanner({ s }: { s: SubjectView }) {
   const projectedStatus = attendanceStatus(projected, s.targetPct, futureTotal || 1);
   const c = statusColors(projectedStatus);
   const delta = projected - s.percentage;
+  const active = n > 0;
 
   return (
-    <div className="mt-3 rounded-lg border border-border/60 bg-muted/60 p-3">
+    <div
+      className={cn(
+        "mt-3 rounded-lg border p-3 transition-colors duration-300",
+        active ? cn(c.border, c.bg) : "border-border/60 bg-muted/60"
+      )}
+    >
       <div className="flex items-center justify-between gap-2">
         <span className="flex items-center gap-1.5 text-xs font-medium text-muted-foreground">
           <Zap className="size-3.5 text-amber-500" aria-hidden="true" />
@@ -71,15 +78,25 @@ function WhatIfPlanner({ s }: { s: SubjectView }) {
               }}
               aria-pressed={mode === m}
               className={cn(
-                "rounded-full px-2.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+                "relative rounded-full px-2.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide transition-colors focus-visible:z-10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
                 mode === m
                   ? m === "attend"
-                    ? "bg-emerald-500/15 text-emerald-700 dark:text-emerald-400"
-                    : "bg-red-500/15 text-red-700 dark:text-red-400"
+                    ? "text-emerald-700 dark:text-emerald-400"
+                    : "text-red-700 dark:text-red-400"
                   : "text-muted-foreground hover:text-foreground"
               )}
             >
-              {m === "attend" ? "Attend" : "Skip"}
+              {mode === m && (
+                <motion.span
+                  layoutId={`whatif-thumb-${s.id}`}
+                  className={cn(
+                    "absolute inset-0 rounded-full",
+                    m === "attend" ? "bg-emerald-500/15" : "bg-red-500/15"
+                  )}
+                  transition={{ type: "spring", stiffness: 500, damping: 40 }}
+                />
+              )}
+              <span className="relative z-10">{m === "attend" ? "Attend" : "Skip"}</span>
             </button>
           ))}
         </div>
@@ -157,9 +174,10 @@ function SubjectCard({
     <motion.div
       initial={{ opacity: 0, y: 10 }}
       animate={{ opacity: 1, y: 0 }}
+      whileHover={{ y: -2, transition: { duration: 0.15 } }}
       transition={{ duration: 0.3, delay: Math.min(index * 0.05, 0.3) }}
     >
-      <Card className="flex h-full flex-col rounded-xl border-border/60 transition-colors hover:border-primary/30">
+      <Card className="flex h-full flex-col rounded-xl border-border/60 transition-all duration-200 hover:border-primary/30 hover:shadow-md hover:shadow-black/5 dark:hover:shadow-black/20">
         <CardHeader className="pb-2">
           {/* min-w-0: this row is a grid child of CardHeader — without it a long
               unwrapped title pushes the sparkline column past the card edge. */}
@@ -368,6 +386,12 @@ export function AttendanceTab({ onOpenSettings }: { onOpenSettings: () => void }
                 </Badge>
               )}
               <Badge variant="outline" className="tabular-nums">Target {target}%</Badge>
+              {overall.status === "danger" && (
+                <span className="relative flex size-2" aria-hidden="true">
+                  <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-red-500 opacity-60" />
+                  <span className="relative inline-flex size-2 rounded-full bg-red-500" />
+                </span>
+              )}
               <StatusChip status={overall.status} target={target} />
               {customCount > 0 && (
                 <Badge
@@ -404,6 +428,9 @@ export function AttendanceTab({ onOpenSettings }: { onOpenSettings: () => void }
           </div>
         </CardContent>
       </Card>
+
+      {/* Recovery pace & ETA, measured from sync snapshots */}
+      <RecoveryPlan overall={overall} subjects={subjects} target={target} history={history.data} />
 
       {/* Trend chart (from sync snapshots) */}
       <TrendSection
