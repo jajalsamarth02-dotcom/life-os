@@ -1314,3 +1314,28 @@ Unresolved issues / risks & next-phase priorities:
 3. User decisions still pending: 2nd free notification channel (Telegram ⭐ / ntfy / Discord / email) and optional fixed daily WhatsApp digest time (never send test/digest to the real phone during QA).
 4. Backlog unchanged: L/H/E columns folding (server-side, needs user consent), SMTP digest (needs credentials), TZ cosmetic, per-semester scoping (schema), weekly bunk-budget (needs timetable slots — still empty).
 5. Keeper cron 430680 must stay alive; worklog protocol: append-only, three-section handover.
+
+---
+Task ID: 22
+Agent: Z.ai Code (main orchestrator)
+Task: Round task 23:00+08 — status assessment, cold-load QA, App-Router resilience pack (error/global-error/not-found/loading) + PWA app-badge feature. All additive files; only page.tsx modified among existing files.
+
+Current project status / assessment:
+- Server healthy all round: 200s throughout; next-server RSS ~1.69GB (still the PRE-cap instance — 900MB cap lands on next natural respawn; do NOT manual-restart, spawn reaping per Task 17). Memory ~1.88GB available after QA. No new OOM events.
+- Cold-load QA at round start: 0 console errors. Gap analysis vs previous rounds: reminders already has search/filter/sort, heatmap + subject drawer exist, share/offline/streak/deep-links done (R18-21). Genuine gaps found: (a) NO app-router error boundaries (error.tsx / global-error.tsx / not-found.tsx / loading.tsx all absent — a runtime crash showed the raw framework screen), (b) no PWA app-badge usage anywhere.
+
+Completed modifications / verified:
+1. NEW — src/app/error.tsx (route error boundary): app-styled recovery card (ambient gradient, red icon ring, digest chip) with Try again (reset) + Reload page actions and honest ops hint ("server may be restarting — wait ~30s"). Logs the real stack to console.
+2. NEW — src/app/global-error.tsx (root boundary): self-contained <html>/<body>, reads persisted theme from localStorage/document class (providers not mounted), inline-style neutral layout, reload button. Only fires if the root layout itself crashes.
+3. NEW — src/app/not-found.tsx: styled 404 (emerald compass ring, big mono 404, "Back to Dashboard" Link). Verified FUNCTIONALLY: /definitely-not-a-page renders it (light + dark screenshots /tmp/qa-r22-404*.png), CDP click on "Back to Dashboard" returned to / with Dashboard tab selected.
+4. NEW — src/app/loading.tsx: SSR route skeleton mirroring dashboard geometry (header, tab strip, ring card, stat tiles) using Skeleton + erp-shimmer (reduced-motion fallback already in globals.css). Could not be caught visually on fast local SSR — tsc-verified, standard contract.
+5. NEW FEATURE — src/components/erp/use-app-badge.ts + page.tsx wiring: navigator.setAppBadge/clearAppBadge shows the overdue ERP-ALA count on the installed app icon (Android/desktop; iOS 17+ standalone). Count = ACTIVE + past-due rows from /api/assignments (qk.assignments, 60s poll) — SAME rule as the Reminders overdue banner; cross-checked via python: 20 overdue (matches worklog). Learned mid-round: dashboard's reminders.items holds only MANUAL reminders (0 overdue) — first wiring used it, caught by API cross-check, fixed to the assignments query. Feature-detected; silent no-op in headless (verified 0 console errors); failures swallowed (cosmetic).
+6. Verification: tsc --noEmit → zero errors under src/. Root dashboard screenshot /tmp/qa-r22-root.png visually verified (LIVE badge, ring 66.67%, NEXT UP, stat cards, bell with in-app badge 1). /api/assignments confirmed fetched on root. Browser CLOSED immediately after; server 200 after.
+
+Unresolved issues / risks & next-phase priorities:
+1. error.tsx / global-error.tsx / loading.tsx could NOT be triggered in live QA without injecting faults into the running app (refused — live mode); they are tsc-verified and follow the standard App Router contract. If a real crash ever surfaces, observe the new recovery UI instead of the raw framework screen.
+2. Pre-cap instance RSS ~1.69GB — capped respawn ≤3 min if killed; leave alone.
+3. next.config.ts unrecognized turbopack key + .next cache regrowth — Task 17 guidance unchanged.
+4. User decisions still pending: 2nd free notification channel (Telegram ⭐ / ntfy / Discord / email) and optional fixed daily WhatsApp digest time (digestTime unset — never send test/digest to the real phone during QA).
+5. Backlog unchanged: L/H/E columns folding (server-side, needs user consent), SMTP digest (needs credentials), TZ cosmetic, per-semester scoping (schema), weekly bunk-budget (needs timetable slots — still empty).
+6. Keeper cron 430680 must stay alive; worklog protocol: append-only, three-section handover.

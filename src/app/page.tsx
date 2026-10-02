@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { motion } from "framer-motion";
 import { useTheme } from "next-themes";
@@ -37,7 +37,8 @@ import { SettingsTab } from "@/components/erp/settings-tab";
 import { CommandPalette } from "@/components/erp/command-palette";
 import { useDueNotifications } from "@/components/erp/use-due-notifications";
 import { useOffline } from "@/components/erp/use-offline";
-import { fetchDashboard, postSync, qk } from "@/components/erp/api";
+import { useAppBadge } from "@/components/erp/use-app-badge";
+import { fetchAssignments, fetchDashboard, postSync, qk } from "@/components/erp/api";
 import { fmtDT } from "@/components/erp/shared";
 
 type TabKey = "dashboard" | "attendance" | "reminders" | "settings";
@@ -200,6 +201,22 @@ export default function Home() {
 
   /* Offline awareness: views keep rendering from the last synced cache. */
   const online = useOffline();
+
+  /* PWA badge: overdue (ACTIVE, past-due) ERP ALA count on the installed app
+     icon. Same rows/rule as the Reminders tab's overdue banner; no-ops without
+     setAppBadge. Manual reminders aren't counted — ALAs are the actionable queue. */
+  const { data: alaData } = useQuery({
+    queryKey: qk.assignments,
+    queryFn: fetchAssignments,
+    refetchInterval: 60_000,
+  });
+  const overdueAlaCount = useMemo(() => {
+    const now = Date.now();
+    return (alaData?.assignments ?? []).filter(
+      (a) => a.status === "ACTIVE" && new Date(a.dueAt).getTime() < now
+    ).length;
+  }, [alaData?.assignments]);
+  useAppBadge(overdueAlaCount);
 
   const sync = data?.erp?.sync;
   const mode = data?.mode;
