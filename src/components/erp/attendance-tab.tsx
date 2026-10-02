@@ -8,7 +8,7 @@ import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Slider } from "@/components/ui/slider";
 import { cn } from "@/lib/utils";
-import { fetchAttendance, qk } from "./api";
+import { fetchAttendance, fetchHistory, qk } from "./api";
 import {
   EmptyHero,
   fmtPct2,
@@ -17,7 +17,10 @@ import {
   statusColors,
   StatusChip,
 } from "./shared";
-import type { SubjectView } from "./types";
+import { AnimatedNumber, ExportAttendanceButton, Sparkline, TrendSection } from "./trend-chart";
+import type { HistoryResponse, SubjectView } from "./types";
+
+const SUBJECT_LINE_COLORS = ["#10b981", "#f59e0b", "#84cc16", "#f97316", "#14b8a6", "#a8a29e", "#ef4444"];
 
 /* What-if: attending the next N classes projects (present+N)/(total+N). */
 function WhatIfSlider({ s }: { s: SubjectView }) {
@@ -53,9 +56,21 @@ function WhatIfSlider({ s }: { s: SubjectView }) {
   );
 }
 
-function SubjectCard({ s, target, index }: { s: SubjectView; target: number; index: number }) {
+function SubjectCard({
+  s,
+  target,
+  index,
+  history,
+}: {
+  s: SubjectView;
+  target: number;
+  index: number;
+  history: HistoryResponse | undefined;
+}) {
   const c = statusColors(s.status);
   const safe = s.status === "safe";
+  const spark = history?.subjects[s.code] ?? [];
+  const color = SUBJECT_LINE_COLORS[index % SUBJECT_LINE_COLORS.length];
   return (
     <motion.div
       initial={{ opacity: 0, y: 10 }}
@@ -69,9 +84,21 @@ function SubjectCard({ s, target, index }: { s: SubjectView; target: number; ind
               <CardTitle className="truncate text-base tracking-tight">{s.name}</CardTitle>
               <CardDescription className="mt-0.5 font-mono text-xs">{s.code}</CardDescription>
             </div>
-            <span className={cn("shrink-0 rounded-md px-2 py-1 text-sm font-bold tabular-nums", c.bg, c.text)}>
-              {fmtPct2(s.percentage)}
-            </span>
+            <div className="flex w-24 shrink-0 flex-col items-end gap-1">
+              <span className={cn("shrink-0 rounded-md px-2 py-1 text-sm font-bold tabular-nums", c.bg, c.text)}>
+                <AnimatedNumber value={s.percentage} suffix="%" />
+              </span>
+              {spark.length >= 2 && (
+                <Sparkline
+                  points={spark.map((p) => p.percentage)}
+                  stroke={color}
+                  width={84}
+                  height={20}
+                  className="max-w-full opacity-80"
+                  ariaLabel={`${s.name} attendance trend`}
+                />
+              )}
+            </div>
           </div>
         </CardHeader>
         <CardContent className="flex flex-1 flex-col gap-3">
@@ -134,6 +161,11 @@ export function AttendanceTab({ onOpenSettings }: { onOpenSettings: () => void }
     queryKey: qk.attendance,
     queryFn: fetchAttendance,
     refetchInterval: 20_000,
+  });
+  const history = useQuery({
+    queryKey: qk.history,
+    queryFn: fetchHistory,
+    refetchInterval: 60_000,
   });
 
   if (isPending) {
@@ -203,13 +235,19 @@ export function AttendanceTab({ onOpenSettings }: { onOpenSettings: () => void }
               </p>
             )}
           </div>
+          <div className="ms-auto">
+            <ExportAttendanceButton subjects={subjects} target={target} />
+          </div>
         </CardContent>
       </Card>
+
+      {/* Trend chart (from sync snapshots) */}
+      <TrendSection history={history.data} subjects={subjects} target={target} />
 
       {/* Subject grid */}
       <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
         {subjects.map((s, i) => (
-          <SubjectCard key={s.id} s={s} target={target} index={i} />
+          <SubjectCard key={s.id} s={s} target={target} index={i} history={history.data} />
         ))}
       </div>
     </div>

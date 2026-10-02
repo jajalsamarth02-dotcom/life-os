@@ -45,3 +45,41 @@ Verification (agent-browser, zero console errors):
 Stage Summary:
 - App is feature-complete per spec sections 1–15: auto sync + change detection + recalc + warnings + dedup reminders (externalId) + personal reminders + manual Sync Now + honest failure handling + empty states + read-only data principle.
 - Known limitation (by design): live scrape parser is generic; real scraping success depends on actual dashboard HTML (needs student credentials once to fine-tune). Demo mode keeps the app fully functional meanwhile.
+
+---
+Task ID: R2 (webDevReview round 2)
+Agent: Z.ai Code (autonomous review & feature round)
+Task: QA assessment + new features (attendance trend history) + styling polish
+
+Work Log / Current status assessment:
+- QA pass: app stable, 0 console errors, background scheduler autonomously evolving demo data ("Last ERP sync" ticking). No user-visible bugs found. One transient React hooks-order error appeared only from mid-edit Fast Refresh; verified gone in fresh sessions (0 errors across refetch cycles).
+
+Completed modifications:
+1. BACKEND — Attendance trend history:
+   - New model AttendanceSnapshot (subjectCode, present, total, source, capturedAt; indexed). db:push applied.
+   - src/lib/sync/history.ts: recordSnapshots() after every successful sync (on change or 6h staleness) incl. "__overall__" weighted row; 90-day prune (10% roll); demo-mode 14-day plausible backfill ending exactly at current values (live mode never backfills — honest accrual).
+   - Wired into runSync(); GET /api/history returns overall + per-subject series.
+   - src/lib/db.ts made self-healing: drops stale global PrismaClient cached by hot-reload when generated schema gains models.
+2. FRONTEND — new features:
+   - TrendSection (recharts): overall emerald area + dashed per-subject lines, subject toggle chips, 7d/14d/30d range selector, trend delta badge, interactive tooltips.
+   - Sparklines (inline SVG) on every subject card header; spring-animated percentage counters (AnimatedNumber) on cards + dashboard ring.
+   - Dashboard "Next up" countdown strip (live-ticking, overdue detection, excludes auto-managed warnings).
+   - Subject sort dropdown: Lowest attendance first (default) / Highest / Name / Recently updated.
+   - CSV export: attendance (code, present/total/absent, %, status, classes needed/can-miss) + reminders (title, source, type, due, status, description) — client-side blob download.
+3. STYLING polish (mandatory):
+   - Ambient emerald/amber gradient blobs behind content (pointer-events-none, theme-aware).
+   - erp-shimmer keyframe: progress bars shimmer while sync.status === "syncing" (respects prefers-reduced-motion).
+   - Card hover shadow-lift on dashboard cards; tighter chart axes (auto domain, tickCount=5); fixed sparkline/% chip squeeze with w-24 shrink-0 column.
+
+Verification results:
+- bun run lint: clean. agent-browser (fresh session): 0 console errors, 0 page errors.
+- /api/history verified: 14 backfilled daily points, 5 subject series, weighted overall.
+- Desktop (1280px) + mobile (390px) screenshots verified; countdown strip, sort dropdown, Export CSV buttons, trend chart + sparklines all render and respond.
+
+OPERATIONAL NOTE (important for next rounds):
+- The dev server (PID ~6685/6835) is now started manually via `setsid bash -c 'exec bun run dev'` because the original supervisor did not respawn it after I killed the next-server child (needed to clear a stale Prisma client after db:push). It survives across tool calls. If it ever goes down: `cd /home/z/my-project && (setsid nohup bun run dev < /dev/null >> /tmp/devwatch.log 2>&1 &)` and wait ~20s. After ANY future prisma db:push, the self-healing db.ts should make restarts unnecessary.
+
+Unresolved issues / risks & next-phase recommendations:
+1. Live scrape parser still generic (needs one real login to fine-tune against actual dashboard HTML) — demo mode covers UX meanwhile. PRIORITY if user provides credentials.
+2. Trend chart shows demo-era backfill once live mode activates; acceptable (labeled), but could filter by snapshot.source if desired.
+3. Ideas backlog: timetable support ("now" highlight), notification per-type preferences, PWA install + push reminders, weekly attendance email digest.

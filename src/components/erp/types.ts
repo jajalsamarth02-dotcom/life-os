@@ -140,6 +140,19 @@ export interface AttendanceResponse {
   subjects: SubjectView[];
 }
 
+export interface HistoryPoint {
+  t: string;
+  percentage: number;
+  present: number;
+  total: number;
+}
+
+export interface HistoryResponse {
+  overall: HistoryPoint[];
+  subjects: Record<string, HistoryPoint[]>;
+  subjectsMeta: { code: string; name: string }[];
+}
+
 export interface AppSettings {
   targetPercentage: number;
   syncIntervalMinutes: number;

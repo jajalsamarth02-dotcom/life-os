@@ -31,6 +31,7 @@ import {
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import type { AttendanceStatus, ChangeKind, ReminderSource, ReminderType } from "./types";
+import { AnimatedNumber } from "./trend-chart";
 
 /* ------------------------------------------------------------------ */
 /* Time helpers                                                        */
@@ -166,12 +167,14 @@ export function ProgressRing({
   size = 140,
   stroke = 11,
   showTarget = true,
+  animated = false,
 }: {
   percentage: number;
   target: number;
   size?: number;
   stroke?: number;
   showTarget?: boolean;
+  animated?: boolean;
 }) {
   const pct = Math.max(0, Math.min(100, percentage));
   const r = (size - stroke) / 2;
@@ -213,7 +216,7 @@ export function ProgressRing({
           className="font-semibold tracking-tight tabular-nums text-foreground"
           style={{ fontSize: size * 0.2 }}
         >
-          {fmtPct2(percentage)}
+          {animated ? <AnimatedNumber value={percentage} suffix="%" /> : fmtPct2(percentage)}
         </span>
         {showTarget && (
           <span className="text-muted-foreground" style={{ fontSize: size * 0.085 }}>
@@ -233,16 +236,18 @@ export function MiniBar({
   percentage,
   status,
   className,
+  shimmer = false,
 }: {
   percentage: number;
   status: AttendanceStatus;
   className?: string;
+  shimmer?: boolean;
 }) {
   const c = statusColors(status);
   return (
     <div className={cn("h-2 w-full overflow-hidden rounded-full bg-muted", className)}>
       <motion.div
-        className={cn("h-full rounded-full", c.bar)}
+        className={cn("h-full rounded-full", c.bar, shimmer && "erp-shimmer")}
         initial={{ width: 0 }}
         animate={{ width: `${Math.max(0, Math.min(100, percentage))}%` }}
         transition={{ duration: 0.6, ease: [0.22, 1, 0.36, 1] }}

@@ -1,15 +1,18 @@
 "use client";
 
 import { useQuery } from "@tanstack/react-query";
+import { useState } from "react";
 import { isToday } from "date-fns";
 import {
   AlertTriangle,
   ArrowRight,
+  ArrowDownUp,
   BellRing,
   CalendarClock,
   CheckCircle2,
   ChevronRight,
   FlaskConical,
+  Hourglass,
   Info,
   Layers,
   WifiOff,
@@ -18,6 +21,7 @@ import {
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Separator } from "@/components/ui/separator";
 import { cn } from "@/lib/utils";
 import { fetchDashboard, qk } from "./api";
@@ -37,6 +41,93 @@ import {
   useNow,
 } from "./shared";
 import type { ChangeEvent, Reminder, SubjectView } from "./types";
+
+/* ------------------------------------------------------------------ */
+
+const SUBJECT_SORTS = [
+  { key: "lowest", label: "Lowest attendance first" },
+  { key: "highest", label: "Highest attendance first" },
+  { key: "name", label: "Name A–Z" },
+  { key: "recent", label: "Recently updated" },
+] as const;
+
+type SubjectSort = (typeof SUBJECT_SORTS)[number]["key"];
+
+function sortSubjects(list: SubjectView[], sort: SubjectSort): SubjectView[] {
+  const copy = [...list];
+  switch (sort) {
+    case "lowest":
+      return copy.sort((a, b) => a.percentage - b.percentage);
+    case "highest":
+      return copy.sort((a, b) => b.percentage - a.percentage);
+    case "name":
+      return copy.sort((a, b) => a.name.localeCompare(b.name));
+    case "recent":
+      return copy.sort((a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime());
+  }
+}
+
+/** Live countdown label for the next upcoming deadline. */
+function countdownLabel(dueAt: string, now: number): string {
+  const diff = new Date(dueAt).getTime() - now;
+  const abs = Math.abs(diff);
+  const mins = Math.round(abs / 60_000);
+  const hours = Math.round(abs / 3_600_000);
+  const days = Math.round(abs / 86_400_000);
+  let span: string;
+  if (mins < 60) span = `${mins} min`;
+  else if (hours < 36) span = `${hours} hr${hours === 1 ? "" : "s"}`;
+  else span = `${days} day${days === 1 ? "" : "s"}`;
+  return diff >= 0 ? `in ${span}` : `${span} overdue`;
+}
+
+function NextUpStrip({ items }: { items: Reminder[] }) {
+  const now = useNow();
+  const upcoming = items
+    .filter((r) => r.status === "ACTIVE" && r.type !== "ATTENDANCE_WARNING")
+    .sort((a, b) => new Date(a.dueAt).getTime() - new Date(b.dueAt).getTime());
+  const overdue = upcoming.filter((r) => new Date(r.dueAt).getTime() < now);
+  const next = upcoming.find((r) => new Date(r.dueAt).getTime() >= now);
+
+  if (upcoming.length === 0) return null;
+  const shown = overdue.length > 0 ? overdue[0] : (next ?? upcoming[0]);
+  const isOverdue = new Date(shown.dueAt).getTime() < now;
+
+  return (
+    <div
+      className={cn(
+        "flex items-center gap-3 rounded-xl border px-4 py-3",
+        isOverdue ? "border-red-500/30 bg-red-500/[0.05]" : "border-primary/25 bg-primary/[0.04]"
+      )}
+    >
+      <span
+        className={cn(
+          "flex size-9 shrink-0 items-center justify-center rounded-lg",
+          isOverdue ? "bg-red-500/10 text-red-600 dark:text-red-400" : "bg-emerald-500/10 text-emerald-600 dark:text-emerald-400"
+        )}
+      >
+        <Hourglass className="size-4" aria-hidden="true" />
+      </span>
+      <div className="min-w-0 flex-1">
+        <p className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
+          Next up {overdue.length > 0 && <span className="text-red-500">· {overdue.length} overdue</span>}
+        </p>
+        <p className="truncate text-sm font-medium">{shown.title}</p>
+      </div>
+      <div className="shrink-0 text-right">
+        <p
+          className={cn(
+            "text-sm font-bold tabular-nums",
+            isOverdue ? "text-red-600 dark:text-red-400" : "text-emerald-600 dark:text-emerald-400"
+          )}
+        >
+          {countdownLabel(shown.dueAt, now)}
+        </p>
+        <p className="text-[11px] text-muted-foreground">{fmtDT(shown.dueAt)}</p>
+      </div>
+    </div>
+  );
+}
 
 /* ------------------------------------------------------------------ */
 
@@ -218,7 +309,7 @@ function ChangeRow({ c }: { c: ChangeEvent }) {
 
 /* ------------------------------------------------------------------ */
 
-function SubjectRow({ s, onOpen }: { s: SubjectView; onOpen: () => void }) {
+function SubjectRow({ s, onOpen, shimmer }: { s: SubjectView; onOpen: () => void; shimmer: boolean }) {
   const c = statusColors(s.status);
   return (
     <button
@@ -236,7 +327,7 @@ function SubjectRow({ s, onOpen }: { s: SubjectView; onOpen: () => void }) {
           <span className={cn("shrink-0 text-sm font-bold tabular-nums", c.text)}>{s.percentage.toFixed(2)}%</span>
         </div>
         <div className="mt-1.5 flex items-center gap-2">
-          <MiniBar percentage={s.percentage} status={s.status} className="flex-1" />
+          <MiniBar percentage={s.percentage} status={s.status} className="flex-1" shimmer={shimmer} />
           {s.status !== "safe" && s.classesToTarget > 0 ? (
             <span className="shrink-0 text-[11px] font-medium text-amber-600 dark:text-amber-400">
               ⚠ needs {s.classesToTarget} more {s.classesToTarget === 1 ? "class" : "classes"}
@@ -315,6 +406,7 @@ export function DashboardTab({
   onOpenAttendance: () => void;
   onOpenSettings: () => void;
 }) {
+  const [sort, setSort] = useState<SubjectSort>("lowest");
   const { data, isPending, isError, error } = useQuery({
     queryKey: qk.dashboard,
     queryFn: fetchDashboard,
@@ -351,6 +443,7 @@ export function DashboardTab({
   }
 
   const { overall, subjects, target, mode } = data;
+  const sorted = sortSubjects(subjects, sort);
 
   if (mode === "none") {
     return (
@@ -365,11 +458,14 @@ export function DashboardTab({
 
   return (
     <div className="space-y-4">
+      {/* Row 0 — next deadline countdown */}
+      <NextUpStrip items={data.reminders.items} />
+
       {/* Row 1 — overall + stats */}
       <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-5">
-        <Card className="rounded-xl border-border/60 md:col-span-2 xl:col-span-2">
+        <Card className="rounded-xl border-border/60 transition-shadow hover:shadow-md md:col-span-2 xl:col-span-2">
           <CardContent className="flex flex-col items-center gap-4 p-6 sm:flex-row sm:gap-6">
-            <ProgressRing percentage={overall.percentage} target={target} size={150} />
+            <ProgressRing percentage={overall.percentage} target={target} size={150} animated />
             <div className="min-w-0 flex-1 space-y-2.5 text-center sm:text-left">
               <div className="flex flex-wrap items-center justify-center gap-2 sm:justify-start">
                 <h2 className="text-lg font-semibold tracking-tight">Overall attendance</h2>
@@ -416,23 +512,41 @@ export function DashboardTab({
       </div>
 
       {/* Row 2 — subject list */}
-      <Card className="rounded-xl border-border/60">
-        <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-3">
+      <Card className="rounded-xl border-border/60 transition-shadow hover:shadow-md">
+        <CardHeader className="flex flex-row items-center justify-between space-y-0 gap-2 pb-3">
           <div>
             <CardTitle className="text-base tracking-tight">Subject attendance</CardTitle>
             <CardDescription className="text-xs">Tap a subject for details and what-if planning</CardDescription>
           </div>
-          <Button variant="ghost" size="sm" className="h-8 gap-1 text-xs" onClick={onOpenAttendance}>
-            View all <ChevronRight className="size-3.5" aria-hidden="true" />
-          </Button>
+          <div className="flex items-center gap-1.5">
+            <Select value={sort} onValueChange={(v) => setSort(v as SubjectSort)}>
+              <SelectTrigger
+                className="h-8 w-[190px] gap-1 text-xs"
+                aria-label="Sort subjects"
+              >
+                <ArrowDownUp className="size-3.5 shrink-0 text-muted-foreground" aria-hidden="true" />
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {SUBJECT_SORTS.map((o) => (
+                  <SelectItem key={o.key} value={o.key} className="text-xs">
+                    {o.label}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            <Button variant="ghost" size="sm" className="h-8 gap-1 text-xs" onClick={onOpenAttendance}>
+              View all <ChevronRight className="size-3.5" aria-hidden="true" />
+            </Button>
+          </div>
         </CardHeader>
         <CardContent>
           {subjects.length === 0 ? (
             <p className="py-6 text-center text-sm text-muted-foreground">No subjects synchronized yet</p>
           ) : (
             <div className="max-h-96 space-y-2 overflow-y-auto pr-1">
-              {subjects.map((s) => (
-                <SubjectRow key={s.id} s={s} onOpen={onOpenAttendance} />
+              {sorted.map((s) => (
+                <SubjectRow key={s.id} s={s} onOpen={onOpenAttendance} shimmer={data.erp.sync.status === "syncing"} />
               ))}
             </div>
           )}

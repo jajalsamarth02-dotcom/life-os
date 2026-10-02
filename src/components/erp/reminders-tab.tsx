@@ -15,6 +15,7 @@ import {
   XCircle,
 } from "lucide-react";
 import { toast } from "sonner";
+import { Download } from "lucide-react";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -64,6 +65,7 @@ import {
   ApiError,
 } from "./api";
 import { dueGroup, fmtDT, GROUP_META, SourceBadge, TypeIcon, typeLabel, useNow } from "./shared";
+import { downloadCsv } from "./trend-chart";
 import type { DueGroup } from "./shared";
 import type { RemindersFilter, Reminder, ReminderType } from "./types";
 
@@ -447,7 +449,24 @@ export function RemindersTab() {
             Show completed
           </label>
 
-          <div className="ml-auto">
+          <div className="ml-auto flex items-center gap-2">
+            {data && data.length > 0 && (
+              <Button
+                variant="outline"
+                size="sm"
+                className="h-8 gap-1.5 text-xs"
+                onClick={() =>
+                  downloadCsv(
+                    `reminders-${new Date().toISOString().slice(0, 10)}.csv`,
+                    ["Title", "Source", "Type", "Due at", "Status", "Description"],
+                    data.map((r) => [r.title, r.source, typeLabel(r.type), fmtDT(r.dueAt), r.status, r.description ?? ""])
+                  )
+                }
+              >
+                <Download className="size-3.5" aria-hidden="true" />
+                Export CSV
+              </Button>
+            )}
             <NewReminderDialog />
           </div>
         </CardContent>

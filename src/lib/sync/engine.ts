@@ -5,6 +5,7 @@ import { fetchDemoSnapshot } from "@/lib/erp/demo";
 import { fetchLiveSnapshot } from "@/lib/erp/live";
 import { ERROR_COPY, ErpSnapshot, SyncError, SyncErrorCode } from "@/lib/erp/types";
 import { decryptSecret, encryptSecret } from "@/lib/crypto";
+import { pruneSnapshots, recordSnapshots } from "@/lib/sync/history";
 
 /**
  * SYNC ENGINE
@@ -137,6 +138,8 @@ export async function runSync(
     const { snapshot, mode } = await fetchSnapshot(trigger);
 
     const changes = await applySnapshot(snapshot, settings.targetPercentage);
+    await recordSnapshots(mode);
+    void pruneSnapshots();
     const now = new Date();
 
     await db.syncState.upsert({

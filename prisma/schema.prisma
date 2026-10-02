@@ -100,3 +100,17 @@ model Notification {
   read      Boolean  @default(false)
   createdAt DateTime @default(now())
 }
+
+// Attendance trend history: one row per (subject, captured moment).
+// subjectCode = "__overall__" stores the weighted overall figure.
+model AttendanceSnapshot {
+  id          String   @id @default(cuid())
+  subjectCode String
+  present     Int
+  total       Int
+  source      String // demo | live
+  capturedAt  DateTime @default(now())
+
+  @@index([subjectCode, capturedAt])
+  @@index([capturedAt])
+}
