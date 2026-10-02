@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { motion } from "framer-motion";
-import { CheckCircle2, PanelRightOpen, Target, TrendingUp, Users, XCircle, Zap } from "lucide-react";
+import { CheckCircle2, GraduationCap, PanelRightOpen, Target, TrendingUp, Users, XCircle, Zap } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -66,12 +66,15 @@ function SubjectCard({
   index,
   history,
   onOpen,
+  showSemester,
 }: {
   s: SubjectView;
   target: number;
   index: number;
   history: HistoryResponse | undefined;
   onOpen: () => void;
+  /** When no semester partition is active, mixed semesters are labeled on each card. */
+  showSemester: boolean;
 }) {
   const c = statusColors(s.status);
   const safe = s.status === "safe";
@@ -90,7 +93,17 @@ function SubjectCard({
           <div className="flex min-w-0 items-start justify-between gap-2">
             <div className="min-w-0 flex-1">
               <CardTitle className="truncate text-base tracking-tight">{s.name}</CardTitle>
-              <CardDescription className="mt-0.5 font-mono text-xs">{s.code}</CardDescription>
+              <CardDescription className="mt-0.5 flex items-center gap-1.5 font-mono text-xs">
+                <span className="truncate">{s.code}</span>
+                {showSemester && s.semester != null && (
+                  <span
+                    className="shrink-0 rounded bg-muted px-1 font-sans text-[10px] font-semibold text-muted-foreground"
+                    title={`Semester ${s.semester} (as reported by the ERP)`}
+                  >
+                    S{s.semester}
+                  </span>
+                )}
+              </CardDescription>
             </div>
             <div className="flex w-24 shrink-0 flex-col items-end gap-1">
               <span className={cn("shrink-0 rounded-md px-2 py-1 text-sm font-bold tabular-nums", c.bg, c.text)}>
@@ -229,13 +242,22 @@ export function AttendanceTab({ onOpenSettings }: { onOpenSettings: () => void }
 
   const { overall, subjects, target } = data;
   const customCount = subjects.filter((s) => s.hasCustomTarget).length;
+  const semesterActive = data.semester !== "all";
 
   if (subjects.length === 0) {
     return (
       <EmptyHero
-        title="No ERP data available yet."
-        description="Once you connect your ERP account or the first sync completes, every subject appears here with per-class what-if planning."
-        actionLabel="Connect / Sync ERP"
+        title={
+          semesterActive
+            ? `No subjects for Semester ${data.semester} yet.`
+            : "No ERP data available yet."
+        }
+        description={
+          semesterActive
+            ? `The ERP hasn't synchronized any subjects for Semester ${data.semester}. Switch the semester in Settings (or choose All) to see the rest of your synchronized data.`
+            : "Once you connect your ERP account or the first sync completes, every subject appears here with per-class what-if planning."
+        }
+        actionLabel="Open semester settings"
         onAction={onOpenSettings}
       />
     );
@@ -260,6 +282,16 @@ export function AttendanceTab({ onOpenSettings }: { onOpenSettings: () => void }
           <div className="min-w-0 flex-1 space-y-1.5">
             <div className="flex flex-wrap items-center gap-2">
               <h2 className="text-base font-semibold tracking-tight">Overall</h2>
+              {semesterActive && (
+                <Badge
+                  variant="outline"
+                  className="gap-1 border-primary/40 text-primary"
+                  title="A semester partition is active — only this semester's ERP subjects are counted"
+                >
+                  <GraduationCap className="size-3" aria-hidden="true" />
+                  Sem {data.semester}
+                </Badge>
+              )}
               <Badge variant="outline" className="tabular-nums">Target {target}%</Badge>
               <StatusChip status={overall.status} target={target} />
               {customCount > 0 && (
@@ -315,6 +347,7 @@ export function AttendanceTab({ onOpenSettings }: { onOpenSettings: () => void }
             target={target}
             index={i}
             history={history.data}
+            showSemester={!semesterActive}
             onOpen={() => setSelectedCode(s.code)}
           />
         ))}

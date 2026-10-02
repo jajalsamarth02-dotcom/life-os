@@ -10,7 +10,29 @@ export interface AppSettings {
   notifyPrefs: Record<string, boolean>;
   /** Per-subject attendance target overrides (subject code → %). Missing key = global target. */
   subjectTargets: Record<string, number>;
+  /**
+   * Semester partition: "all" shows every synchronized subject;
+   * "1"–"8" shows ONLY the subjects the ERP reported for that semester.
+   */
+  selectedSemester: string;
 }
+
+/** Values the semester selector accepts ("all" or "1".."8"). */
+export const SEMESTER_VALUES = ["all", "1", "2", "3", "4", "5", "6", "7", "8"] as const;
+
+export function isValidSemesterValue(v: unknown): v is string {
+  return typeof v === "string" && (SEMESTER_VALUES as readonly string[]).includes(v);
+}
+
+/** Convert the stored setting into a DB filter: null = all semesters. */
+export function semesterFilterOf(selected: string | undefined | null): number | null {
+  if (!selected) return null;
+  const n = Number(selected);
+  return Number.isInteger(n) && n >= 1 && n <= 8 ? n : null;
+}
+
+/** Raw setting key under which the sync engine stores the ERP-detected current semester. */
+export const ERP_SEMESTER_KEY = "erp.currentSemester";
 
 /** Notification types the engine can emit (whitelisted in the API + UI). */
 export const NOTIFY_TYPES = [
@@ -29,6 +51,7 @@ export const DEFAULT_SETTINGS: AppSettings = {
   minLiveSyncGapMinutes: 5, // rate-limit protection for the real ERP
   notifyPrefs: {},
   subjectTargets: {},
+  selectedSemester: "all", // show everything until the user partitions by semester
 };
 
 /** Resolve the effective attendance target for one subject. */
@@ -80,6 +103,15 @@ export async function updateSettings(patch: Partial<AppSettings>): Promise<AppSe
       if (isNotifyType(k) && typeof v === "boolean") merged[k] = v;
     }
     next.notifyPrefs = merged;
+  }
+  // semester partition: accept numbers too (1–8) and normalize to "all"/"1".."8"
+  if (patch.selectedSemester !== undefined) {
+    const raw = patch.selectedSemester as unknown;
+    const normalized =
+      typeof raw === "number" && Number.isInteger(raw) ? String(raw) : raw;
+    next.selectedSemester = isValidSemesterValue(normalized)
+      ? normalized
+      : current.selectedSemester;
   }
   // subject targets: replace when provided, keep only sane numeric values (1–100)
   if (patch.subjectTargets !== undefined) {

@@ -13,6 +13,7 @@ import {
   ChevronRight,
   FlaskConical,
   CalendarRange,
+  GraduationCap,
   Hourglass,
   Info,
   Layers,
@@ -517,6 +518,16 @@ export function DashboardTab({
             <div className="min-w-0 flex-1 space-y-2.5 text-center sm:text-left">
               <div className="flex flex-wrap items-center justify-center gap-2 sm:justify-start">
                 <h2 className="text-lg font-semibold tracking-tight">Overall attendance</h2>
+                {data.semester !== "all" && (
+                  <Badge
+                    variant="outline"
+                    className="gap-1 border-primary/40 text-primary"
+                    title="A semester partition is active — only this semester's ERP subjects are counted"
+                  >
+                    <GraduationCap className="size-3" aria-hidden="true" />
+                    Sem {data.semester}
+                  </Badge>
+                )}
                 <StatusChip status={overall.status} target={target} />
                 <Button
                   variant="ghost"
@@ -616,7 +627,11 @@ export function DashboardTab({
         </CardHeader>
         <CardContent>
           {subjects.length === 0 ? (
-            <p className="py-6 text-center text-sm text-muted-foreground">No subjects synchronized yet</p>
+            <p className="py-6 text-center text-sm text-muted-foreground">
+              {data.semester !== "all"
+                ? `No subjects synchronized for Semester ${data.semester}`
+                : "No subjects synchronized yet"}
+            </p>
           ) : (
             <div className="max-h-96 space-y-2 overflow-y-auto pr-1">
               {sorted.map((s) => (

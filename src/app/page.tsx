@@ -302,6 +302,7 @@ export default function Home() {
         syncing={syncNow.isPending || sync?.status === "syncing"}
         demoMode={mode === "demo"}
         subjects={data?.subjects}
+        semester={data?.semester}
       />
 
       <footer className="relative mt-auto border-t border-border/60 bg-card/50">

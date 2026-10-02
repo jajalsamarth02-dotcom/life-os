@@ -11,6 +11,7 @@ import {
   CalendarClock,
   CheckCircle2,
   FlaskConical,
+  GraduationCap,
   Info,
   KeyRound,
   Loader2,
@@ -82,10 +83,12 @@ import {
   disconnectErp,
   fetchAttendance,
   fetchErpStatus,
+  fetchSemesters,
   fetchSettings,
   fetchSyncLogs,
   postDemoEvolve,
   postDemoReset,
+  putSelectedSemester,
   putSettings,
   putSubjectTarget,
   ApiError,
@@ -562,6 +565,158 @@ function NotificationPrefsCard() {
 }
 
 /* ------------------------------------------------------------------ */
+/* Semester partition (Sem 1–8)                                        */
+/* ------------------------------------------------------------------ */
+
+const SEMESTER_OPTIONS = [
+  { value: "all", label: "All" },
+  ...Array.from({ length: 8 }, (_, i) => ({ value: String(i + 1), label: `Sem ${i + 1}` })),
+];
+
+export function semesterLabel(v: string | undefined | null): string {
+  if (!v || v === "all") return "All semesters";
+  return `Semester ${v}`;
+}
+
+function SemesterCard() {
+  const qc = useQueryClient();
+  const { data, isPending } = useQuery({
+    queryKey: qk.semesters,
+    queryFn: fetchSemesters,
+    refetchInterval: 30_000,
+  });
+
+  const setSem = useMutation({
+    mutationFn: (value: string) => putSelectedSemester(value),
+    onSuccess: (s) => {
+      qc.invalidateQueries(); // subject lists, overall, trend, timetable pickers — everything
+      const count = data?.counts.reduce((a, c) => a + c.count, 0) ?? 0;
+      const scoped =
+        s.selectedSemester === "all"
+          ? count
+          : (data?.counts.find((c) => c.semester === Number(s.selectedSemester))?.count ?? 0);
+      toast.success(`Showing ${semesterLabel(s.selectedSemester)}`, {
+        description:
+          scoped === 0
+            ? "No subjects are synchronized for this semester yet — switch back to All or sync the ERP."
+            : `${scoped} synchronized subject${scoped === 1 ? "" : "s"} from the ERP.`,
+      });
+    },
+    onError: (e) => toast.error("Could not change semester", { description: e.message }),
+  });
+
+  const selected = data?.selected ?? "all";
+  const detected = data?.detected ?? null;
+  const countFor = (sem: number | null) =>
+    data?.counts.find((c) => c.semester === sem)?.count ?? 0;
+  const totalSubjects = data?.counts.reduce((a, c) => a + c.count, 0) ?? 0;
+  const unclassified = countFor(null);
+
+  return (
+    <Card className="rounded-xl border-border/60">
+      <CardHeader className="flex flex-row items-start justify-between space-y-0 gap-2 pb-3">
+        <div>
+          <CardTitle className="flex items-center gap-2 text-base tracking-tight">
+            <GraduationCap className="size-4 text-primary" aria-hidden="true" />
+            Semester
+          </CardTitle>
+          <CardDescription className="text-xs">
+            Partition your subjects — only the selected semester&apos;s ERP-synchronized subjects appear across
+            the app. Semester info is read live from the ERP during sync.
+          </CardDescription>
+        </div>
+        <Badge variant="secondary" className="shrink-0 text-[11px] tabular-nums">
+          {selected === "all" ? `ALL · ${totalSubjects}` : `SEM ${selected} · ${countFor(Number(selected))}`}
+        </Badge>
+      </CardHeader>
+      <CardContent className="space-y-3">
+        {isPending || !data ? (
+          <div className="grid grid-cols-3 gap-2 sm:grid-cols-5">
+            {Array.from({ length: 9 }).map((_, i) => (
+              <Skeleton key={i} className="h-14 rounded-lg" />
+            ))}
+          </div>
+        ) : (
+          <>
+            <div
+              className="grid grid-cols-3 gap-2 sm:grid-cols-5"
+              role="group"
+              aria-label="Semester partition"
+            >
+              {SEMESTER_OPTIONS.map((opt) => {
+                const isSel = selected === opt.value;
+                const count =
+                  opt.value === "all"
+                    ? totalSubjects
+                    : countFor(Number(opt.value));
+                return (
+                  <button
+                    key={opt.value}
+                    type="button"
+                    onClick={() => {
+                      if (!isSel) setSem.mutate(opt.value);
+                    }}
+                    disabled={setSem.isPending}
+                    aria-pressed={isSel}
+                    aria-label={`Show ${opt.value === "all" ? "all semesters" : `semester ${opt.value}`} — ${count} subjects`}
+                    className={cn(
+                      "flex h-14 min-w-0 flex-col items-center justify-center gap-0.5 rounded-lg border px-2 text-xs font-medium transition-all",
+                      "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+                      isSel
+                        ? "border-primary bg-primary text-primary-foreground shadow-sm"
+                        : "border-border/60 bg-card hover:border-primary/40 hover:bg-muted/60",
+                      setSem.isPending && "opacity-70"
+                    )}
+                  >
+                    <span className="truncate">{opt.label}</span>
+                    <span
+                      className={cn(
+                        "text-[10px] tabular-nums",
+                        isSel ? "opacity-80" : "text-muted-foreground"
+                      )}
+                    >
+                      {count} {count === 1 ? "subj" : "subjs"}
+                    </span>
+                  </button>
+                );
+              })}
+            </div>
+
+            {detected !== null && selected !== String(detected) && (
+              <div className="flex flex-wrap items-center gap-2 rounded-lg border border-emerald-500/30 bg-emerald-500/[0.08] px-3 py-2">
+                <CheckCircle2 className="size-4 shrink-0 text-emerald-600 dark:text-emerald-400" aria-hidden="true" />
+                <p className="min-w-0 flex-1 text-xs text-muted-foreground">
+                  The ERP currently reports <span className="font-semibold text-foreground">Semester {detected}</span>.
+                </p>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  className="h-7 gap-1 border-emerald-500/40 px-2 text-xs text-emerald-700 hover:bg-emerald-500/10 hover:text-emerald-800 dark:text-emerald-400"
+                  disabled={setSem.isPending}
+                  onClick={() => setSem.mutate(String(detected))}
+                  aria-label={`Switch to the ERP-reported semester ${detected}`}
+                >
+                  Use Sem {detected}
+                </Button>
+              </div>
+            )}
+
+            {unclassified > 0 && (
+              <p className="flex items-start gap-1.5 text-[11px] leading-relaxed text-muted-foreground">
+                <Info className="mt-0.5 size-3.5 shrink-0" aria-hidden="true" />
+                {unclassified} subject{unclassified === 1 ? " has" : "s have"} no semester from the ERP yet — they only
+                appear under <span className="font-medium text-foreground">All</span> until the next sync classifies
+                them.
+              </p>
+            )}
+          </>
+        )}
+      </CardContent>
+    </Card>
+  );
+}
+
+/* ------------------------------------------------------------------ */
 /* Per-subject attendance targets                                      */
 /* ------------------------------------------------------------------ */
 
@@ -695,7 +850,9 @@ function SubjectTargetsCard() {
           </p>
         ) : data.subjects.length === 0 ? (
           <p className="py-4 text-center text-sm text-muted-foreground">
-            No subjects synchronized yet — targets can be set after the first sync.
+            {data.semester !== "all"
+              ? `No subjects synchronized for Semester ${data.semester} — targets can be set once the ERP syncs them.`
+              : "No subjects synchronized yet — targets can be set after the first sync."}
           </p>
         ) : (
           <div className="max-h-96 overflow-y-auto rounded-lg border border-border/50">
@@ -1162,6 +1319,7 @@ export function SettingsTab() {
         <ErpConnectionCard />
         <SyncSettingsCard />
       </div>
+      <SemesterCard />
       <SubjectTargetsCard />
       <NotificationPrefsCard />
       <div className="grid gap-4 lg:grid-cols-2">

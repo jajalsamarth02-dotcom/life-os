@@ -21,6 +21,8 @@ export interface SubjectView extends AttendanceView {
   id: string;
   code: string;
   name: string;
+  /** Semester partition (1–8) as reported by the ERP; null = not yet known. */
+  semester: number | null;
   updatedAt: string;
   /** Effective target for THIS subject (override or global). */
   targetPct: number;
@@ -119,10 +121,14 @@ export interface ErpSyncEnvelope {
 export interface ErpStatus extends ErpSyncEnvelope {
   lastVerifiedAt: string | null;
   liveAvailable: "unknown" | "yes" | "no";
+  /** Semester the ERP pages reported during sync; null = not detected yet. */
+  detectedSemester: number | null;
 }
 
 export interface DashboardResponse {
   target: number;
+  /** Active semester partition: "all" or "1".."8". */
+  semester: string;
   mode: AppMode;
   overall: AttendanceView;
   subjects: SubjectView[];
@@ -140,6 +146,8 @@ export interface DashboardResponse {
 
 export interface AttendanceResponse {
   target: number;
+  /** Active semester partition: "all" or "1".."8". */
+  semester: string;
   overall: AttendanceView;
   subjects: SubjectView[];
 }
@@ -180,6 +188,16 @@ export interface AppSettings {
   notifyPrefs: Record<string, boolean>;
   /** Per-subject target overrides (code → %); missing key = global target. */
   subjectTargets: Record<string, number>;
+  /** Semester partition: "all" or "1".."8" — only that semester's ERP subjects are shown. */
+  selectedSemester: string;
+}
+
+/** Data for the Settings semester partition card. */
+export interface SemestersResponse {
+  selected: string;
+  /** Current semester the ERP itself reported during sync; null = unknown. */
+  detected: number | null;
+  counts: { semester: number | null; count: number }[];
 }
 
 export interface SyncResponse {

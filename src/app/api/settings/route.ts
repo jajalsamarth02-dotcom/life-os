@@ -1,6 +1,11 @@
 import { NextResponse } from "next/server";
 import { db } from "@/lib/db";
-import { getSettings, isNotifyType, updateSettings } from "@/lib/settings";
+import {
+  getSettings,
+  isNotifyType,
+  isValidSemesterValue,
+  updateSettings,
+} from "@/lib/settings";
 import { recomputeAttendanceWarnings } from "@/lib/sync/engine";
 import { getSyncState } from "@/lib/sync/engine";
 
@@ -29,6 +34,14 @@ export async function PUT(req: Request) {
     }
     if (typeof body.autoSyncEnabled === "boolean") patch.autoSyncEnabled = body.autoSyncEnabled;
     if (typeof body.demoMode === "boolean") patch.demoMode = body.demoMode;
+    // Semester partition — "all" or "1".."8" (numbers accepted, normalized).
+    if (body.selectedSemester !== undefined) {
+      const raw =
+        typeof body.selectedSemester === "number" && Number.isInteger(body.selectedSemester)
+          ? String(body.selectedSemester)
+          : body.selectedSemester;
+      if (isValidSemesterValue(raw)) patch.selectedSemester = raw;
+    }
     if (body.notifyPrefs && typeof body.notifyPrefs === "object" && !Array.isArray(body.notifyPrefs)) {
       const clean: Record<string, boolean> = {};
       for (const [k, v] of Object.entries(body.notifyPrefs as Record<string, unknown>)) {

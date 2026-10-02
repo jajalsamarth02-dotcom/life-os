@@ -32,6 +32,8 @@ const ATTENDANCE_PATHS = [
   "/student/subject-attendance",
   "/student/attendance/view",
 ];
+/** The student profile carries the "Semester: Sem N" academic info. */
+const PROFILE_PATHS = ["/student/profile"];
 const REQUEST_TIMEOUT_MS = 15000;
 const UA =
   "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36 ERPStudentSync/1.0";
@@ -200,7 +202,136 @@ async function fetchWithSession(
   }
 }
 
-/** Generic, conservative attendance-table parser. */
+const ROMAN: Record<string, number> = {
+  i: 1, ii: 2, iii: 3, iv: 4, v: 5, vi: 6, vii: 7, viii: 8,
+};
+
+function semesterFromToken(raw: string): number | null {
+  const t = raw.toLowerCase();
+  if (/^\d$/.test(t)) return parseInt(t, 10);
+  return ROMAN[t] ?? null;
+}
+
+/**
+ * Detect the student's current semester from ERP page text.
+ * Accepts "Semester : 3", "Sem-4", "SEM 5", "3rd Semester", "Semester VI" and
+ * other common forms (arabic + roman numerals, optional ordinal suffixes).
+ * Returns null when nothing convincing is found.
+ */
+export function detectCurrentSemester(html: string): number | null {
+  const text = stripTags(html);
+
+  // "Semester 3", "Semester: III", "Semester - VI", "Semester 4th"
+  const fwd = text.match(
+    /semester\s*[:\-–]?\s*(\d{1}(?:st|nd|rd|th)?|i|ii|iii|iv|v|vi|vii|viii)\b/i
+  );
+  if (fwd) return semesterFromToken(fwd[1].replace(/(?:st|nd|rd|th)$/i, ""));
+
+  // "3rd Semester", "Sem 5"
+  const rev = text.match(/\b(\d{1})(?:st|nd|rd|th)?\s+semester\b/i);
+  if (rev) return parseInt(rev[1], 10);
+
+  // compact forms like "Sem 3", "Sem-IV"
+  const compact = text.match(/\bsem\.?\s*[-–]?\s*(\d{1}|i|ii|iii|iv|v|vi|vii|viii)\b/i);
+  if (compact) return semesterFromToken(compact[1]);
+
+  return null;
+}
+
+/** Find a semester mentioned inside one table row ("Sem 4", "Semester IV" …). */
+function rowSemester(cells: string[]): number | null {
+  for (const c of cells) {
+    const m = c.match(/\b(?:sem|semester)\.?\s*[-–]?\s*(\d{1}|i|ii|iii|iv|v|vi|vii|viii)\b/i);
+    if (m) {
+      const n = semesterFromToken(m[1]);
+      if (n) return n;
+    }
+  }
+  return null;
+}
+
+/**
+ * GMIU attendance-page parser (verified against the live ERP).
+ *
+ * The real /student/attendance table looks like:
+ *   | Course | 01 … 31 (day cells) | P | A | L | H | E | % |
+ * where P/A/L/H/E are per-subject summary counts (Present, Absent, Leave,
+ * Holiday, Exam) and % is P/(P+A). Day cells hold session marks like "P (T)".
+ *
+ * Returns null when no such table is found (callers fall back to the generic
+ * parser). A non-null result is a COMPLETE view of the student's subjects —
+ * safe for the sync engine to remove locally-removed rows against.
+ */
+export function parseGmiuAttendance(html: string): ErpSubjectSnapshot[] | null {
+  const tables = html.match(/<table[\s\S]*?<\/table>/gi) ?? [];
+  for (const table of tables) {
+    const rows = table.match(/<tr[\s\S]*?<\/tr>/gi) ?? [];
+    if (rows.length < 2) continue;
+
+    // locate the header row within the first few rows
+    let headerCells: string[] = [];
+    let headerIdx = -1;
+    for (let i = 0; i < Math.min(rows.length, 4); i++) {
+      const cells = (rows[i].match(/<t[dh][^>]*>[\s\S]*?<\/t[dh]>/gi) ?? []).map((c) =>
+        stripTags(c).trim()
+      );
+      if (cells.some((c) => /^course$/i.test(c))) {
+        headerCells = cells;
+        headerIdx = i;
+        break;
+      }
+    }
+    if (headerIdx < 0) continue;
+
+    const lastIndexOf = (target: string) => {
+      let idx = -1;
+      headerCells.forEach((c, i) => {
+        if (c.toUpperCase() === target) idx = i;
+      });
+      return idx;
+    };
+    const iP = lastIndexOf("P");
+    const iA = lastIndexOf("A");
+    if (iP < 0 || iA < 0 || iA < iP) continue;
+
+    const out: ErpSubjectSnapshot[] = [];
+    for (const row of rows.slice(headerIdx + 1)) {
+      const cells = (row.match(/<t[dh][^>]*>[\s\S]*?<\/t[dh]>/gi) ?? []).map((c) =>
+        stripTags(c).trim()
+      );
+      if (iP >= cells.length || iA >= cells.length) continue;
+      const name = (cells[0] ?? "").replace(/\s+/g, " ").trim();
+      if (name.length < 3 || !/[a-zA-Z]{3,}/.test(name) || /^\d{1,2}$/.test(name)) continue;
+      const p = parseInt(cells[iP], 10);
+      const a = parseInt(cells[iA], 10);
+      if (!Number.isFinite(p) || !Number.isFinite(a) || p < 0 || a < 0) continue;
+      const total = p + a;
+      // Subjects with no classes yet (P=A=0) are still listed by the ERP —
+      // keep them so the mirror is a complete, honest view.
+      const code =
+        (name.match(/\b[A-Z]{2,4}[-\s]?\d{2,4}\b/) ?? [])[0]?.replace(/\s+/g, "-") ??
+        name
+          .slice(0, 24)
+          .toUpperCase()
+          .replace(/[^A-Z0-9]+/g, "-")
+          .replace(/^-+|-+$/g, "");
+      if (!out.some((s) => s.code === code)) {
+        out.push({ code, name, present: p, total });
+      }
+    }
+    if (out.length > 0) return out;
+  }
+  return null;
+}
+
+/** Parse a page with the GMIU-specific parser first, generic one as fallback. */
+function parsePage(html: string): { subjects: ErpSubjectSnapshot[]; complete: boolean } {
+  const gmiu = parseGmiuAttendance(html);
+  if (gmiu && gmiu.length > 0) return { subjects: gmiu, complete: true };
+  return { subjects: parseSubjects(html), complete: false };
+}
+
+/** Generic, conservative attendance-table parser (fallback for other layouts). */
 function parseSubjects(html: string): ErpSubjectSnapshot[] {
   const found = new Map<string, ErpSubjectSnapshot>();
   const tables = html.match(/<table[\s\S]*?<\/table>/gi) ?? [];
@@ -252,7 +383,15 @@ function parseSubjects(html: string): ErpSubjectSnapshot[] {
       const code =
         (name.match(/\b[A-Z]{2,4}[-\s]?\d{2,4}\b/) ?? [])[0]?.replace(/\s+/g, "-") ??
         name.slice(0, 24).toUpperCase().replace(/\s+/g, "-");
-      if (!found.has(code)) found.set(code, { code, name: name.trim(), present, total });
+      if (!found.has(code)) {
+        found.set(code, {
+          code,
+          name: name.trim(),
+          present,
+          total,
+          semester: rowSemester(cells),
+        });
+      }
     }
   }
   return [...found.values()];
@@ -268,44 +407,39 @@ function guessType(title: string): ReminderType {
   return "OTHER";
 }
 
-export async function fetchLiveSnapshot(
-  username: string,
-  password: string,
-  savedCookie?: string | null
-): Promise<LiveFetchResult> {
-  // 1) try the saved session cookie first (gentle on the ERP)
-  if (savedCookie) {
-    const saved = new Map<string, string>();
-    for (const pair of savedCookie.split(";")) {
-      const i = pair.indexOf("=");
-      if (i > 0) saved.set(pair.slice(0, i).trim(), pair.slice(i + 1).trim());
-    }
-    const dash = await fetchWithSession(DASHBOARD_PATH, saved);
-    if (dash.html) {
-      const subjects = parseSubjects(dash.html);
-      if (subjects.length > 0) {
-        return { snapshot: buildSnapshot(subjects), sessionCookie: cookieHeader(dash.cookies) };
-      }
-    }
-  }
+interface CollectedSnapshot {
+  subjects: ErpSubjectSnapshot[];
+  complete: boolean;
+  currentSemester: number | null;
+  cookies: Map<string, string>;
+}
 
-  // 2) full login flow
-  const { cookies } = await login(username, password);
-  const cookie = cookieHeader(cookies);
-
-  const dash = await fetchWithSession(DASHBOARD_PATH, cookies);
+/**
+ * Walk the ERP pages with an authenticated session: dashboard → attendance
+ * routes → (for the semester label) the student profile. Prefers the verified
+ * GMIU attendance table; falls back to the generic parser when it is absent.
+ */
+async function collectSnapshot(sessionCookies: Map<string, string>): Promise<CollectedSnapshot> {
+  const dash = await fetchWithSession(DASHBOARD_PATH, sessionCookies);
   if (!dash.html) {
     throw new SyncError("AUTH_FAILED", "Session did not survive login redirect.");
   }
 
-  let subjects = parseSubjects(dash.html);
+  let page = parsePage(dash.html);
+  let subjects = page.subjects;
+  let complete = page.complete;
+  let currentSemester = detectCurrentSemester(dash.html);
+
   if (subjects.length === 0) {
-    // try well-known attendance routes
     for (const p of ATTENDANCE_PATHS) {
-      const page = await fetchWithSession(p, dash.cookies);
-      if (page.html) {
-        subjects = parseSubjects(page.html);
-        if (subjects.length > 0) break;
+      const att = await fetchWithSession(p, dash.cookies);
+      if (!att.html) continue;
+      page = parsePage(att.html);
+      if (page.subjects.length > 0) {
+        subjects = page.subjects;
+        complete = page.complete;
+        if (!currentSemester) currentSemester = detectCurrentSemester(att.html);
+        break;
       }
     }
   }
@@ -318,19 +452,70 @@ export async function fetchLiveSnapshot(
     );
   }
 
-  return { snapshot: buildSnapshot(subjects, dash.cookies), sessionCookie: cookieHeader(dash.cookies) };
+  // The semester lives on the student profile ("Semester: Sem N").
+  if (!currentSemester) {
+    for (const p of PROFILE_PATHS) {
+      const prof = await fetchWithSession(p, dash.cookies);
+      if (prof.html) {
+        currentSemester = detectCurrentSemester(prof.html);
+        if (currentSemester) break;
+      }
+    }
+  }
+
+  if (currentSemester) {
+    for (const s of subjects) if (!s.semester) s.semester = currentSemester;
+  }
+
+  return { subjects, complete, currentSemester, cookies: dash.cookies };
+}
+
+export async function fetchLiveSnapshot(
+  username: string,
+  password: string,
+  savedCookie?: string | null
+): Promise<LiveFetchResult> {
+  // 1) try the saved session cookie first (gentle on the ERP)
+  if (savedCookie) {
+    const saved = new Map<string, string>();
+    for (const pair of savedCookie.split(";")) {
+      const i = pair.indexOf("=");
+      if (i > 0) saved.set(pair.slice(0, i).trim(), pair.slice(i + 1).trim());
+    }
+    try {
+      const out = await collectSnapshot(saved);
+      return {
+        snapshot: buildSnapshot(out.subjects, out.complete, out.currentSemester),
+        sessionCookie: cookieHeader(out.cookies),
+      };
+    } catch {
+      // session likely expired — fall through to a full login below
+    }
+  }
+
+  // 2) full login flow
+  const { cookies } = await login(username, password);
+  const out = await collectSnapshot(cookies);
+  return {
+    snapshot: buildSnapshot(out.subjects, out.complete, out.currentSemester),
+    sessionCookie: cookieHeader(out.cookies),
+  };
 }
 
 function buildSnapshot(
   subjects: ErpSubjectSnapshot[],
-  cookies?: Map<string, string>
+  complete: boolean,
+  currentSemester?: number | null
 ): ErpSnapshot {
-  void cookies;
   return {
     mode: "live",
     fetchedAt: new Date().toISOString(),
-    complete: false, // live scrape may be partial → never delete local data based on it
+    // A verified GMIU attendance table is the FULL subject list of the
+    // student's current semester → safe to remove disappeared local rows.
+    // The generic fallback may be partial → never delete local data from it.
+    complete,
     subjects,
+    currentSemester: currentSemester ?? null,
     reminders: [], // exam/deadline scraping is added once the real page structure is known
   };
 }

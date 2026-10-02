@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { db } from "@/lib/db";
-import { getSettings } from "@/lib/settings";
+import { getSettings, semesterFilterOf } from "@/lib/settings";
 import { getSyncState } from "@/lib/sync/engine";
 import { getSubjectViews, overallWithTarget } from "@/lib/views";
 
@@ -13,7 +13,12 @@ export async function GET() {
   try {
     const settings = await getSettings();
     const state = await getSyncState();
-    const subjects = await getSubjectViews(settings.targetPercentage, settings.subjectTargets);
+    const semesterFilter = semesterFilterOf(settings.selectedSemester);
+    const subjects = await getSubjectViews(
+      settings.targetPercentage,
+      settings.subjectTargets,
+      semesterFilter
+    );
     const overall = overallWithTarget(subjects, settings.targetPercentage);
 
     const now = new Date();
@@ -39,6 +44,7 @@ export async function GET() {
 
     return NextResponse.json({
       target: settings.targetPercentage,
+      semester: settings.selectedSemester,
       mode: settings.demoMode ? "demo" : conn ? "live" : "none",
       overall,
       subjects,

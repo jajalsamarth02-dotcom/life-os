@@ -16,6 +16,8 @@ export interface ErpSubjectSnapshot {
   name: string;
   present: number;
   total: number;
+  /** Semester (1–8) if the ERP reports it for this row; null = unknown. */
+  semester?: number | null;
 }
 
 export interface ErpReminderSnapshot {
@@ -38,6 +40,8 @@ export interface ErpSnapshot {
   complete: boolean;
   subjects: ErpSubjectSnapshot[];
   reminders: ErpReminderSnapshot[];
+  /** Current semester detected on the ERP pages (1–8); null = not found. */
+  currentSemester?: number | null;
   note?: string;
 }
 

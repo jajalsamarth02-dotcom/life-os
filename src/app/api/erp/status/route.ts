@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { db } from "@/lib/db";
-import { getSettings } from "@/lib/settings";
+import { getSettings, getRawSetting, ERP_SEMESTER_KEY, semesterFilterOf } from "@/lib/settings";
 import { getSyncState } from "@/lib/sync/engine";
 
 export const dynamic = "force-dynamic";
@@ -14,6 +14,10 @@ export async function GET() {
   let liveAvailable: "unknown" | "yes" | "no" = "unknown";
   if (conn) liveAvailable = conn.status === "connected" ? "yes" : "no";
 
+  // Semester the ERP itself reported during sync (Settings → "from ERP" hint).
+  const rawDetected = await getRawSetting(ERP_SEMESTER_KEY);
+  const detectedSemester = semesterFilterOf(rawDetected);
+
   return NextResponse.json({
     connected: !!conn,
     username: conn?.username ?? null,
@@ -21,6 +25,7 @@ export async function GET() {
     lastVerifiedAt: conn?.lastVerifiedAt?.toISOString() ?? null,
     liveAvailable,
     demoMode: settings.demoMode,
+    detectedSemester,
     sync: {
       status: state.status,
       mode: state.mode,

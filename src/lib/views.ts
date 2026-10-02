@@ -5,6 +5,8 @@ export interface SubjectView extends AttendanceView {
   id: string;
   code: string;
   name: string;
+  /** Semester partition (1–8) as reported by the ERP; null = not yet known. */
+  semester: number | null;
   updatedAt: string;
   /** Effective target for THIS subject (override or global). */
   targetPct: number;
@@ -13,7 +15,15 @@ export interface SubjectView extends AttendanceView {
 }
 
 export function toSubjectView(
-  s: { id: string; code: string; name: string; present: number; total: number; updatedAt: Date },
+  s: {
+    id: string;
+    code: string;
+    name: string;
+    present: number;
+    total: number;
+    semester?: number | null;
+    updatedAt: Date;
+  },
   globalTargetPct: number,
   subjectTargets?: Record<string, number>
 ): SubjectView {
@@ -25,6 +35,7 @@ export function toSubjectView(
     id: s.id,
     code: s.code,
     name: s.name,
+    semester: typeof s.semester === "number" ? s.semester : null,
     updatedAt: s.updatedAt.toISOString(),
     targetPct: effective,
     hasCustomTarget,
@@ -34,10 +45,15 @@ export function toSubjectView(
 
 export async function getSubjectViews(
   targetPct: number,
-  subjectTargets?: Record<string, number>
+  subjectTargets?: Record<string, number>,
+  /** 1–8 filters to one ERP semester; null/undefined = all semesters. */
+  semesterFilter?: number | null
 ): Promise<SubjectView[]> {
   const subjects = await db.subject.findMany({
-    where: { active: true },
+    where: {
+      active: true,
+      ...(semesterFilter ? { semester: semesterFilter } : {}),
+    },
     orderBy: [{ code: "asc" }],
   });
   return subjects.map((s) => toSubjectView(s, targetPct, subjectTargets));

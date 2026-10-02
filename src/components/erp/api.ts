@@ -12,6 +12,7 @@ import type {
   HistoryResponse,
   Reminder,
   RemindersFilter,
+  SemestersResponse,
   SyncEventsResponse,
   SyncLogsResponse,
   SyncResponse,
@@ -72,6 +73,7 @@ export const qk = {
   reminders: (filter: RemindersFilter, includeDone: boolean) =>
     ["reminders", filter, includeDone] as const,
   settings: ["settings"] as const,
+  semesters: ["semesters"] as const,
   sync: ["sync"] as const,
   erpStatus: ["erp-status"] as const,
 };
@@ -110,6 +112,7 @@ export const fetchReminders = (filter: RemindersFilter, includeDone: boolean) =>
     `/api/reminders?filter=${encodeURIComponent(filter)}&includeDone=${includeDone}`
   ).then((r) => r.reminders);
 export const fetchSettings = () => api<AppSettings>("/api/settings");
+export const fetchSemesters = () => api<SemestersResponse>("/api/semesters");
 export const fetchSyncLogs = () => api<SyncLogsResponse>("/api/sync");
 export const fetchSyncEvents = () => api<SyncEventsResponse>("/api/sync/events");
 export const fetchErpStatus = () => api<ErpStatus>("/api/erp/status");
@@ -203,6 +206,13 @@ export const putSettings = (patch: Partial<AppSettings>) =>
     method: "PUT",
     body: JSON.stringify(patch),
   });
+
+/**
+ * Set the semester partition ("all" or "1".."8"). Every subject list,
+ * overall figure and trend chart then shows ONLY that semester's data.
+ */
+export const putSelectedSemester = (selected: string) =>
+  putSettings({ selectedSemester: selected });
 
 /** Set (or clear with null) a per-subject attendance target override. */
 export const putSubjectTarget = (code: string, targetPct: number | null) =>

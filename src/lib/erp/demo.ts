@@ -25,7 +25,8 @@ interface DemoExam {
 interface DemoState {
   createdAt: string;
   lastEvolveAt: string;
-  subjects: { code: string; name: string; present: number; total: number }[];
+  currentSemester: number;
+  subjects: { code: string; name: string; present: number; total: number; semester: number }[];
   exams: DemoExam[];
   examSeq: number;
 }
@@ -57,16 +58,23 @@ function at(daysFromNow: number, hour: number, minute = 0): string {
   return d.toISOString();
 }
 
+/**
+ * The simulated student is enrolled in semester 3 — every subject the demo ERP
+ * reports carries that semester so the semester partition works end-to-end.
+ */
+const DEMO_SEMESTER = 3;
+
 function initialState(): DemoState {
   return {
     createdAt: new Date().toISOString(),
     lastEvolveAt: new Date().toISOString(),
+    currentSemester: DEMO_SEMESTER,
     subjects: [
-      { code: "DBMS-301", name: "Database Management Systems", present: 24, total: 34 },
-      { code: "CS-302", name: "Java Programming", present: 28, total: 34 },
-      { code: "CS-303", name: "Android Application Development", present: 26, total: 34 },
-      { code: "CS-304", name: "Web Technology", present: 19, total: 25 },
-      { code: "MA-305", name: "Discrete Mathematics", present: 20, total: 30 },
+      { code: "DBMS-301", name: "Database Management Systems", present: 24, total: 34, semester: DEMO_SEMESTER },
+      { code: "CS-302", name: "Java Programming", present: 28, total: 34, semester: DEMO_SEMESTER },
+      { code: "CS-303", name: "Android Application Development", present: 26, total: 34, semester: DEMO_SEMESTER },
+      { code: "CS-304", name: "Web Technology", present: 19, total: 25, semester: DEMO_SEMESTER },
+      { code: "MA-305", name: "Discrete Mathematics", present: 20, total: 30, semester: DEMO_SEMESTER },
     ],
     exams: [
       {
@@ -104,18 +112,30 @@ function initialState(): DemoState {
 
 async function loadState(): Promise<DemoState> {
   const raw = await getRawSetting(STATE_KEY);
-  if (!raw) {
-    const s = initialState();
-    await setRawSetting(STATE_KEY, JSON.stringify(s));
-    return s;
+  let state: DemoState | null = null;
+  if (raw) {
+    try {
+      state = JSON.parse(raw) as DemoState;
+    } catch {
+      state = null;
+    }
   }
-  try {
-    return JSON.parse(raw) as DemoState;
-  } catch {
-    const s = initialState();
-    await setRawSetting(STATE_KEY, JSON.stringify(s));
-    return s;
+  if (!state) state = initialState();
+
+  // Migration: states persisted before the semester feature lack the fields.
+  let migrated = false;
+  if (typeof state.currentSemester !== "number") {
+    state.currentSemester = DEMO_SEMESTER;
+    migrated = true;
   }
+  for (const s of state.subjects) {
+    if (typeof s.semester !== "number") {
+      s.semester = state.currentSemester;
+      migrated = true;
+    }
+  }
+  if (migrated) await setRawSetting(STATE_KEY, JSON.stringify(state));
+  return state;
 }
 
 async function saveState(state: DemoState): Promise<void> {
@@ -220,8 +240,9 @@ export async function fetchDemoSnapshot(force = false): Promise<ErpSnapshot> {
     mode: "demo",
     fetchedAt: new Date(now).toISOString(),
     complete: true,
-    subjects: state.subjects.map((s) => ({ ...s })),
+    subjects: state.subjects.map((s) => ({ ...s, semester: s.semester ?? state.currentSemester })),
     reminders,
+    currentSemester: state.currentSemester,
     note: "Simulated ERP data (DEMO) — replace with real ERP credentials in Settings for live synchronization.",
   };
 }

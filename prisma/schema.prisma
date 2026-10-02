@@ -62,9 +62,13 @@ model Subject {
   name      String
   present   Int
   total     Int
+  /** Semester partition (1–8) as reported by the ERP; null = not yet known. */
+  semester  Int?
   active    Boolean  @default(true) // false = removed from ERP
   addedAt   DateTime @default(now())
   updatedAt DateTime @updatedAt
+
+  @@index([semester])
 }
 
 // Detected changes between consecutive ERP snapshots

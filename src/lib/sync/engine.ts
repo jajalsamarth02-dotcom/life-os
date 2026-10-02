@@ -1,5 +1,12 @@
 import { db } from "@/lib/db";
-import { getSettings, getRawSetting, setRawSetting, isNotifyEnabled, type AppSettings } from "@/lib/settings";
+import {
+  getSettings,
+  getRawSetting,
+  setRawSetting,
+  isNotifyEnabled,
+  ERP_SEMESTER_KEY,
+  type AppSettings,
+} from "@/lib/settings";
 import { attendancePercentage, classesToReachTarget } from "@/lib/attendance";
 import { fetchDemoSnapshot } from "@/lib/erp/demo";
 import { fetchLiveSnapshot } from "@/lib/erp/live";
@@ -277,24 +284,26 @@ async function applySnapshot(snapshot: ErpSnapshot, settings: AppSettings): Prom
   // --- subjects ---
   for (const s of snapshot.subjects) {
     const prev = prevByCode.get(s.code);
+    // Semester: the row's own value wins, else the page-level current semester.
+    const semester = s.semester ?? snapshot.currentSemester ?? null;
     if (!prev) {
       const existedInactive = await db.subject.findUnique({ where: { code: s.code } });
       if (existedInactive) {
         await db.subject.update({
           where: { id: existedInactive.id },
-          data: { name: s.name, present: s.present, total: s.total, active: true },
+          data: { name: s.name, present: s.present, total: s.total, semester, active: true },
         });
       } else {
         await db.subject.create({
-          data: { code: s.code, name: s.name, present: s.present, total: s.total },
+          data: { code: s.code, name: s.name, present: s.present, total: s.total, semester },
         });
       }
-      await changeEvent("SUBJECT_ADDED", s.code, `${s.name} — ${s.present}/${s.total} classes`);
+      await changeEvent("SUBJECT_ADDED", s.code, `${s.name} — ${s.present}/${s.total} classes${semester ? ` · Sem ${semester}` : ""}`);
       changes++;
     } else if (prev.present !== s.present || prev.total !== s.total || prev.name !== s.name) {
       await db.subject.update({
         where: { id: prev.id },
-        data: { name: s.name, present: s.present, total: s.total },
+        data: { name: s.name, present: s.present, total: s.total, semester },
       });
       const oldPct = attendancePercentage(prev.present, prev.total);
       const newPct = attendancePercentage(s.present, s.total);
@@ -304,6 +313,19 @@ async function applySnapshot(snapshot: ErpSnapshot, settings: AppSettings): Prom
         `${s.name}: Present ${prev.present}→${s.present}, Total ${prev.total}→${s.total} (${oldPct.toFixed(2)}% → ${newPct.toFixed(2)}%)`
       );
       changes++;
+    } else if (prev.semester !== semester) {
+      // Semester metadata arrived/changed without any attendance difference —
+      // update quietly (the partition itself is not an "ERP data change").
+      await db.subject.update({ where: { id: prev.id }, data: { semester } });
+    }
+  }
+
+  // Remember the ERP-detected current semester so Settings can offer it
+  // as a one-tap partition choice.
+  if (typeof snapshot.currentSemester === "number" && snapshot.currentSemester >= 1 && snapshot.currentSemester <= 8) {
+    const stored = await getRawSetting(ERP_SEMESTER_KEY);
+    if (stored !== String(snapshot.currentSemester)) {
+      await setRawSetting(ERP_SEMESTER_KEY, String(snapshot.currentSemester));
     }
   }
 
@@ -314,6 +336,9 @@ async function applySnapshot(snapshot: ErpSnapshot, settings: AppSettings): Prom
         await db.subject.update({ where: { id: prev.id }, data: { active: false } });
         await changeEvent("SUBJECT_REMOVED", prev.code, `${prev.name} no longer on the ERP`);
         changes++;
+        // its auto-managed warning reminder has no subject left to describe
+        const warn = await db.reminder.findUnique({ where: { externalId: `erp:warn:${prev.code}` } });
+        if (warn) await db.reminder.delete({ where: { id: warn.id } });
       }
     }
   }

@@ -6,7 +6,9 @@ import { toast } from "sonner";
 import {
   BarChart3,
   CalendarClock,
+  Check,
   FlaskConical,
+  GraduationCap,
   Keyboard,
   LayoutDashboard,
   Moon,
@@ -26,7 +28,7 @@ import {
   CommandShortcut,
 } from "@/components/ui/command";
 import { cn } from "@/lib/utils";
-import { postDemoEvolve, postSync } from "./api";
+import { postDemoEvolve, postSync, putSelectedSemester } from "./api";
 import type { AttendanceStatus, SubjectView } from "./types";
 
 const STATUS_DOT: Record<AttendanceStatus, string> = {
@@ -46,6 +48,8 @@ interface CommandPaletteProps {
   syncing: boolean;
   demoMode: boolean;
   subjects: SubjectView[] | undefined;
+  /** Active semester partition ("all" or "1".."8"). */
+  semester?: string;
 }
 
 /**
@@ -61,6 +65,7 @@ export function CommandPalette({
   syncing,
   demoMode,
   subjects,
+  semester = "all",
 }: CommandPaletteProps) {
   const { resolvedTheme, setTheme } = useTheme();
 
@@ -90,6 +95,28 @@ export function CommandPalette({
 
   const toggleTheme = () => {
     run(() => setTheme(resolvedTheme === "dark" ? "light" : "dark"));
+  };
+
+  const setSemester = (value: string) => {
+    run(async () => {
+      try {
+        await putSelectedSemester(value);
+        window.dispatchEvent(new CustomEvent("erp:invalidate-all"));
+        toast.success(
+          value === "all" ? "Showing all semesters" : `Showing Semester ${value}`,
+          {
+            description:
+              value === "all"
+                ? "Every ERP-synchronized subject is visible again."
+                : "Only this semester's ERP-synchronized subjects are shown now.",
+          }
+        );
+      } catch (e) {
+        toast.error("Could not change semester", {
+          description: e instanceof Error ? e.message : String(e),
+        });
+      }
+    });
   };
 
   const NAV = [
@@ -139,6 +166,35 @@ export function CommandPalette({
             <CommandSeparator />
           </>
         )}
+
+        <CommandGroup heading="Semester partition">
+          <CommandItem
+            value="semester all show every subject"
+            onSelect={() => setSemester("all")}
+            disabled={semester === "all"}
+          >
+            <GraduationCap className="size-4 text-muted-foreground" aria-hidden="true" />
+            Show all semesters
+            {semester === "all" && <Check className="ml-auto size-3.5 text-primary" aria-hidden="true" />}
+          </CommandItem>
+          {Array.from({ length: 8 }, (_, i) => {
+            const sem = String(i + 1);
+            const active = semester === sem;
+            return (
+              <CommandItem
+                key={sem}
+                value={`semester ${sem} show partition`}
+                onSelect={() => setSemester(sem)}
+                disabled={active}
+              >
+                <GraduationCap className={active ? "size-4 text-primary" : "size-4 text-muted-foreground"} aria-hidden="true" />
+                Show Semester {sem} only
+                {active && <Check className="ml-auto size-3.5 text-primary" aria-hidden="true" />}
+              </CommandItem>
+            );
+          })}
+        </CommandGroup>
+        <CommandSeparator />
 
         <CommandGroup heading="Navigate">
           {NAV.map((n) => (

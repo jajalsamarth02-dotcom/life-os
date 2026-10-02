@@ -529,3 +529,49 @@ Unresolved issues / risks & next-phase priorities:
    the PWA.
 4. Demo note: warnings are recreated on every sync while a subject is below target — their
    "due in 14h" chips will persist by design (dueAt is end-of-day).
+
+---
+Task ID: 7 (IN PROGRESS — user direct request, semester partition)
+Agent: Z.ai Code (main orchestrator)
+Task: USER REQUEST — "add setting from ERP: semester partition Sem 1–8; only show selected semester's subjects; data real from ERP live"
+
+Work Log (mid-flight — DO NOT revert/fix apparent breakage while this is open):
+- Schema: Subject.semester Int? added (db:push done; Prisma client regenerated — dev server restart REQUIRED, stale-client errors like "Invalid ... subject.groupBy" mean the server predates the change).
+- settings.ts: selectedSemester ("all"|"1".."8"), semesterFilterOf(), ERP_SEMESTER_KEY; settings PUT validates it.
+- live.ts: detectCurrentSemester() (arabic+roman, ordinal suffixes) + rowSemester() per-row; snapshot.currentSemester; subjects carry semester.
+- demo.ts: demo student is Sem 3; state migration stamps existing demo state.
+- engine.ts: persists semester on upsert (quiet metadata-only updates) + stores ERP-detected semester under erp.currentSemester.
+- views.ts getSubjectViews(…, semesterFilter); /api/attendance + /api/dashboard filter + expose `semester`; /api/history semester-scopes series & rebuilds overall; /api/erp/status exposes detectedSemester; NEW /api/semesters (counts/selected/detected).
+- NEXT: frontend (types, SemesterCard in Settings, badges, palette entries), QA, worklog completion.
+
+Stage Summary:
+- Backend complete; frontend pending. If dev server is down, restart with `bun run dev` (background) — it may have been killed by concurrent sessions.
+
+---
+Task ID: 7 (COMPLETED — user direct request: semester partition + real ERP data)
+Agent: Z.ai Code (main orchestrator)
+
+Task: USER REQUEST — "add setting from ERP: semester partition Sem 1–8; only show the selected semester's subjects; all info real, taken from ERP live". While implementing, the student's REAL ERP credentials were connected (jajaldharmendra02@gmail.com, verified 10:30) — so this round also tuned the live parser against the REAL ERP pages (the long-standing top-priority backlog item).
+
+Current project status / assessment:
+- App is LIVE mode (demo off): real ERP account connected, real syncs succeeding.
+- Before this round the live parser was generic and produced 2 junk rows ("COURSE", truncated "ANALYSIS-AND-DESIGN-OF-A"); real subjects were unparsed.
+
+Completed modifications / verified:
+1. SCHEMA — Subject.semester Int? (+index), db:push done. DEV SERVER RESTART was required (stale Prisma client); discovered that servers started inside agent tool calls get killed at call end, so a `dev-server-keeper` cron (fixed_rate 300s, job 430680) now revives port 3000 from platform sessions — CONFIRMED WORKING (self-healed at 11:05).
+2. SETTINGS — AppSettings.selectedSemester ("all"|"1".."8") + validation in PUT /api/settings + semesterFilterOf()/ERP_SEMESTER_KEY in lib/settings.
+3. SEMESTER SOURCING (real ERP) — lib/erp/live.ts: detectCurrentSemester() (arabic+roman, "Semester: Sem 5", "3rd Semester", "Sem-IV"…); rowSemester(); PROFILE_PATHS=/student/profile (verified: profile carries "Semester: Sem 5"; dashboard/attendance don't mention it); GMIU-specific parseGmiuAttendance() matching the real /student/attendance table (Course | day cells | P | A | L | H | E | %) with generic parser kept as fallback; snapshot.complete=true ONLY for the verified GMIU table (enables safe removal of disappeared rows); 0/0 subjects kept (honest "no classes yet").
+4. ENGINE — applySnapshot persists semester (row value > snapshot.currentSemester), quiet metadata-only updates, stores ERP-detected semester under erp.currentSemester, cleans auto-managed warning reminders when a subject disappears.
+5. APIS — /api/attendance, /api/dashboard filter by selectedSemester and expose it; /api/history semester-scopes per-subject series AND rebuilds the overall series from the filtered subjects (snapshots don't carry semester); NEW /api/semesters (per-semester counts + selected + ERP-detected); /api/erp/status exposes detectedSemester.
+6. UI — Settings "Semester" card (All + Sem 1–8 buttons with live subject counts, active badge, green "ERP currently reports Semester 5 → Use Sem 5" hint, unclassified-subjects note); semester switcher group in ⌘K palette; "Sem 5" partition badges on Dashboard + Attendance overall headers; per-subject "S5" chips when viewing ALL; honest empty states for semesters without subjects ("No subjects for Semester N yet").
+7. RESULT ON REAL DATA — live sync parsed ALL 8 real Sem-5 subjects (ANALYSIS AND DESIGN OF ALGORITHM 0/1, ARTIFICIAL INTELLIGENCE 1/1, COMPUTER NETWORKS 1/1, HOD LECTURE 0/0, ADVANCED MOBILE APPLICATION DEVELOPMENT 0/0, SOFTWARE ENGINEERING 0/0, RESPONSIVE WEB & MOBILE UI DESIGN 0/0, SUMMER INTERNSHIP 0/0) with semester=5; junk "COURSE" + 5 demo rows deactivated; demo exam reminders cleaned; erp.currentSemester=5. selectedSemester left at "5" (user's real semester).
+
+Verification results:
+- bun run lint clean. Offline parser test against saved real HTML (8/8 subjects, semester 5). API E2E: /api/semesters {detected:5, counts:[{5,8}]}; filter 5 → 8 subjects overall 66.67% (2 present / 4 held — real numbers); filter 3 → honest 0; back to all → 8. agent-browser: LIVE badge + real subjects on dashboard, Settings card buttons with correct counts, palette "Semester partition" group (Sem 5 shown active), toasts on switch, Sem 5 badge next to Overall on Dashboard + Attendance; mobile 390px + dark mode verified visually; 0 console errors.
+
+Unresolved issues / risks & next-phase priorities:
+1. Leave/holiday/exam (L/H/E) columns are not yet folded into total (currently total=P+A). If the ERP counts E (exam) as held, refine totals when such rows appear.
+2. Live syncs now hit dashboard+attendance+profile each run (~3 GETs, saved session) — well within rate limits; backoff unchanged.
+3. Week-delta on dashboard reads +100 pts/7d because real history only starts today (demo history was deactivated, by design) — will normalize as days accrue.
+4. dev-server-keeper cron must stay alive; if preview shows Caddy 502, it self-heals within ≤5 min.
+5. Backlog: timetable slots semester-scoping, per-subject what-if from palette, digest email delivery, TZ-aware calendar events.
