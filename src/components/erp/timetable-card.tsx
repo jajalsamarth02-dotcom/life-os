@@ -333,7 +333,14 @@ function ManageTimetableDialog({
             );
           })}
           {slots.length === 0 && (
-            <p className="py-4 text-center text-sm text-muted-foreground">No classes scheduled yet</p>
+            <div className="flex flex-col items-center gap-1.5 py-6 text-center">
+              <CalendarDays className="size-5 text-muted-foreground/60" aria-hidden="true" />
+              <p className="text-sm font-medium text-foreground/80">No classes scheduled yet</p>
+              <p className="max-w-xs text-xs leading-relaxed text-muted-foreground">
+                The ERP doesn&apos;t publish a timetable — add your real class times with the pickers above to unlock
+                today&apos;s-schedule highlights, ongoing-class badges and weekly planning.
+              </p>
+            </div>
           )}
         </div>
       </DialogContent>

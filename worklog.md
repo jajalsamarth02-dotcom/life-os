@@ -1293,3 +1293,24 @@ Unresolved issues / risks & next-phase priorities:
 4. Backlog unchanged: L/H/E columns folding (server-side parser — needs user consent), SMTP digest (needs credentials), TZ cosmetic, per-semester scoping (schema), weekly bunk-budget (needs timetable slots — still empty).
 5. Testing note for future rounds: Radix tab/segmented interactions in QA must use real CDP clicks (agent-browser click <ref>), not JS element.click().
 6. Keeper cron 430680 must stay alive; worklog protocol: append-only, three-section handover.
+
+---
+Task ID: 21
+Agent: Z.ai Code (main orchestrator)
+Task: Round task 22:45+08 — status assessment, cold-load QA, Web Share feature + Manage-dialog empty-state polish. All client-side, no schema/API changes.
+
+Current project status / assessment:
+- Server healthy: 200s throughout; next-server RSS ~1620MB (pre-cap instance; 900MB cap lands on next natural respawn — do NOT manual-restart). Memory ~1.9GB available. No new OOM events. Cold-load QA: 0 console errors.
+- Dashboard already has Copy-summary chip, weekly report dialog, week-delta chip, NEXT UP strip, stat cards — feature chosen for the gap: mobile-native sharing (Web Share API), which Copy cannot cover.
+
+Completed modifications / verified:
+1. NEW FEATURE — Share chip (dashboard-tab.tsx): Web Share API button next to Copy in the Overall attendance card, sharing the same plain-text summary (per-subject %, status, targets). Gated post-hydration on typeof navigator.share === "function" (hydration-safe: SSR never renders it). Only appears on capable devices (the student's phone) — verified hidden in headless Chromium (navigator.share undefined → chip absent, no errors) and code path shared with the proven copySummary text. Dismissed share sheets (AbortError) stay silent; success shows "Shared" for 2s.
+2. STYLING — Manage-timetable dialog empty state (timetable-card.tsx): one muted line upgraded to a centered icon+title+hint block explaining that the ERP publishes no timetable and what setup unlocks (today's-schedule highlights, ongoing-class badges, weekly planning).
+3. Verification: tsc --noEmit → zero errors under src/. agent-browser CDP QA: dashboard cold-load 0 errors; Share chip gating confirmed absent in headless; Manage dialog opened via CDP click (ref e20) and new empty-state copy found in the DOM ("The ERP does not publish a timetable page, so add…"); screenshot /tmp/qa-r21.png visually verified (overall card chips, delta chip, NEXT UP strip, stat cards all intact). Browser CLOSED immediately; server 200 after.
+
+Unresolved issues / risks & next-phase priorities:
+1. Pre-cap instance RSS ~1620MB near the kill line — capped respawn ≤3 min if killed; leave alone.
+2. next.config.ts unrecognized key + .next cache regrowth — Task 17 guidance unchanged.
+3. User decisions still pending: 2nd free notification channel (Telegram ⭐ / ntfy / Discord / email) and optional fixed daily WhatsApp digest time (never send test/digest to the real phone during QA).
+4. Backlog unchanged: L/H/E columns folding (server-side, needs user consent), SMTP digest (needs credentials), TZ cosmetic, per-semester scoping (schema), weekly bunk-budget (needs timetable slots — still empty).
+5. Keeper cron 430680 must stay alive; worklog protocol: append-only, three-section handover.

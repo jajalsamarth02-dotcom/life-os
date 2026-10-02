@@ -1,7 +1,7 @@
 "use client";
 
 import { useQuery } from "@tanstack/react-query";
-import { useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { isToday } from "date-fns";
 import {
   AlertTriangle,
@@ -20,6 +20,7 @@ import {
   ClipboardList,
   Copy,
   Layers,
+  Share2,
   WifiOff,
   XCircle,
 } from "lucide-react";
@@ -726,6 +727,26 @@ export function DashboardTab({
     }
   };
 
+  /* Native share sheet (mobile-first). Probed post-hydration so SSR markup
+     never differs from the client render. */
+  const [canShare, setCanShare] = useState(false);
+  const [shared, setShared] = useState(false);
+  const shareTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useEffect(() => {
+    setCanShare(typeof navigator.share === "function");
+  }, []);
+  const shareSummary = async () => {
+    if (!summaryText) return;
+    try {
+      await navigator.share({ title: "Attendance summary", text: summaryText });
+      setShared(true);
+      if (shareTimer.current) clearTimeout(shareTimer.current);
+      shareTimer.current = setTimeout(() => setShared(false), 2000);
+    } catch {
+      // share sheet dismissed (AbortError) or unavailable — stay inert
+    }
+  };
+
   if (isPending) {
     return (
       <div className="space-y-4">
@@ -830,6 +851,19 @@ export function DashboardTab({
                   )}
                   {copied ? "Copied" : "Copy"}
                 </Button>
+                {canShare && (
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    className="h-7 gap-1 rounded-full border border-border/40 bg-background/40 px-2.5 text-xs text-muted-foreground hover:bg-accent hover:text-foreground"
+                    onClick={shareSummary}
+                    aria-label="Share attendance summary via your device"
+                    title="Share the plain-text attendance summary (per-subject %, status, targets)"
+                  >
+                    <Share2 className="size-3.5" aria-hidden="true" />
+                    {shared ? "Shared" : "Share"}
+                  </Button>
+                )}
                 <Button
                   variant="ghost"
                   size="sm"
