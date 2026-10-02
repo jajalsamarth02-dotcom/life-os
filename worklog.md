@@ -1539,3 +1539,29 @@ Unresolved issues / risks & next-phase priorities:
 5. Unlinked-course ALAs (BETCE15316 ADVANCED WEB DEVELOPMENT, 6 open/6 overdue) intentionally get no chip; they remain visible in the Reminders tab list and dashboard AlaDeadlinePanel only.
 6. Backlog unchanged: L/H/E columns folding (needs user consent), SMTP digest (needs credentials), TZ cosmetic, per-semester scoping (schema), weekly bunk-budget (timetable slots still empty), backup restore (needs user consent for a write endpoint).
 7. Keeper cron 430680 must stay alive; worklog protocol: append-only, three-section handover.
+
+---
+Task ID: 31
+Agent: Z.ai Code (main orchestrator)
+Task: Round task 01:15+08 — status assessment, cold-load QA, Reminders/ALA "Deadline Radar" upgrade: 35-day deadline density strip, "Due ≤7d" quick-filter chip, semester-wide ALA completion bar.
+
+Current project status / assessment:
+- Server healthy all round: 200s throughout; browser CLOSED after QA; 0 console errors on settled loads. Live data unchanged: overall 66.67% (2/3, target 75%), 8 subjects, 47 ALA rows (6 submitted / 21 pending / 20 overdue), title "(20) ERP Sync · 66.67%".
+- QA at round start confirmed Task 29/30 features live (interactive stat cards, 6 ALA chips, drawer Active-deadlines "3 overdue / 4" + 4 ERP portal anchors). Gap analysis: the ALA list had a per-group progress bar but NO semester-wide completion at-a-glance, NO temporal density view (the Oct 30–31 wave of 13 deadlines was invisible until you scrolled into it), and the status filter had no "due soon" concept despite the digest banner quoting "next open deadline 6 Oct (in 3d)".
+
+Completed modifications / verified:
+1. NEW FEATURE — AlaDeadlineRadar (reminders-tab.tsx): 35-day density strip of upcoming ACTIVE deadlines (today → +34d). Bar height = deadlines that calendar day (max-normalized, 2px baseline for empty days); amber gradient inside the 7-day band, slate beyond; today column gets a primary ring + glow + "Today" label; hover tooltips list up to 4 titles "+N more". Header line: "N due within 7 days · M inside 35 days · peak {date} (K)" — the 7-day figure uses the SAME rolling clock as the filter chip so numbers always agree. Axis ticks Today/+7d/+14d/+21d/+28d/+34d. Hidden while searching/filtering (same contract as the digest). Window deliberately 35d (not 28): ground truth showed the 13-row Oct 30/31 wave lands at offset 28 — a 28-day window would have hidden it entirely. GROUND-TRUTH verified: rolling7=2, window=15, buckets Oct 6 (1) / Oct 9 (1) / Oct 30 (9) / Oct 31 (4) — radar header, aria-label and peak all match EXACTLY.
+2. NEW FEATURE — "Due ≤7d" status-filter chip (AlaStatusFilter gains "soon", inserted Overdue→Pending): rows ACTIVE && dueMs-now ≤ 7d; live count in the chip (2 today). Verified by click: exactly the 2 true rows shown (AI_ALA-2 6 Oct, ALA-03 9 Oct); digest + radar hide while filtering. Pending chip re-tinted sky so amber now uniquely means "due soon".
+3. NEW FEATURE — semester-wide ALA completion bar at the top of the ALA card: emerald gradient fill (min 2% so "1 done" is visible), "6/47 submitted" tabular caption, role=progressbar with honest aria. Instantly shows the 13% big picture the badges alone don't convey.
+4. STYLING — radar container: rounded-xl muted panel; bars with rounded tops + hover opacity; group-hover tooltips; today -mx-[3px] widening so the ring doesn't clip. Filter chips row unchanged structurally (5 chips fit one line at desktop, wrap cleanly at 390px-narrow — verified via body-maxWidth squeeze test).
+5. Verification: tsc --noEmit → zero errors under app src/ (remaining output is the known non-src noise: examples/, skills/, scripts/, next.config memoryLimit). agent-browser QA: chips All 47 / Overdue 20 / Due ≤7d 2 / Pending 21 / Submitted 6; completion 13% "6 of 47"; radar 35 columns + tooltips ("30 Oct — 9 due: ALA-5, ALA-4, ALA-3, ALA-2, +5 more"); dashboard regression (6 chips + title) intact after tab nav. Screenshots: /tmp/qa-r31-radar.png (light), /tmp/qa-r31-radar-dark.png (dark), /tmp/qa-r31-radar-narrow.png (390px squeeze) — all clean. Console: 0 errors. Browser CLOSED immediately; server 200 after.
+
+Unresolved issues / risks & next-phase priorities:
+1. QA-sequencing artifact (NOT an app bug): clicking an attendance-tab subject card right after hash manipulation found no button — the target panel wasn't mounted at click time. Re-navigating first fixed it; future QA should navigate → wait → re-query before clicking.
+2. next.config.ts unrecognized turbopack/memoryLimit key — unchanged Task 17 guidance (pre-existing non-src tsc noise).
+3. User decisions still pending: 2nd free notification channel (Telegram ⭐ / ntfy / Discord / email) and optional fixed daily WhatsApp digest time (digestTime unset — never send test/digest to the real phone during QA).
+4. MilestoneCelebration real target-crossing still pending live data (needs 1 more attended class → 3/4 = 75%). Next ERP sync may trigger it — watch for it next round.
+5. Dashboard subject sparklines still dormant — activates automatically at ≥2 snapshots.
+6. Radar band note: the amber band is calendar-day based (offset<7) while the chip/summary use the rolling 7×24h clock — a row due 6d18h out can sit on the +7d slate column while the header says "2 due within 7 days". Documented in the docstring; acceptable, revisit only if a user complains.
+7. Backlog unchanged: L/H/E columns folding (needs user consent), SMTP digest (needs credentials), TZ cosmetic, per-semester scoping (schema), weekly bunk-budget (timetable slots still empty), backup restore (needs user consent for a write endpoint).
+8. Keeper cron 430680 must stay alive; worklog protocol: append-only, three-section handover.

@@ -1050,13 +1050,14 @@ function AlaSubjectGroup({
  * Includes search, status filter, sorting, expand/collapse-all and a
  * one-click .ics export of every not-yet-submitted deadline.
  */
-type AlaStatusFilter = "all" | "pending" | "overdue" | "submitted";
+type AlaStatusFilter = "all" | "overdue" | "soon" | "pending" | "submitted";
 type AlaSort = "deadline" | "course";
 
 const ALA_STATUS_META: { key: AlaStatusFilter; label: string; activeClass: string }[] = [
   { key: "all", label: "All", activeClass: "bg-primary text-primary-foreground" },
-  { key: "pending", label: "Pending", activeClass: "bg-amber-500/20 text-amber-800 dark:text-amber-300 border-amber-500/50" },
   { key: "overdue", label: "Overdue", activeClass: "bg-red-500/15 text-red-700 dark:text-red-300 border-red-500/50" },
+  { key: "soon", label: "Due ≤7d", activeClass: "bg-amber-500/20 text-amber-800 dark:text-amber-300 border-amber-500/50" },
+  { key: "pending", label: "Pending", activeClass: "bg-sky-500/15 text-sky-700 dark:text-sky-300 border-sky-500/50" },
   { key: "submitted", label: "Submitted", activeClass: "bg-emerald-500/15 text-emerald-700 dark:text-emerald-300 border-emerald-500/50" },
 ];
 
@@ -1202,6 +1203,147 @@ function AlaOverdueDigest({
   );
 }
 
+/** One day bucket inside the deadline radar. */
+interface RadarDay {
+  /** Day index (0 = today). */
+  offset: number;
+  /** Local midnight timestamp for the day. */
+  ms: number;
+  /** ACTIVE rows due this day. */
+  count: number;
+  /** Up to 4 sample titles for the hover tooltip. */
+  titles: string[];
+}
+
+const RADAR_WINDOW = 35;
+
+/**
+ * Deadline radar — a 35-day density strip of upcoming ACTIVE deadlines.
+ * Pure situational awareness: bar height = how many deadlines land that day,
+ * amber while inside the 7-day window, muted beyond, and today gets a primary
+ * ring + label. Read-only (hover tooltips only) — the digest banner above
+ * already owns the "act now" job. The 7-day summary uses the same rolling
+ * clock as the "Due ≤7d" filter chip so the numbers always agree.
+ */
+function AlaDeadlineRadar({ assignments, now }: { assignments: Reminder[]; now: number }) {
+  const days = useMemo<RadarDay[]>(() => {
+    const start = new Date(now);
+    start.setHours(0, 0, 0, 0);
+    const startMs = start.getTime();
+    const arr: RadarDay[] = Array.from({ length: RADAR_WINDOW }, (_, offset) => ({
+      offset,
+      ms: startMs + offset * 86_400_000,
+      count: 0,
+      titles: [],
+    }));
+    const byMs = new Map(arr.map((d) => [d.ms, d]));
+    for (const a of assignments) {
+      if (a.status !== "ACTIVE") continue;
+      const d = new Date(a.dueAt);
+      d.setHours(0, 0, 0, 0);
+      const bucket = byMs.get(d.getTime());
+      if (!bucket) continue;
+      bucket.count += 1;
+      if (bucket.titles.length < 4) bucket.titles.push(a.title);
+    }
+    return arr;
+  }, [assignments, now]);
+
+  const maxCount = Math.max(1, ...days.map((d) => d.count));
+  const inWeek = assignments.filter(
+    (a) =>
+      a.status === "ACTIVE" &&
+      new Date(a.dueAt).getTime() >= now &&
+      new Date(a.dueAt).getTime() - now <= 7 * 86_400_000
+  ).length;
+  const inWindow = days.reduce((n, d) => n + d.count, 0);
+  const busiest = [...days].sort((a, b) => b.count - a.count)[0];
+  const label = (d: Date) =>
+    d.toLocaleDateString("en-GB", { day: "numeric", month: "short" });
+
+  if (inWindow === 0) return null;
+
+  return (
+    <div className="rounded-xl border border-border/60 bg-muted/20 p-3">
+      <div className="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-0.5">
+        <p className="text-xs font-semibold tracking-tight">Deadline radar · next 35 days</p>
+        <p className="text-[11px] tabular-nums text-muted-foreground">
+          {inWeek > 0 ? (
+            <>
+              <span className="font-semibold text-amber-700 dark:text-amber-400">{inWeek}</span> due within 7 days
+            </>
+          ) : (
+            "nothing due within 7 days"
+          )}
+          {inWindow > inWeek && (
+            <>
+              {" · "}
+              <span className="font-semibold text-foreground/80">{inWindow}</span> inside 35 days
+            </>
+          )}
+          {busiest.count > 0 && busiest.offset !== 0 && (
+            <>
+              {" · peak "}
+              {busiest.offset < 7 ? "this week" : label(new Date(busiest.ms))} ({busiest.count})
+            </>
+          )}
+        </p>
+      </div>
+      <div
+        role="img"
+        aria-label={`Deadline radar: ${inWeek} deadlines due within 7 days, ${inWindow} inside the next 35 days.${
+          busiest.count > 0 ? ` Busiest day ${label(new Date(busiest.ms))} with ${busiest.count}.` : ""
+        }`}
+        className="mt-2.5 flex h-16 items-end gap-[3px]"
+      >
+        {days.map((d) => {
+          const h = d.count === 0 ? 2 : Math.max(8, Math.round((d.count / maxCount) * 100));
+          const hot = d.offset < 7;
+          const isToday = d.offset === 0;
+          const title =
+            d.count === 0
+              ? isToday
+                ? `Today · ${label(new Date(d.ms))} — nothing due`
+                : `${label(new Date(d.ms))} — nothing due`
+              : `${isToday ? "Today · " : ""}${label(new Date(d.ms))} — ${d.count} due: ${d.titles.join(", ")}${d.count > d.titles.length ? `, +${d.count - d.titles.length} more` : ""}`;
+          return (
+            <div
+              key={d.offset}
+              title={title}
+              className={cn(
+                "group relative flex h-full min-w-0 flex-1 cursor-default flex-col justify-end rounded-b-sm",
+                isToday && "-mx-[3px] rounded-md ring-1 ring-primary/70"
+              )}
+            >
+              <div
+                style={{ height: `${h}%` }}
+                className={cn(
+                  "w-full rounded-[3px] transition-all duration-200 group-hover:opacity-80",
+                  d.count === 0
+                    ? "bg-border/50"
+                    : isToday
+                      ? "bg-primary shadow-[0_0_8px_-2px] shadow-primary/60"
+                      : hot
+                        ? "bg-gradient-to-t from-amber-500/80 to-amber-400/90"
+                        : "bg-gradient-to-t from-slate-400/50 to-slate-400/70 dark:from-slate-500/50 dark:to-slate-500/70"
+                )}
+              />
+            </div>
+          );
+        })}
+      </div>
+      <div className="mt-1 flex items-center justify-between text-[10px] tabular-nums text-muted-foreground">
+        <span className="font-semibold text-primary">Today</span>
+        <span>+7d</span>
+        <span>+14d</span>
+        <span>+21d</span>
+        <span>+28d</span>
+        <span>+34d</span>
+      </div>
+    </div>
+  );
+}
+
 function AlaSection() {
   const { data, isPending, isError, error } = useQuery({
     queryKey: qk.assignments,
@@ -1272,14 +1414,19 @@ function AlaSection() {
   const counts = useMemo(() => {
     let pending = 0;
     let overdue = 0;
+    let soon = 0;
     let submitted = 0;
     for (const a of data?.assignments ?? []) {
       if (a.status === "ACTIVE") {
-        if (new Date(a.dueAt).getTime() < now) overdue++;
-        else pending++;
+        const dueMs = new Date(a.dueAt).getTime();
+        if (dueMs < now) overdue++;
+        else {
+          pending++;
+          if (dueMs - now <= 7 * 86_400_000) soon++;
+        }
       } else submitted++;
     }
-    return { all: (data?.assignments.length ?? 0) as number, pending, overdue, submitted };
+    return { all: (data?.assignments.length ?? 0) as number, pending, overdue, soon, submitted };
   }, [data, now]);
 
   /* Search + status filter + sort — applied per row, then empty groups drop out. */
@@ -1310,7 +1457,10 @@ function AlaSection() {
             const done = a.status !== "ACTIVE";
             if (status === "submitted") return done;
             if (done) return false;
-            return status === "overdue" ? new Date(a.dueAt).getTime() < now : new Date(a.dueAt).getTime() >= now;
+            const dueMs = new Date(a.dueAt).getTime();
+            if (status === "overdue") return dueMs < now;
+            if (status === "soon") return dueMs >= now && dueMs - now <= 7 * 86_400_000;
+            return dueMs >= now;
           });
           if (items.length === 0) return null;
           const submittedCount = items.filter((a) => a.status !== "ACTIVE").length;
@@ -1469,6 +1619,26 @@ function AlaSection() {
           </div>
         ) : (
           <div className="space-y-2.5">
+            {/* Semester-wide completion bar — the "how much is behind me" big picture */}
+            <div className="flex items-center gap-2.5">
+              <div
+                role="progressbar"
+                aria-valuemin={0}
+                aria-valuemax={100}
+                aria-valuenow={total > 0 ? Math.round((submitted / total) * 100) : 0}
+                aria-label={`ALA completion: ${submitted} of ${total} submitted`}
+                className="h-1.5 min-w-0 flex-1 overflow-hidden rounded-full bg-muted"
+              >
+                <div
+                  className="h-full rounded-full bg-gradient-to-r from-emerald-600 to-emerald-400 transition-[width] duration-500"
+                  style={{ width: `${total > 0 ? Math.max(2, Math.round((submitted / total) * 100)) : 0}%` }}
+                />
+              </div>
+              <span className="shrink-0 text-[11px] tabular-nums text-muted-foreground">
+                <span className="font-semibold text-emerald-700 dark:text-emerald-400">{submitted}</span>
+                /{total} submitted
+              </span>
+            </div>
             {/* Search + filter chips + sort — sticky-feeling control row */}
             <div className="flex flex-col gap-2 rounded-xl border border-border/60 bg-muted/25 p-2.5 sm:flex-row sm:items-center">
               <div className="relative min-w-0 flex-1">
@@ -1562,6 +1732,11 @@ function AlaSection() {
             {/* Overdue digest — collapses to nothing the moment no row is overdue */}
             {!searching && (
               <AlaOverdueDigest groups={groups} onViewOverdue={() => setStatus("overdue")} />
+            )}
+
+            {/* Deadline radar — 35-day density strip (hidden while filtering, like the digest) */}
+            {!searching && data && (
+              <AlaDeadlineRadar assignments={data.assignments} now={now} />
             )}
 
             {visibleGroups.length === 0 ? (
