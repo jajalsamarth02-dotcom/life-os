@@ -3,13 +3,13 @@
 import { useEffect, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { motion } from "framer-motion";
-import { CheckCircle2, GraduationCap, PanelRightOpen, Target, TrendingUp, Users, XCircle, Zap } from "lucide-react";
+import { CheckCircle2, GraduationCap, Inbox, PanelRightOpen, Target, TrendingUp, Users, XCircle, Zap } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Slider } from "@/components/ui/slider";
 import { cn } from "@/lib/utils";
-import { attendanceStatus } from "@/lib/attendance";
+import { attendanceStatus, classesToReachTarget } from "@/lib/attendance";
 import { fetchAttendance, fetchHistory, qk } from "./api";
 import { HistoryHeatmap } from "./history-heatmap";
 import { RecoveryPlan } from "./recovery-plan";
@@ -50,6 +50,13 @@ function WhatIfPlanner({ s }: { s: SubjectView }) {
   const c = statusColors(projectedStatus);
   const delta = projected - s.percentage;
   const active = n > 0;
+  /* Recovery hint must reflect the POST-simulation numbers: after skipping n
+     classes the old classesToTarget is stale (it ignores the skips). */
+  const recoverClasses = classesToReachTarget(
+    mode === "attend" ? s.present + n : s.present,
+    futureTotal,
+    s.targetPct
+  );
 
   return (
     <div
@@ -109,9 +116,18 @@ function WhatIfPlanner({ s }: { s: SubjectView }) {
         the next <b className="tabular-nums text-foreground">{n}</b> {n === 1 ? "class" : "classes"}
       </p>
       <div className="mt-0.5 flex items-baseline gap-1.5">
-        <span className={cn("text-lg font-bold tabular-nums", c.text)}>
-          <AnimatedNumber value={projected} suffix="%" />
-        </span>
+        {s.total === 0 && n === 0 ? (
+          <span
+            className={cn("text-lg font-bold tabular-nums", c.text)}
+            title="No classes held yet — the ERP has not recorded attendance for this subject"
+          >
+            —
+          </span>
+        ) : (
+          <span className={cn("text-lg font-bold tabular-nums", c.text)}>
+            <AnimatedNumber value={projected} suffix="%" />
+          </span>
+        )}
         {n > 0 && (
           <span className={cn("text-[11px] font-medium tabular-nums", c.text)}>
             ({delta >= 0 ? "+" : "−"}{Math.abs(delta).toFixed(2)} pts)
@@ -143,7 +159,9 @@ function WhatIfPlanner({ s }: { s: SubjectView }) {
               : `Still at/above the ${s.targetPct}% target.`
             : projectedStatus === "warning"
               ? `Within 5 pts of the ${s.targetPct}% target — close, not safe.`
-              : `Below the ${s.targetPct}% target — ${s.classesToTarget} attended ${s.classesToTarget === 1 ? "class" : "classes"} needed to recover.`}
+              : recoverClasses > 0
+                ? `Below the ${s.targetPct}% target — ${recoverClasses} attended ${recoverClasses === 1 ? "class" : "classes"} needed to recover.`
+                : `Below the ${s.targetPct}% target — no class schedule to recover with yet.`}
         </p>
       )}
     </div>
@@ -197,9 +215,18 @@ function SubjectCard({
               </CardDescription>
             </div>
             <div className="flex w-24 shrink-0 flex-col items-end gap-1">
-              <span className={cn("shrink-0 rounded-md px-2 py-1 text-sm font-bold tabular-nums", c.bg, c.text)}>
-                <AnimatedNumber value={s.percentage} suffix="%" />
-              </span>
+              {s.status === "none" ? (
+                <span
+                  className={cn("shrink-0 rounded-md px-2 py-1 text-sm font-bold tabular-nums", c.bg, c.text)}
+                  title="No classes held yet — the ERP has not recorded attendance for this subject"
+                >
+                  —
+                </span>
+              ) : (
+                <span className={cn("shrink-0 rounded-md px-2 py-1 text-sm font-bold tabular-nums", c.bg, c.text)}>
+                  <AnimatedNumber value={s.percentage} suffix="%" />
+                </span>
+              )}
               {spark.length >= 2 && (
                 <Sparkline
                   points={spark.map((p) => p.percentage)}
@@ -247,6 +274,11 @@ function SubjectCard({
                   Exactly on target
                 </Badge>
               )
+            ) : s.status === "none" ? (
+              <Badge variant="outline" className="gap-1 text-muted-foreground">
+                <Inbox className="size-3" aria-hidden="true" />
+                No classes yet
+              </Badge>
             ) : (
               <Badge variant="outline" className="gap-1 border-amber-500/40 text-amber-700 dark:text-amber-400">
                 <TrendingUp className="size-3" aria-hidden="true" />
@@ -258,7 +290,9 @@ function SubjectCard({
           <p className="text-xs text-muted-foreground">
             {safe
               ? `You can miss ${s.canSkip} more ${s.canSkip === 1 ? "class" : "classes"} and stay above the ${s.targetPct}% target${s.hasCustomTarget ? " (custom)" : ""}.`
-              : `Attend the next ${s.classesToTarget} ${s.classesToTarget === 1 ? "class" : "classes"} to reach ${s.targetPct}%${s.hasCustomTarget ? " (custom target)" : ""}.`}
+              : s.status === "none"
+                ? `No classes held yet — targets and planning hints appear once the ERP records the first class.`
+                : `Attend the next ${s.classesToTarget} ${s.classesToTarget === 1 ? "class" : "classes"} to reach ${s.targetPct}%${s.hasCustomTarget ? " (custom target)" : ""}.`}
           </p>
 
           <div className="mt-auto space-y-2">

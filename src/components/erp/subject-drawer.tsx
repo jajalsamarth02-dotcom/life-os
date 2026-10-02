@@ -186,10 +186,19 @@ function WhatIfPlanner({ s, target }: { s: SubjectView; target: number }) {
             Projected attendance
           </p>
           <div className="mt-0.5 flex items-baseline gap-2">
-            <span className={cn("text-2xl font-bold tabular-nums", pc.text)}>
-              {n === 0 ? s.percentage.toFixed(2) : projected.toFixed(2)}
-              <span className="text-sm font-semibold">%</span>
-            </span>
+            {s.total === 0 && n === 0 ? (
+              <span
+                className={cn("text-2xl font-bold tabular-nums", pc.text)}
+                title="No classes held yet — the ERP has not recorded attendance for this subject"
+              >
+                —
+              </span>
+            ) : (
+              <span className={cn("text-2xl font-bold tabular-nums", pc.text)}>
+                {n === 0 ? s.percentage.toFixed(2) : projected.toFixed(2)}
+                <span className="text-sm font-semibold">%</span>
+              </span>
+            )}
             {n > 0 && (
               <span
                 className={cn(
@@ -204,7 +213,9 @@ function WhatIfPlanner({ s, target }: { s: SubjectView; target: number }) {
           </div>
         </div>
         <div className="text-right">
-          {projectedStatus === "safe" ? (
+          {s.total === 0 && n === 0 ? (
+            <p className="text-xs font-medium italic text-muted-foreground">No classes yet</p>
+          ) : projectedStatus === "safe" ? (
             <p className="flex items-center gap-1 text-xs font-medium text-emerald-700 dark:text-emerald-400">
               <CheckCircle2 className="size-3.5" aria-hidden="true" /> Above {target}% target
             </p>
@@ -707,7 +718,13 @@ export function SubjectDrawer({
             aria-hidden="true"
             className={cn(
               "pointer-events-none absolute -right-10 -top-14 size-40 rounded-full blur-2xl opacity-30",
-              subject.status === "safe" ? "bg-emerald-500" : subject.status === "warning" ? "bg-amber-500" : "bg-red-500"
+              subject.status === "safe"
+                ? "bg-emerald-500"
+                : subject.status === "warning"
+                  ? "bg-amber-500"
+                  : subject.status === "danger"
+                    ? "bg-red-500"
+                    : "bg-slate-400"
             )}
           />
           <div className="relative flex items-start justify-between gap-3 pr-10 sm:pr-5">
@@ -726,9 +743,18 @@ export function SubjectDrawer({
               </p>
             </div>
             <div className="shrink-0 text-right">
-              <p className={cn("text-3xl font-bold tracking-tight tabular-nums", c.text)}>
-                <AnimatedNumber value={subject.percentage} suffix="%" />
-              </p>
+              {subject.status === "none" ? (
+                <p
+                  className={cn("text-3xl font-bold tracking-tight tabular-nums", c.text)}
+                  title="No classes held yet — the ERP has not recorded attendance for this subject"
+                >
+                  —
+                </p>
+              ) : (
+                <p className={cn("text-3xl font-bold tracking-tight tabular-nums", c.text)}>
+                  <AnimatedNumber value={subject.percentage} suffix="%" />
+                </p>
+              )}
               <p className="text-[11px] text-muted-foreground">
                 target {subject.targetPct}%{subject.hasCustomTarget ? " · custom" : ""}
               </p>
@@ -756,13 +782,17 @@ export function SubjectDrawer({
               <p
                 className={cn(
                   "text-lg font-semibold tabular-nums",
-                  subject.classesToTarget > 0 ? "text-amber-600 dark:text-amber-400" : "text-emerald-600 dark:text-emerald-400"
+                  subject.total === 0
+                    ? "text-muted-foreground"
+                    : subject.classesToTarget > 0
+                      ? "text-amber-600 dark:text-amber-400"
+                      : "text-emerald-600 dark:text-emerald-400"
                 )}
               >
-                {subject.classesToTarget > 0 ? subject.classesToTarget : "✓"}
+                {subject.total === 0 ? "—" : subject.classesToTarget > 0 ? subject.classesToTarget : "✓"}
               </p>
               <p className="text-[10px] font-medium uppercase tracking-wide text-muted-foreground">
-                {subject.classesToTarget > 0 ? "To reach" : "On target"}
+                {subject.total === 0 ? "No data" : subject.classesToTarget > 0 ? "To reach" : "On target"}
               </p>
             </div>
           </div>

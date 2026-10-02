@@ -7,6 +7,7 @@ import { toast } from "sonner";
 import { formatDistanceToNowStrict } from "date-fns";
 import {
   ALargeSmall,
+  ArrowRight,
   BarChart3,
   CalendarClock,
   Check,
@@ -120,11 +121,12 @@ export function CommandPalette({
      polled by the ALA section and the app badge), so it costs no extra fetch. */
   const assignmentsQ = useQuery({ queryKey: qk.assignments, queryFn: fetchAssignments, staleTime: 15_000 });
   const nowMs = React.useMemo(() => Date.now(), [assignmentsQ.data]);
-  const deadlineItems = React.useMemo(() => {
+  const { deadlineItems, activeDeadlineCount } = React.useMemo(() => {
     const active = (assignmentsQ.data?.assignments ?? []).filter((a) => a.status === "ACTIVE");
-    return active
-      .sort((a, b) => new Date(a.dueAt).getTime() - new Date(b.dueAt).getTime())
-      .slice(0, 8);
+    const sorted = [...active].sort(
+      (a, b) => new Date(a.dueAt).getTime() - new Date(b.dueAt).getTime()
+    );
+    return { deadlineItems: sorted.slice(0, 8), activeDeadlineCount: active.length };
   }, [assignmentsQ.data]);
   const openDeadline = (title: string) => {
     run(() => {
@@ -208,7 +210,7 @@ export function CommandPalette({
         {deadlineItems.length > 0 && (
           <>
             <CommandGroup
-              heading={`Upcoming deadlines${assignmentsQ.data ? ` · ${(assignmentsQ.data.assignments ?? []).filter((a) => a.status === "ACTIVE").length} active` : ""}`}
+              heading={`Upcoming deadlines${assignmentsQ.data ? ` · ${activeDeadlineCount} active` : ""}`}
             >
               {deadlineItems.map((a) => {
                 const due = new Date(a.dueAt).getTime();
@@ -248,6 +250,20 @@ export function CommandPalette({
                   </CommandItem>
                 );
               })}
+              {activeDeadlineCount > deadlineItems.length && (
+                <CommandItem
+                  value="show all deadlines open reminders ala assignments"
+                  onSelect={() => openDeadline("")}
+                  className="text-muted-foreground"
+                >
+                  <ArrowRight className="size-4 shrink-0" aria-hidden="true" />
+                  <span>
+                    Show all <b className="font-semibold tabular-nums text-foreground">{activeDeadlineCount}</b>{" "}
+                    active deadlines
+                  </span>
+                  <span className="ml-auto text-xs text-muted-foreground">Reminders tab</span>
+                </CommandItem>
+              )}
             </CommandGroup>
             <CommandSeparator />
           </>

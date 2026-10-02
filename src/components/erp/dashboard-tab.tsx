@@ -57,7 +57,8 @@ import {
   TypeIcon,
   useNow,
 } from "./shared";
-import type { AlaUpcomingRow, ChangeEvent, Reminder, SubjectView } from "./types";
+import type { AlaUpcomingRow, ChangeEvent, HistoryPoint, Reminder, SubjectView } from "./types";
+import { Sparkline } from "./trend-chart";
 
 /* ------------------------------------------------------------------ */
 
@@ -70,13 +71,27 @@ const SUBJECT_SORTS = [
 
 type SubjectSort = (typeof SUBJECT_SORTS)[number]["key"];
 
+/* No-data subjects (total === 0) have no attendance yet — a 0.00% is not a
+   real value, so they never compete with actual percentages: they sink to
+   the end of both directions with a name tie-break. */
+function noDataLast(a: SubjectView, b: SubjectView): number {
+  const an = a.total === 0;
+  const bn = b.total === 0;
+  if (an !== bn) return an ? 1 : -1;
+  return 0;
+}
+
 function sortSubjects(list: SubjectView[], sort: SubjectSort): SubjectView[] {
   const copy = [...list];
   switch (sort) {
     case "lowest":
-      return copy.sort((a, b) => a.percentage - b.percentage);
+      return copy.sort(
+        (a, b) => noDataLast(a, b) || a.percentage - b.percentage || a.name.localeCompare(b.name)
+      );
     case "highest":
-      return copy.sort((a, b) => b.percentage - a.percentage);
+      return copy.sort(
+        (a, b) => noDataLast(a, b) || b.percentage - a.percentage || a.name.localeCompare(b.name)
+      );
     case "name":
       return copy.sort((a, b) => a.name.localeCompare(b.name));
     case "recent":
@@ -573,13 +588,28 @@ function ChangeRow({ c, onOpen }: { c: ChangeEvent; onOpen?: (code: string) => v
 
 /* ------------------------------------------------------------------ */
 
-function SubjectRow({ s, onOpen, shimmer }: { s: SubjectView; onOpen: () => void; shimmer: boolean }) {
+function SubjectRow({
+  s,
+  onOpen,
+  shimmer,
+  spark,
+}: {
+  s: SubjectView;
+  onOpen: () => void;
+  shimmer: boolean;
+  /** Per-subject snapshot history — when ≥2 points, a mini trend line rides the row. */
+  spark?: HistoryPoint[];
+}) {
   const c = statusColors(s.status);
+  const trend = (spark ?? []).map((p) => p.percentage);
   return (
     <button
       type="button"
       onClick={onOpen}
-      className="flex w-full items-center gap-3 rounded-lg border border-border/50 p-3 text-left transition-all hover:border-primary/40 hover:bg-muted/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+      className={cn(
+        "flex w-full items-center gap-3 rounded-lg border border-border/50 p-3 text-left transition-all hover:border-primary/40 hover:bg-muted/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+        s.status === "none" && "border-dashed bg-muted/20"
+      )}
       aria-label={`Open attendance details for ${s.name}`}
     >
       <span className={cn("hidden shrink-0 rounded-md px-2 py-1 font-mono text-[11px] font-semibold sm:block", c.bg, c.text)}>
@@ -588,11 +618,22 @@ function SubjectRow({ s, onOpen, shimmer }: { s: SubjectView; onOpen: () => void
       <div className="min-w-0 flex-1">
         <div className="flex items-center justify-between gap-2">
           <p className="min-w-0 truncate text-sm font-medium">{s.name}</p>
-          <span className={cn("shrink-0 text-sm font-bold tabular-nums", c.text)}>{s.percentage.toFixed(2)}%</span>
+          {s.status === "none" ? (
+            <span
+              className={cn("shrink-0 text-sm font-bold tabular-nums", c.text)}
+              title="No classes held yet — the ERP has not recorded attendance for this subject"
+            >
+              —
+            </span>
+          ) : (
+            <span className={cn("shrink-0 text-sm font-bold tabular-nums", c.text)}>{s.percentage.toFixed(2)}%</span>
+          )}
         </div>
         <div className="mt-1.5 flex items-center gap-2">
           <MiniBar percentage={s.percentage} status={s.status} target={s.targetPct} className="flex-1" shimmer={shimmer} />
-          {s.status !== "safe" && s.classesToTarget > 0 ? (
+          {s.status === "none" ? (
+            <span className="shrink-0 text-[11px] italic text-muted-foreground/80">no classes yet</span>
+          ) : s.status !== "safe" && s.classesToTarget > 0 ? (
             <span className="shrink-0 text-[11px] font-medium text-amber-600 dark:text-amber-400">
               ⚠ needs {s.classesToTarget} more {s.classesToTarget === 1 ? "class" : "classes"}
             </span>
@@ -604,6 +645,17 @@ function SubjectRow({ s, onOpen, shimmer }: { s: SubjectView; onOpen: () => void
           {s.hasCustomTarget && <CustomTargetChip target={s.targetPct} className="shrink-0" />}
         </div>
       </div>
+      {trend.length >= 2 && (
+        <Sparkline
+          points={trend}
+          stroke={c.bar.includes("red") ? "#ef4444" : c.bar.includes("amber") ? "#f59e0b" : "#10b981"}
+          width={56}
+          height={18}
+          target={s.targetPct}
+          className="hidden shrink-0 opacity-70 md:block"
+          ariaLabel={`${s.name} attendance trend, currently ${s.percentage.toFixed(2)}%`}
+        />
+      )}
       <ChevronRight className="size-4 shrink-0 text-muted-foreground/60" aria-hidden="true" />
     </button>
   );
@@ -1038,6 +1090,7 @@ export function DashboardTab({
                   s={s}
                   onOpen={() => setSelectedCode(s.code)}
                   shimmer={data.erp.sync.status === "syncing"}
+                  spark={history.data?.subjects[s.code]}
                 />
               ))}
             </div>
