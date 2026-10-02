@@ -1219,13 +1219,24 @@ const RADAR_WINDOW = 35;
 
 /**
  * Deadline radar — a 35-day density strip of upcoming ACTIVE deadlines.
- * Pure situational awareness: bar height = how many deadlines land that day,
- * amber while inside the 7-day window, muted beyond, and today gets a primary
- * ring + label. Read-only (hover tooltips only) — the digest banner above
- * already owns the "act now" job. The 7-day summary uses the same rolling
+ * Situational awareness + one-click drill-down: bar height = how many
+ * deadlines land that day, amber while inside the 7-day window, muted beyond,
+ * and today gets a primary ring + label. Days with deadlines are real buttons
+ * — clicking one filters the list below to that calendar day (click again or
+ * clear the amber pill to reset). The 7-day summary uses the same rolling
  * clock as the "Due ≤7d" filter chip so the numbers always agree.
  */
-function AlaDeadlineRadar({ assignments, now }: { assignments: Reminder[]; now: number }) {
+function AlaDeadlineRadar({
+  assignments,
+  now,
+  selectedOffset,
+  onPickDay,
+}: {
+  assignments: Reminder[];
+  now: number;
+  selectedOffset: number | null;
+  onPickDay: (offset: number | null) => void;
+}) {
   const days = useMemo<RadarDay[]>(() => {
     const start = new Date(now);
     start.setHours(0, 0, 0, 0);
@@ -1290,45 +1301,67 @@ function AlaDeadlineRadar({ assignments, now }: { assignments: Reminder[]; now: 
         </p>
       </div>
       <div
-        role="img"
+        role="group"
         aria-label={`Deadline radar: ${inWeek} deadlines due within 7 days, ${inWindow} inside the next 35 days.${
           busiest.count > 0 ? ` Busiest day ${label(new Date(busiest.ms))} with ${busiest.count}.` : ""
-        }`}
+        } Days with deadlines are clickable filters.`}
         className="mt-2.5 flex h-16 items-end gap-[3px]"
       >
         {days.map((d) => {
           const h = d.count === 0 ? 2 : Math.max(8, Math.round((d.count / maxCount) * 100));
           const hot = d.offset < 7;
           const isToday = d.offset === 0;
+          const selected = selectedOffset === d.offset;
+          const clickable = d.count > 0;
           const title =
             d.count === 0
               ? isToday
                 ? `Today · ${label(new Date(d.ms))} — nothing due`
                 : `${label(new Date(d.ms))} — nothing due`
-              : `${isToday ? "Today · " : ""}${label(new Date(d.ms))} — ${d.count} due: ${d.titles.join(", ")}${d.count > d.titles.length ? `, +${d.count - d.titles.length} more` : ""}`;
-          return (
+              : `${isToday ? "Today · " : ""}${label(new Date(d.ms))} — ${d.count} due: ${d.titles.join(", ")}${d.count > d.titles.length ? `, +${d.count - d.titles.length} more` : ""}${clickable ? " — click to filter" : ""}`;
+          const bar = (
             <div
-              key={d.offset}
-              title={title}
+              style={{ height: `${h}%` }}
               className={cn(
-                "group relative flex h-full min-w-0 flex-1 cursor-default flex-col justify-end rounded-b-sm",
-                isToday && "-mx-[3px] rounded-md ring-1 ring-primary/70"
+                "w-full rounded-[3px] transition-all duration-200 group-hover:opacity-80",
+                d.count === 0
+                  ? "bg-border/50"
+                  : isToday
+                    ? "bg-primary shadow-[0_0_8px_-2px] shadow-primary/60"
+                    : hot
+                      ? "bg-gradient-to-t from-amber-500/80 to-amber-400/90"
+                      : "bg-gradient-to-t from-slate-400/50 to-slate-400/70 dark:from-slate-500/50 dark:to-slate-500/70",
+                selected && "brightness-110 saturate-150"
+              )}
+            />
+          );
+          const shell = cn(
+            "group relative flex h-full min-w-0 flex-1 flex-col justify-end rounded-b-sm",
+            isToday && "-mx-[3px] rounded-md ring-1 ring-primary/70",
+            selected && "z-10 rounded-md ring-2 ring-primary/80 bg-primary/[0.06]"
+          );
+          if (!clickable) {
+            return (
+              <div key={d.offset} title={title} className={cn(shell, "cursor-default")}>
+                {bar}
+              </div>
+            );
+          }
+          return (
+            <button
+              key={d.offset}
+              type="button"
+              title={title}
+              aria-pressed={selected}
+              aria-label={`Filter the list to ${isToday ? "today" : label(new Date(d.ms))} — ${d.count} deadline${d.count === 1 ? "" : "s"} due`}
+              onClick={() => onPickDay(selected ? null : d.offset)}
+              className={cn(
+                shell,
+                "cursor-pointer rounded-md outline-none transition-shadow hover:ring-1 hover:ring-primary/40 focus-visible:ring-2 focus-visible:ring-ring"
               )}
             >
-              <div
-                style={{ height: `${h}%` }}
-                className={cn(
-                  "w-full rounded-[3px] transition-all duration-200 group-hover:opacity-80",
-                  d.count === 0
-                    ? "bg-border/50"
-                    : isToday
-                      ? "bg-primary shadow-[0_0_8px_-2px] shadow-primary/60"
-                      : hot
-                        ? "bg-gradient-to-t from-amber-500/80 to-amber-400/90"
-                        : "bg-gradient-to-t from-slate-400/50 to-slate-400/70 dark:from-slate-500/50 dark:to-slate-500/70"
-                )}
-              />
-            </div>
+              {bar}
+            </button>
           );
         })}
       </div>
@@ -1340,6 +1373,11 @@ function AlaDeadlineRadar({ assignments, now }: { assignments: Reminder[]; now: 
         <span>+28d</span>
         <span>+34d</span>
       </div>
+      {selectedOffset == null ? (
+        <p className="mt-1 text-[10px] text-muted-foreground/70">
+          Click a bar to see that day&apos;s deadlines.
+        </p>
+      ) : null}
     </div>
   );
 }
@@ -1357,6 +1395,8 @@ function AlaSection() {
   const [status, setStatus] = useState<AlaStatusFilter>("all");
   const [sort, setSort] = useState<AlaSort>("deadline");
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
+  /** Radar drill-down: calendar-day offset (0 = today) the list is filtered to. */
+  const [dayOffset, setDayOffset] = useState<number | null>(null);
 
   /* Deep-focus from the command palette (erp:focus-ala, detail = search text):
      isolates the target ALA row by pre-filling the search box. */
@@ -1367,6 +1407,7 @@ function AlaSection() {
         setQuery(q);
         setStatus("all");
         setSort("deadline");
+        setDayOffset(null);
       }
     };
     window.addEventListener("erp:focus-ala", handler);
@@ -1429,11 +1470,18 @@ function AlaSection() {
     return { all: (data?.assignments.length ?? 0) as number, pending, overdue, soon, submitted };
   }, [data, now]);
 
-  /* Search + status filter + sort — applied per row, then empty groups drop out. */
+  /* Search + status filter + radar day drill-down — applied per row, then empty groups drop out. */
+  const dayStartMs = useMemo(() => {
+    if (dayOffset == null) return null;
+    const d = new Date(now);
+    d.setHours(0, 0, 0, 0);
+    return d.getTime() + dayOffset * 86_400_000;
+  }, [dayOffset, now]);
+
   const visibleGroups = useMemo<AlaGroup[]>(() => {
     const q = query.trim().toLowerCase();
     let list = groups;
-    if (q || status !== "all") {
+    if (q || status !== "all" || dayStartMs != null) {
       list = groups
         .map((g) => {
           const matchesQuery =
@@ -1453,6 +1501,11 @@ function AlaSection() {
               a.title.toLowerCase().includes(q) ||
               (a.description ?? "").toLowerCase().includes(q)
             )) return false;
+            if (dayStartMs != null) {
+              const due = new Date(a.dueAt);
+              due.setHours(0, 0, 0, 0);
+              if (due.getTime() !== dayStartMs) return false;
+            }
             if (status === "all") return true;
             const done = a.status !== "ACTIVE";
             if (status === "submitted") return done;
@@ -1481,7 +1534,7 @@ function AlaSection() {
       list = [...list].sort((x, y) => (x.name ?? x.code).localeCompare(y.name ?? y.code));
     }
     return list;
-  }, [groups, query, status, sort, now]);
+  }, [groups, query, status, sort, now, dayStartMs]);
 
   const total = data?.assignments.length ?? 0;
   const submitted = counts.submitted;
@@ -1697,7 +1750,7 @@ function AlaSection() {
               </div>
             </div>
 
-            {/* Status filter chips with live counts */}
+            {/* Status filter chips with live counts + active day-filter pill */}
             <div className="flex flex-wrap items-center gap-1.5" role="group" aria-label="Filter by status">
               {ALA_STATUS_META.map((f) => {
                 const active = status === f.key;
@@ -1727,16 +1780,34 @@ function AlaSection() {
                   </button>
                 );
               })}
+              {dayOffset != null && dayStartMs != null && (
+                <button
+                  type="button"
+                  onClick={() => setDayOffset(null)}
+                  aria-label={`Clear the day filter (showing rows due ${fmtDay(new Date(dayStartMs).toISOString())})`}
+                  title="Show every deadline again"
+                  className="flex items-center gap-1.5 rounded-full border border-amber-500/50 bg-amber-500/15 px-2.5 py-1 text-xs font-semibold text-amber-800 shadow-sm transition-colors hover:bg-amber-500/25 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring dark:text-amber-300"
+                >
+                  <CalendarDays className="size-3.5" aria-hidden="true" />
+                  Due {fmtDay(new Date(dayStartMs).toISOString())}
+                  <X className="size-3.5" aria-hidden="true" />
+                </button>
+              )}
             </div>
 
-            {/* Overdue digest — collapses to nothing the moment no row is overdue */}
-            {!searching && (
+            {/* Overdue digest — collapses to nothing the moment any filter is active */}
+            {!searching && dayOffset == null && (
               <AlaOverdueDigest groups={groups} onViewOverdue={() => setStatus("overdue")} />
             )}
 
-            {/* Deadline radar — 35-day density strip (hidden while filtering, like the digest) */}
+            {/* Deadline radar — 35-day density strip; stays visible for the selected day */}
             {!searching && data && (
-              <AlaDeadlineRadar assignments={data.assignments} now={now} />
+              <AlaDeadlineRadar
+                assignments={data.assignments}
+                now={now}
+                selectedOffset={dayOffset}
+                onPickDay={setDayOffset}
+              />
             )}
 
             {visibleGroups.length === 0 ? (

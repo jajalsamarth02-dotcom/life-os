@@ -1565,3 +1565,28 @@ Unresolved issues / risks & next-phase priorities:
 6. Radar band note: the amber band is calendar-day based (offset<7) while the chip/summary use the rolling 7×24h clock — a row due 6d18h out can sit on the +7d slate column while the header says "2 due within 7 days". Documented in the docstring; acceptable, revisit only if a user complains.
 7. Backlog unchanged: L/H/E columns folding (needs user consent), SMTP digest (needs credentials), TZ cosmetic, per-semester scoping (schema), weekly bunk-budget (timetable slots still empty), backup restore (needs user consent for a write endpoint).
 8. Keeper cron 430680 must stay alive; worklog protocol: append-only, three-section handover.
+
+---
+Task ID: 32
+Agent: Z.ai Code (main orchestrator)
+Task: Round task 01:30+08 — status assessment, cold-load QA, radar drill-down: clickable day bars → calendar-day list filter with amber clear pill; radar becomes an interactive control.
+
+Current project status / assessment:
+- Server healthy all round: 200s throughout; browser CLOSED after QA; 0 console errors. Live data unchanged: overall 66.67% (2/3, target 75%), 47 ALA rows (6 submitted / 21 pending / 20 overdue), title "(20) ERP Sync · 66.67%".
+- QA at round start confirmed Task 31 features live (35-day radar, Due ≤7d chip, completion bar). Gap analysis: the radar was display-only — you could SEE the Oct 30/31 wave (13 rows) but the only way to list those rows was scrolling through all 7 groups. Also checked the numbered tab badges (Dashboard 1 … Settings 4): keyboard shortcuts 1-4 ALREADY exist in page.tsx (plus ?/s/t) — no work needed there, avoided a duplicate build.
+
+Completed modifications / verified:
+1. NEW INTERACTION — radar day drill-down (reminders-tab.tsx): bars with count>0 are now real <button>s (aria-pressed, per-bar aria-label "Filter the list to {date} — N deadlines due", hover ring, focus-visible ring, title gains "— click to filter"); empty days stay inert divs. Clicking toggles a dayOffset state in AlaSection; clicking the selected bar again clears it. Container role downgraded img→group (interactive children now legal). Hint line "Click a bar to see that day's deadlines." shows only when nothing is selected.
+2. NEW FILTER — calendar-day filter in AlaSection: dayStartMs memo (local midnight + offset × 86400000, same bucket math as the radar); visibleGroups intersects query ∧ status ∧ day (day check runs before status, matches rows by local due DAY regardless of submission status — the LIST shows the day's full picture incl. already-submitted rows, while the radar bar measures pending pressure; ground truth: Oct 30 = 9 ACTIVE + 3 SUBMITTED = 12 list rows for the 9-bar). erp:focus-ala handler now also clears dayOffset (palette focus flow stays isolating). Radar stays visible while a day is selected (ringed column = context); digest hides during any filtering.
+3. NEW UI — amber clear pill in the chips row when a day is active: "📅 Due 30 Oct 2026 ×" (CalendarDays + X, amber border/bg, hover deepen, aria-label "Clear the day filter (showing rows due …)"). Pill survives status-chip changes so the day context never gets lost behind the user's back.
+4. STYLING — selected column: z-10 + ring-2 ring-primary/80 + bg-primary/[0.06] + bar brightness-110 saturate-150; clickable bars rounded-md + hover:ring-1 hover:ring-primary/40; pill styling as above; chips row wraps cleanly with the pill (verified at desktop + narrow).
+5. Verification: tsc --noEmit → zero errors under app src/. agent-browser QA: exactly 4 clickable bars with labels 6 Oct(1)/9 Oct(1)/30 Oct(9)/31 Oct(4) — matches ground truth buckets exactly; 30 Oct drill → 3 groups, 12 rows (9 pending + 3 submitted, verified vs API), pill "Due 30 Oct 2026", bar aria-pressed=true, digest gone, radar kept; pill click → full 7-group list + digest back; 31 Oct drill → 4 rows, second click on same bar → cleared, hint line back; combined day+Overdue → honest "Nothing matches" empty state with radar hidden and pill still present. NOTE (QA hygiene): the first "combined filter" probe clicked nothing — inactive chips have aria-pressed="false", so the `aria-pressed=true` selector missed; re-queried by textContent and it worked. Screenshots: /tmp/qa-r32-dayfilter.png + /tmp/qa-r32-dayfilter2.png (light, pill + ringed column + filtered list), /tmp/qa-r32-dayfilter-dark.png (dark) — all clean. Console: 0 errors. Browser CLOSED; server 200 after.
+
+Unresolved issues / risks & next-phase priorities:
+1. Day-filter semantics note (intentional): radar bar = ACTIVE count (urgency), day-filtered list = ALL rows due that day (incl. submitted). Group headers carry the submitted/total breakdown so the difference is self-explaining.
+2. next.config.ts unrecognized turbopack/memoryLimit key — unchanged Task 17 guidance (pre-existing non-src tsc noise).
+3. User decisions still pending: 2nd free notification channel (Telegram ⭐ / ntfy / Discord / email) and optional fixed daily WhatsApp digest time (digestTime unset — never send test/digest to the real phone during QA).
+4. MilestoneCelebration real target-crossing still pending live data (needs 1 more attended class → 3/4 = 75%). Next ERP sync may trigger it — watch for it next round.
+5. Dashboard subject sparklines still dormant — activates automatically at ≥2 snapshots.
+6. Backlog unchanged: L/H/E columns folding (needs user consent), SMTP digest (needs credentials), TZ cosmetic, per-semester scoping (schema), weekly bunk-budget (timetable slots still empty), backup restore (needs user consent for a write endpoint).
+7. Keeper cron 430680 must stay alive; worklog protocol: append-only, three-section handover.
