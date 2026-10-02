@@ -21,6 +21,7 @@ import {
   Copy,
   Layers,
   Printer,
+  RefreshCw,
   Share2,
   WifiOff,
   XCircle,
@@ -33,7 +34,7 @@ import { Separator } from "@/components/ui/separator";
 import { motion } from "framer-motion";
 import { cn } from "@/lib/utils";
 import { compactErrorText } from "@/lib/compact-error";
-import { fetchDashboard, fetchHistory, qk } from "./api";
+import { fetchDashboard, fetchHistory, fetchSyncLogs, qk } from "./api";
 import { WeeklyDigestDialog } from "./digest-dialog";
 import { MilestoneCelebration, MilestonesStrip } from "./milestones";
 import { SubjectDrawer } from "./subject-drawer";
@@ -471,6 +472,18 @@ function ErpStatusCard({
   };
 }) {
   const now = useNow();
+  /* Sync reliability from the SHARED qk.sync cache (the Settings sync-history
+     card polls the same key — React Query dedupes, no extra traffic when both
+     are mounted). Honest window: only the logs the server still retains. */
+  const logsQ = useQuery({ queryKey: qk.sync, queryFn: fetchSyncLogs, staleTime: 15_000, refetchInterval: 60_000 });
+  const logs = logsQ.data?.logs ?? [];
+  const totalLogs = logs.length;
+  const okLogs = logs.filter((l) => l.status === "success").length;
+  const rate = totalLogs > 0 ? okLogs / totalLogs : null;
+  const rateTone =
+    rate == null ? null : rate >= 0.9 ? "emerald" : rate >= 0.7 ? "amber" : "red";
+  const lastFail = logs.find((l) => l.status !== "success");
+  const syncing = sync.status === "syncing";
   return (
     <Card className="rounded-xl border-border/60">
       <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-3">
@@ -478,7 +491,9 @@ function ErpStatusCard({
           <CardTitle className="text-base tracking-tight">ERP connection</CardTitle>
           <CardDescription className="text-xs">erp.gmiu.edu.in · read-only source of truth</CardDescription>
         </div>
-        {connected ? (
+        {syncing ? (
+          <RefreshCw className="size-5 animate-spin text-primary" aria-hidden="true" />
+        ) : connected ? (
           <CheckCircle2 className="size-5 text-emerald-500" aria-hidden="true" />
         ) : demoMode ? (
           <FlaskConical className="size-5 text-amber-500" aria-hidden="true" />
@@ -515,6 +530,26 @@ function ErpStatusCard({
               )}
             </dd>
           </div>
+          {rate != null && (
+            <div className="flex items-center justify-between gap-2">
+              <dt className="text-muted-foreground">Reliability</dt>
+              <dd
+                className="flex items-center gap-1.5 font-medium tabular-nums"
+                title={`Success rate over the last ${totalLogs} recorded syncs${lastFail ? ` — last failure ${ago(lastFail.startedAt, now)}` : ""}`}
+              >
+                <span
+                  aria-hidden="true"
+                  className={cn(
+                    "size-1.5 shrink-0 rounded-full",
+                    rateTone === "emerald" && "bg-emerald-500",
+                    rateTone === "amber" && "bg-amber-500",
+                    rateTone === "red" && "bg-red-500"
+                  )}
+                />
+                {okLogs}/{totalLogs} OK
+              </dd>
+            </div>
+          )}
           {sync.consecutiveFailures > 0 && (
             <div className="flex items-center justify-between gap-2 rounded-lg bg-amber-500/10 px-2.5 py-1.5 text-amber-700 dark:text-amber-400">
               <dt className="flex items-center gap-1.5 font-medium">

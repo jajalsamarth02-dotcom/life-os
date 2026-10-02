@@ -218,6 +218,19 @@ export default function Home() {
   }, [alaData?.assignments]);
   useAppBadge(overdueAlaCount);
 
+  /* Live tab title: overall attendance at a glance + the unread-convention
+     "(N)" prefix mirroring the app badge (same ACTIVE + past-due rule). Gives
+     desktop tabs and iOS <17 (no setAppBadge) the same at-a-glance signal.
+     Written only on change to avoid needless document mutations. */
+  useEffect(() => {
+    const pct = data?.overall?.percentage;
+    const next =
+      typeof pct === "number"
+        ? `${overdueAlaCount > 0 ? `(${overdueAlaCount}) ` : ""}ERP Sync · ${pct.toFixed(2)}%`
+        : "ERP Sync — Automatic ERP-Sync Student System";
+    if (document.title !== next) document.title = next;
+  }, [data?.overall?.percentage, overdueAlaCount]);
+
   const sync = data?.erp?.sync;
   const mode = data?.mode;
 

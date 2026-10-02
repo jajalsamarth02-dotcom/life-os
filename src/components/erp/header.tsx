@@ -40,13 +40,24 @@ import { fetchDashboard, fetchTimetable, markAllNotificationsRead, postSync, qk 
 import { ago, fmtDT, useNow } from "./shared";
 import type { AppMode, AppNotification, NotificationSeverity } from "./types";
 
+/** Status dot with a soft radiating ping — marks the live/demo connection.
+ *  Hidden ping under prefers-reduced-motion; the static dot always remains. */
+function PingDot({ tone }: { tone: string }) {
+  return (
+    <span className="relative flex size-1.5 shrink-0" aria-hidden="true">
+      <span className={cn("absolute inline-flex h-full w-full animate-ping rounded-full opacity-60 motion-reduce:hidden", tone)} />
+      <span className={cn("relative inline-flex size-1.5 rounded-full", tone)} />
+    </span>
+  );
+}
+
 function ModeBadge({ mode }: { mode: AppMode | undefined }) {
   // Hidden below sm: the demo banner / connection card already communicate the
   // mode, and the 390px header cannot afford the width.
   if (mode === "live") {
     return (
       <Badge className="hidden shrink-0 border-emerald-500/40 bg-emerald-500/10 text-emerald-700 dark:text-emerald-400 sm:inline-flex" variant="outline">
-        <span className="size-1.5 rounded-full bg-emerald-500" aria-hidden="true" />
+        <PingDot tone="bg-emerald-500" />
         LIVE
       </Badge>
     );
@@ -54,7 +65,7 @@ function ModeBadge({ mode }: { mode: AppMode | undefined }) {
   if (mode === "demo") {
     return (
       <Badge className="hidden shrink-0 border-amber-500/40 bg-amber-500/10 text-amber-700 dark:text-amber-400 sm:inline-flex" variant="outline">
-        <span className="size-1.5 rounded-full bg-amber-500" aria-hidden="true" />
+        <PingDot tone="bg-amber-500" />
         DEMO
       </Badge>
     );

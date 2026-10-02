@@ -1461,3 +1461,29 @@ Unresolved issues / risks & next-phase priorities:
 5. Dashboard sparklines are built but dormant until subjects accrue ≥2 snapshots — expected to activate naturally; no action needed.
 6. Backlog unchanged: L/H/E columns folding (server-side parser, needs user consent), SMTP digest (needs credentials), TZ cosmetic, per-semester scoping (schema), weekly bunk-budget (needs timetable slots — still empty), backup restore (needs user consent for a write endpoint).
 7. Keeper cron 430680 must stay alive; worklog protocol: append-only, three-section handover.
+
+---
+Task ID: 28
+Agent: Z.ai Code (main orchestrator)
+Task: Round task 00:30+08 — status assessment, cold-load QA, live document.title feature, sync-reliability row on the ERP connection card, header LIVE/DEMO ping dots.
+
+Current project status / assessment:
+- Server healthy all round: 200s throughout; next-server RSS ~2.04GB post-QA (pre-cap instance — 900MB cap lands on next natural respawn; do NOT manual-restart, spawn reaping per Task 17). Memory ~1.33GB available after QA. No new OOM events.
+- Cold-load QA at round start: 0 console errors. Live data: overall 66.67% (2/3, target 75%), 8 subjects, 20 overdue ALAs, sync logs healthy. Gap analysis vs R18-27: ALA .ics export already exists (reminders-tab exportAlaIcs — do NOT rebuild), but (a) document.title was never set dynamically (tab title was static branding — no at-a-glance signal in desktop tabs or iOS <17 where setAppBadge is unavailable), (b) sync reliability was invisible outside Settings' Sync history card, (c) header LIVE badge dot was static. Chose those three.
+
+Completed modifications / verified:
+1. NEW FEATURE — live document.title (src/app/page.tsx, effect beside useAppBadge): title becomes "(N) ERP Sync · P%" — N = overdue ACTIVE ALAs (SAME rule as the app badge / Reminders overdue banner), P = overall attendance. Falls back to the full metadata title when no dashboard data. Written only on change (string compare) to avoid document churn. VERIFIED: title = "(20) ERP Sync · 66.67%" in live QA — matches 20 overdue ALAs + 66.67% ring exactly.
+2. NEW FEATURE — Reliability row (ErpStatusCard, dashboard-tab.tsx): joins the SHARED qk.sync React-Query cache (Settings' Sync history card polls the same key — deduped, zero extra traffic) and renders "● K/N OK" with a status-colored dot (emerald ≥90%, amber ≥70%, red below). Tooltip states the honest window ("success rate over the last N recorded syncs") and the last failure time via ago(). Hidden when the endpoint returns no logs. VERIFIED: "● 14/15 OK" (93% → emerald) renders under Next-scheduled-sync (screenshot /tmp/qa-r28-erp3.png). NOTE: /api/sync (fetchSyncLogs) retains fewer rows than /api/sync/logs — the row honestly reflects the endpoint's window.
+3. STYLING — header ModeBadge ping dots: new PingDot helper (header.tsx) wraps the LIVE/DEMO badge dot with an animate-ping layer (opacity-60), motion-reduce:hidden so reduced-motion users keep the static dot. NOT CONNECTED stays static. VERIFIED: 2 animate-ping spans on the page (header badge + NEXT UP strip), both intentional.
+4. STYLING — ErpStatusCard syncing state: when sync.status === "syncing" the header icon swaps to a spinning RefreshCw (text-primary) instead of the static green check — the card now visibly reacts during the next scheduled sync. (Live-syncing state not caught in QA window — tsc-verified, standard conditional; observe on the next real sync.)
+5. Verification: tsc --noEmit → zero errors under src/. agent-browser QA: clean reload asserts — title "(20) ERP Sync · 66.67%", reliability "14/15 OK", 2 ping dots, 0 console errors on the settled load. Screenshot /tmp/qa-r28-erp3.png (ERP card with Reliability row) + /tmp/qa-r28-erp2.png (no-data rows from R27 intact). Browser CLOSED immediately; server 200 after.
+6. QA JOURNEY NOTE (repeat of R27 pattern): transient "PingDot is not defined" appeared in console for loads that raced in-flight Fast Refresh rebuilds (two-step edit: usage landed before the helper). Compiled chunk on disk verified correct (function PingDot present); fully-settled clean reloads are error-free. If this pattern keeps recurring across rounds, the quiet-window `rm -rf .next` + keeper respawn mitigation becomes more attractive.
+
+Unresolved issues / risks & next-phase priorities:
+1. Pre-cap instance RSS ~2.04GB — capped (900MB) respawn ≤3 min if the kill line hits; leave alone. Consider quiet-window `rm -rf .next` + keeper respawn if creeping continues.
+2. next.config.ts unrecognized turbopack/memoryLimit key — unchanged Task 17 guidance.
+3. User decisions still pending: 2nd free notification channel (Telegram ⭐ / ntfy / Discord / email) and optional fixed daily WhatsApp digest time (digestTime unset — never send test/digest to the real phone during QA).
+4. MilestoneCelebration real target-crossing still pending live data (needs 1 more attended class → 3/4 = 75%).
+5. Dashboard subject sparklines (R27) still dormant — every subject has exactly 1 snapshot; activates automatically on the next attendance change.
+6. Backlog unchanged: L/H/E columns folding (server-side parser, needs user consent), SMTP digest (needs credentials), TZ cosmetic, per-semester scoping (schema), weekly bunk-budget (needs timetable slots — still empty), backup restore (needs user consent for a write endpoint).
+7. Keeper cron 430680 must stay alive; worklog protocol: append-only, three-section handover.
