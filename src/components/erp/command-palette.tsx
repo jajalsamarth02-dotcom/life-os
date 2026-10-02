@@ -25,6 +25,7 @@ import {
   Sun,
   Target,
   Timer,
+  Zap,
 } from "lucide-react";
 import {
   CommandDialog,
@@ -403,6 +404,18 @@ export function CommandPalette({
               Simulate ERP change (demo)
             </CommandItem>
           )}
+          <CommandItem
+            value="what-if simulator overall attendance project miss attend classes future"
+            onSelect={() =>
+              run(() => {
+                onNavigate("attendance");
+                window.setTimeout(() => window.dispatchEvent(new CustomEvent("erp:goto-whatif")), 180);
+              })
+            }
+          >
+            <Zap className="size-4 text-amber-500" aria-hidden="true" />
+            Open the what-if simulator
+          </CommandItem>
           <CommandItem
             value="print report save pdf attendance"
             onSelect={() => run(() => window.print())}

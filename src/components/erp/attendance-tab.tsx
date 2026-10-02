@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { motion } from "framer-motion";
 import { CheckCircle2, GraduationCap, Inbox, PanelRightOpen, Target, TrendingUp, Users, XCircle, Zap } from "lucide-react";
@@ -29,6 +29,7 @@ import {
 } from "./shared";
 import { AnimatedNumber, ExportAttendanceButton, Sparkline, TrendSection } from "./trend-chart";
 import type { HistoryResponse, SubjectView } from "./types";
+import { WhatIfOverall } from "./what-if-overall";
 
 const SUBJECT_LINE_COLORS = ["#10b981", "#f59e0b", "#84cc16", "#f97316", "#14b8a6", "#a8a29e", "#ef4444"];
 
@@ -362,6 +363,24 @@ export function AttendanceTab({ onOpenSettings }: { onOpenSettings: () => void }
     return () => window.removeEventListener("erp:open-subject", handler);
   }, []);
 
+  /* Command palette → deep-link to the overall what-if simulator: scroll it
+     into view and flash the card ring so the target is obvious. */
+  const simRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    const goto = () => {
+      const el = simRef.current;
+      if (!el) return;
+      el.scrollIntoView({ behavior: "smooth", block: "center" });
+      el.classList.add("ring-2", "ring-primary/50", "ring-offset-2", "ring-offset-background");
+      window.setTimeout(
+        () => el.classList.remove("ring-2", "ring-primary/50", "ring-offset-2", "ring-offset-background"),
+        1800
+      );
+    };
+    window.addEventListener("erp:goto-whatif", goto);
+    return () => window.removeEventListener("erp:goto-whatif", goto);
+  }, []);
+
   const selectedSubject = data?.subjects.find((x) => x.code === selectedCode) ?? null;
 
   if (isPending) {
@@ -483,6 +502,11 @@ export function AttendanceTab({ onOpenSettings }: { onOpenSettings: () => void }
           </div>
         </CardContent>
       </Card>
+
+      {/* Overall what-if simulator (aggregate sibling of the drawer planner) */}
+      <div ref={simRef} className="scroll-mt-24 rounded-xl">
+        <WhatIfOverall overall={overall} target={target} />
+      </div>
 
       {/* Recovery pace & ETA, measured from sync snapshots */}
       <RecoveryPlan overall={overall} subjects={subjects} target={target} history={history.data} />

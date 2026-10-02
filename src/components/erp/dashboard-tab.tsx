@@ -1072,22 +1072,24 @@ export function DashboardTab({
                 <span className="font-semibold text-foreground">{overall.total}</span> classes
                 <span className="text-muted-foreground/70"> ({overall.absent} missed)</span>
               </p>
+              {/* Plain inline paragraphs — flex+gap chunks broke sentences into
+                  independently-wrapping fragments at card width. */}
               <div className="space-y-1 text-sm">
                 {overall.classesToTarget > 0 ? (
-                  <p className="flex items-center justify-center gap-1.5 text-amber-600 dark:text-amber-400 sm:justify-start">
-                    <ArrowRight className="size-3.5 shrink-0" aria-hidden="true" />
+                  <p className="text-amber-600 dark:text-amber-400">
+                    <ArrowRight className="mr-1 inline size-3.5 shrink-0 align-[-3px]" aria-hidden="true" />
                     Attend the next <b className="tabular-nums">{overall.classesToTarget}</b>{" "}
                     {overall.classesToTarget === 1 ? "class" : "classes"} to reach {target}%
                   </p>
                 ) : (
-                  <p className="flex items-center justify-center gap-1.5 text-emerald-600 dark:text-emerald-400 sm:justify-start">
-                    <CheckCircle2 className="size-3.5 shrink-0" aria-hidden="true" />
+                  <p className="text-emerald-600 dark:text-emerald-400">
+                    <CheckCircle2 className="mr-1 inline size-3.5 shrink-0 align-[-3px]" aria-hidden="true" />
                     You are at or above the {target}% target
                   </p>
                 )}
                 {overall.canSkip > 0 && (
-                  <p className="flex items-center justify-center gap-1.5 text-muted-foreground sm:justify-start">
-                    <CalendarClock className="size-3.5 shrink-0" aria-hidden="true" />
+                  <p className="text-muted-foreground">
+                    <CalendarClock className="mr-1 inline size-3.5 shrink-0 align-[-3px]" aria-hidden="true" />
                     You can skip <b className="tabular-nums text-foreground">{overall.canSkip}</b>{" "}
                     {overall.canSkip === 1 ? "class" : "classes"} and stay above {target}%
                   </p>
