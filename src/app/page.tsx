@@ -15,6 +15,7 @@ import {
   Search,
   Settings as SettingsIcon,
   TriangleAlert,
+  WifiOff,
   X,
 } from "lucide-react";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
@@ -35,6 +36,7 @@ import { RemindersTab } from "@/components/erp/reminders-tab";
 import { SettingsTab } from "@/components/erp/settings-tab";
 import { CommandPalette } from "@/components/erp/command-palette";
 import { useDueNotifications } from "@/components/erp/use-due-notifications";
+import { useOffline } from "@/components/erp/use-offline";
 import { fetchDashboard, postSync, qk } from "@/components/erp/api";
 import { fmtDT } from "@/components/erp/shared";
 
@@ -196,6 +198,9 @@ export default function Home() {
   /* System notifications when a reminder becomes due (device-local opt-in) */
   useDueNotifications();
 
+  /* Offline awareness: views keep rendering from the last synced cache. */
+  const online = useOffline();
+
   const sync = data?.erp?.sync;
   const mode = data?.mode;
 
@@ -275,6 +280,18 @@ export default function Home() {
 
       <main className="relative mx-auto w-full max-w-6xl flex-1 px-4 py-4 sm:py-6">
         <div className="space-y-4">
+          {!online && (
+            <div
+              role="status"
+              className="flex items-center gap-2.5 rounded-xl border border-amber-500/40 bg-amber-500/10 px-4 py-3 text-sm text-amber-800 dark:text-amber-200"
+            >
+              <WifiOff className="size-4 shrink-0" aria-hidden="true" />
+              <p>
+                <b>You're offline.</b> Showing the last synced data — everything updates automatically once you
+                reconnect.
+              </p>
+            </div>
+          )}
           {sync?.status === "failed" && (
             <SyncFailureBanner
               message={sync.lastErrorMessage ?? "Unknown error"}

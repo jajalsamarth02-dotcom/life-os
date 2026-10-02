@@ -1270,3 +1270,26 @@ Unresolved issues / risks & next-phase priorities:
 4. Note: student's live data now shows 20 overdue ALAs across 4 subjects (worst COMPUTER NETWORKS, 6) — the overdue banner + WhatsApp digest already cover this; no action needed from us.
 5. Feature idea parked pending timetable data: weekly bunk-budget per day (slots × canSkip) — timetable is still empty; deep-linked PWA shortcuts should make the app more accessible on the student's phone meanwhile.
 6. Keeper cron 430680 must stay alive; worklog protocol: append-only, three-section handover.
+
+---
+Task ID: 20
+Agent: Z.ai Code (main orchestrator)
+Task: Round task 22:30+08 — status assessment, cold-load QA, offline awareness + perfect-day streak features, StatusChip polish. All client-side, no schema/API changes.
+
+Current project status / assessment:
+- Server healthy all round: 200s throughout; next-server RSS 1599MB (pre-cap instance; 900MB cap lands on next natural respawn — do NOT manual-restart, spawn reaping per Task 17). Memory ~1.88GB available after QA. No new OOM events.
+- Cold-load QA at round start: 0 console errors/warnings. No prior offline handling anywhere (grep-verified) and no streak feature — both genuine gaps, chosen for this round.
+
+Completed modifications / verified:
+1. NEW FEATURE — offline awareness: src/components/erp/use-offline.ts (new hook, navigator.onLine + online/offline events + sonner toasts on transitions) wired into src/app/page.tsx. When offline: amber banner under the header ("You're offline. Showing the last synced data…", role=status) — views keep rendering from the React Query cache, so no data work needed. On reconnect: success toast + banner auto-removes + next 20s poll refreshes.
+2. NEW FEATURE — perfect-day streak (recovery-plan.tsx): groups FULL snapshot history into device-local days via consecutive (present,total) deltas; a day is "perfect" when held>0 and attended===held. Streak walks backwards from the most recent day with classes (clean yesterday still counts). Rendered as a Flame row under the pace tiles: "N perfect day(s) in a row · M perfect days all-time" with a tooltip definition. Honest with sparse data: hidden entirely when no classes recorded.
+3. STYLING — StatusChip (shared.tsx) now leads with a status-colored dot (uses existing statusColors().bar), improving at-a-glance scanning everywhere chips appear (dashboard, attendance cards, summary strips).
+4. Verification: tsc --noEmit → zero errors under src/. agent-browser functional QA: fired synthetic offline event → banner + toast appeared; fired online → DOM check confirmed [role=status] banner removed (earlier text match was the transient toast); console 0 errors. Streak math cross-checked against /api/history via python (only day with classes: 2026-10-02 2/2 → "1 perfect day in a row / 1 all-time" as rendered). Learned mid-QA: programmatic element.click() does NOT activate Radix tabs (activation is pointerdown-based) — used agent-browser's CDP click on the fresh a11y ref instead; hash + tab verified (#attendance + Recovery pace + streak text in DOM). Screenshot /tmp/qa-r20.png visually confirmed: chip dot, streak row, integer tiles. Browser CLOSED immediately; server 200 after.
+
+Unresolved issues / risks & next-phase priorities:
+1. Pre-cap instance RSS ~1600MB and creeping with recompiles — if killed, capped respawn arrives ≤3 min; leave alone.
+2. next.config.ts unrecognized key + .next cache regrowth — Task 17 guidance unchanged.
+3. User decisions still pending: 2nd free notification channel (Telegram ⭐ / ntfy / Discord / email) and optional fixed daily WhatsApp digest time (never send test/digest to the real phone during QA).
+4. Backlog unchanged: L/H/E columns folding (server-side parser — needs user consent), SMTP digest (needs credentials), TZ cosmetic, per-semester scoping (schema), weekly bunk-budget (needs timetable slots — still empty).
+5. Testing note for future rounds: Radix tab/segmented interactions in QA must use real CDP clicks (agent-browser click <ref>), not JS element.click().
+6. Keeper cron 430680 must stay alive; worklog protocol: append-only, three-section handover.

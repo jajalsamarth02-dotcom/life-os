@@ -1,7 +1,7 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import { CalendarClock, Download, Gauge, Rocket, ShieldCheck } from "lucide-react";
+import { CalendarClock, Download, Flame, Gauge, Rocket, ShieldCheck } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { cn } from "@/lib/utils";
@@ -53,6 +53,39 @@ function fmtShortDate(ms: number): string {
   return new Intl.DateTimeFormat(undefined, { day: "numeric", month: "short" }).format(new Date(ms));
 }
 
+/**
+ * Perfect-day streak over the FULL snapshot history: a day counts when every
+ * class the ERP recorded that day was attended (held > 0, attended === held).
+ * The streak walks backwards from the most recent day that had classes, so a
+ * clean yesterday still counts even if today's classes haven't happened yet.
+ */
+function dayStreak(points: HistoryPoint[]): { streak: number; perfectDays: number; hasClasses: boolean } {
+  if (!points || points.length < 2) return { streak: 0, perfectDays: 0, hasClasses: false };
+  const sorted = [...points].sort((a, b) => +new Date(a.t) - +new Date(b.t));
+  const perDay = new Map<string, { attended: number; held: number }>();
+  for (let i = 1; i < sorted.length; i++) {
+    const day = new Date(sorted[i].t).toDateString(); // device-local day bucket
+    const attended = Math.max(0, sorted[i].present - sorted[i - 1].present);
+    const held = Math.max(0, sorted[i].total - sorted[i - 1].total);
+    if (held > 0) {
+      const cur = perDay.get(day) ?? { attended: 0, held: 0 };
+      cur.attended += attended;
+      cur.held += held;
+      perDay.set(day, cur);
+    }
+  }
+  const days = [...perDay.entries()].sort((a, b) => +new Date(a[0]) - +new Date(b[0]));
+  if (days.length === 0) return { streak: 0, perfectDays: 0, hasClasses: false };
+  const perfectDays = days.filter(([, v]) => v.attended === v.held).length;
+  let streak = 0;
+  for (let i = days.length - 1; i >= 0; i--) {
+    const [, v] = days[i];
+    if (v.attended === v.held) streak++;
+    else break;
+  }
+  return { streak, perfectDays, hasClasses: true };
+}
+
 function fmtWeeks(weeks: number): string {
   if (weeks < 1) return "under a week";
   if (weeks < 9) return `≈ ${weeks.toFixed(1)} ${weeks === 1 ? "week" : "weeks"}`;
@@ -102,6 +135,10 @@ export function RecoveryPlan({
 
   const pace = useMemo(
     () => (history ? paceFromPoints(history.overall, Date.now()) : { attended: 0, held: 0, perWeek: 0, hasData: false }),
+    [history]
+  );
+  const streakInfo = useMemo(
+    () => (history ? dayStreak(history.overall) : { streak: 0, perfectDays: 0, hasClasses: false }),
     [history]
   );
 
@@ -174,6 +211,23 @@ export function RecoveryPlan({
             <p className="text-[11px] text-muted-foreground">Classes / week</p>
           </div>
         </div>
+
+        {/* Perfect-day streak (motivation) */}
+        {streakInfo.hasClasses && (
+          <div
+            className="flex items-center gap-2 rounded-lg border border-border/60 bg-muted/40 px-3 py-2 text-xs"
+            title="A perfect day = every class the ERP recorded that day was attended"
+          >
+            <Flame className="size-3.5 shrink-0 text-orange-500" aria-hidden="true" />
+            <span>
+              <b className="tabular-nums">{streakInfo.streak}</b> perfect {streakInfo.streak === 1 ? "day" : "days"} in a
+              row
+            </span>
+            <span className="ml-auto shrink-0 text-muted-foreground tabular-nums">
+              {streakInfo.perfectDays} perfect {streakInfo.perfectDays === 1 ? "day" : "days"} all-time
+            </span>
+          </div>
+        )}
 
         {pace.held === 0 ? (
           <p className="rounded-lg border border-dashed border-border/60 px-3 py-2.5 text-xs leading-relaxed text-muted-foreground">
