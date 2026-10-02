@@ -7,20 +7,24 @@ import { toast } from "sonner";
 import { formatDistanceToNowStrict } from "date-fns";
 import {
   ALargeSmall,
+  AlertTriangle,
   ArrowRight,
   BarChart3,
   CalendarClock,
   Check,
+  ExternalLink,
   FlaskConical,
   GraduationCap,
   Keyboard,
   LayoutDashboard,
+  ListFilter,
   Moon,
   Printer,
   RefreshCw,
   Settings as SettingsIcon,
   Sun,
   Target,
+  Timer,
 } from "lucide-react";
 import {
   CommandDialog,
@@ -35,6 +39,7 @@ import {
 import { cn } from "@/lib/utils";
 import { cycleTextSize, TEXT_SIZES } from "@/lib/text-size";
 import { fetchAssignments, postDemoEvolve, postSync, putSelectedSemester, qk } from "./api";
+import { ERP_BASE } from "./shared";
 import type { AttendanceStatus, SubjectView } from "./types";
 import { useTextSize } from "./text-size-card";
 
@@ -61,8 +66,8 @@ interface CommandPaletteProps {
 }
 
 /**
- * Global command palette (⌘K / Ctrl+K): quick navigation, actions and
- * subject jump-to-details.
+ * Global command palette (⌘K / Ctrl+K): quick navigation, actions, subject
+ * jump-to-details, ALA quick-filters and ERP portal deep-links.
  */
 export function CommandPalette({
   open,
@@ -121,18 +126,38 @@ export function CommandPalette({
      polled by the ALA section and the app badge), so it costs no extra fetch. */
   const assignmentsQ = useQuery({ queryKey: qk.assignments, queryFn: fetchAssignments, staleTime: 15_000 });
   const nowMs = React.useMemo(() => Date.now(), [assignmentsQ.data]);
-  const { deadlineItems, activeDeadlineCount } = React.useMemo(() => {
+  const { deadlineItems, activeDeadlineCount, overdueCount, soonCount } = React.useMemo(() => {
     const active = (assignmentsQ.data?.assignments ?? []).filter((a) => a.status === "ACTIVE");
     const sorted = [...active].sort(
       (a, b) => new Date(a.dueAt).getTime() - new Date(b.dueAt).getTime()
     );
-    return { deadlineItems: sorted.slice(0, 8), activeDeadlineCount: active.length };
-  }, [assignmentsQ.data]);
+    const dueMs = (a: { dueAt: string }) => new Date(a.dueAt).getTime();
+    return {
+      deadlineItems: sorted.slice(0, 8),
+      activeDeadlineCount: active.length,
+      overdueCount: active.filter((a) => dueMs(a) < nowMs).length,
+      soonCount: active.filter((a) => {
+        const d = dueMs(a);
+        return d >= nowMs && d - nowMs <= 7 * 86_400_000;
+      }).length,
+    };
+  }, [assignmentsQ.data, nowMs]);
   const openDeadline = (title: string) => {
     run(() => {
       onNavigate("reminders");
       window.setTimeout(() => {
         window.dispatchEvent(new CustomEvent("erp:focus-ala", { detail: title }));
+      }, 150);
+    });
+  };
+
+  /* ALA quick-filter — a fresh triage entry: the AlaSection listener clears
+     every other axis (search/subject/day) and applies the requested status. */
+  const filterAla = (status: string) => {
+    run(() => {
+      onNavigate("reminders");
+      window.setTimeout(() => {
+        window.dispatchEvent(new CustomEvent("erp:filter-ala", { detail: status }));
       }, 150);
     });
   };
@@ -253,7 +278,7 @@ export function CommandPalette({
               {activeDeadlineCount > deadlineItems.length && (
                 <CommandItem
                   value="show all deadlines open reminders ala assignments"
-                  onSelect={() => openDeadline("")}
+                  onSelect={() => filterAla("all")}
                   className="text-muted-foreground"
                 >
                   <ArrowRight className="size-4 shrink-0" aria-hidden="true" />
@@ -264,6 +289,39 @@ export function CommandPalette({
                   <span className="ml-auto text-xs text-muted-foreground">Reminders tab</span>
                 </CommandItem>
               )}
+            </CommandGroup>
+            <CommandSeparator />
+
+            <CommandGroup heading="ALA quick filters">
+              <CommandItem
+                value="ala overdue filter late assignments triage"
+                onSelect={() => filterAla("overdue")}
+                disabled={overdueCount === 0}
+              >
+                <AlertTriangle className="size-4 shrink-0 text-red-500" aria-hidden="true" />
+                <span>Show overdue ALAs</span>
+                <span className="ml-auto rounded-full bg-red-500/10 px-1.5 text-[10px] font-bold tabular-nums text-red-600 dark:text-red-400">
+                  {overdueCount}
+                </span>
+              </CommandItem>
+              <CommandItem
+                value="ala soon due within week filter triage"
+                onSelect={() => filterAla("soon")}
+                disabled={soonCount === 0}
+              >
+                <Timer className="size-4 shrink-0 text-amber-500" aria-hidden="true" />
+                <span>Show ALAs due within 7 days</span>
+                <span className="ml-auto rounded-full bg-amber-500/15 px-1.5 text-[10px] font-bold tabular-nums text-amber-700 dark:text-amber-400">
+                  {soonCount}
+                </span>
+              </CommandItem>
+              <CommandItem
+                value="ala clear filters show everything reset"
+                onSelect={() => filterAla("all")}
+              >
+                <ListFilter className="size-4 shrink-0 text-muted-foreground" aria-hidden="true" />
+                <span>Clear ALA filters — show the full list</span>
+              </CommandItem>
             </CommandGroup>
             <CommandSeparator />
           </>
@@ -363,6 +421,23 @@ export function CommandPalette({
             Keyboard shortcuts
             <CommandShortcut>?</CommandShortcut>
           </CommandItem>
+        </CommandGroup>
+
+        <CommandGroup heading="ERP portal · opens in a new tab">
+          {[
+            { href: `${ERP_BASE}/student/dashboard`, label: "Open the ERP dashboard" },
+            { href: `${ERP_BASE}/student/attendance`, label: "Open the ERP attendance page" },
+            { href: `${ERP_BASE}/student/assignment`, label: "Open the ERP assignments page" },
+          ].map((l) => (
+            <CommandItem
+              key={l.href}
+              value={`${l.label} erp portal website ${l.href}`}
+              onSelect={() => run(() => window.open(l.href, "_blank", "noopener,noreferrer"))}
+            >
+              <ExternalLink className="size-4 shrink-0 text-muted-foreground" aria-hidden="true" />
+              {l.label}
+            </CommandItem>
+          ))}
         </CommandGroup>
       </CommandList>
     </CommandDialog>

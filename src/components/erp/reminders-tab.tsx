@@ -1054,7 +1054,8 @@ function AlaSubjectGroup({
  * last date to submit. Pending rows carry an explicit, per-row "Submit"
  * action that uploads to the portal with the student's own session (never
  * automatic; the ERP's own page must confirm before the row flips).
- * Includes search, status + subject filter chips, sorting, expand/collapse-all and a
+ * Includes search, status + subject filter chips, sorting, expand/collapse-all,
+ * palette quick-filter events (erp:filter-ala), scope-aware .ics export and a
  * one-click .ics export of every not-yet-submitted deadline.
  */
 type AlaStatusFilter = "all" | "overdue" | "soon" | "pending" | "submitted";
@@ -1455,6 +1456,23 @@ function AlaSection() {
     return () => window.removeEventListener("erp:focus-ala", handler);
   }, []);
 
+  /* Quick-filter from the command palette (erp:filter-ala, detail = status key):
+     a fresh triage entry — clears every other axis (search/subject/day) and
+     applies the requested status. "all" just resets everything. */
+  useEffect(() => {
+    const handler = (e: Event) => {
+      const s = (e as CustomEvent<string>).detail;
+      if (s === "all" || s === "overdue" || s === "soon" || s === "pending" || s === "submitted") {
+        setQuery("");
+        setStatus(s);
+        setSubject(null);
+        setDayOffset(null);
+      }
+    };
+    window.addEventListener("erp:filter-ala", handler);
+    return () => window.removeEventListener("erp:filter-ala", handler);
+  }, []);
+
   const groups = useMemo<AlaGroup[]>(() => {
     if (!data) return [];
     const map = new Map<string, AlaGroup>();
@@ -1593,9 +1611,22 @@ function AlaSection() {
   const searching = query.trim() !== "" || status !== "all" || subject != null;
   const hasActiveDeadlines = counts.pending + counts.overdue > 0;
 
+  /* Scoped export: while any filter axis is engaged, the .ics contains exactly
+     what the list shows (visible ACTIVE rows) instead of the whole semester. */
+  const filtering = searching || dayOffset != null;
+  const scopedActive = filtering
+    ? visibleGroups.flatMap((g) => g.items).filter((a) => a.status === "ACTIVE")
+    : null;
+
   const exportAlaIcs = () => {
     if (!data) return;
-    const active = data.assignments.filter((a) => a.status === "ACTIVE");
+    const active = scopedActive ?? data.assignments.filter((a) => a.status === "ACTIVE");
+    if (active.length === 0) {
+      toast.info("Nothing to export", {
+        description: "No open deadlines in the current view — clear a filter first.",
+      });
+      return;
+    }
     const filename = downloadRemindersIcs(
       active.map((a) => ({
         id: a.id,
@@ -1608,7 +1639,9 @@ function AlaSection() {
       "ALA & assignment deadlines (ERP Sync)"
     );
     toast.success(`${filename} downloaded`, {
-      description: `${active.length} open deadline${active.length === 1 ? "" : "s"} — import into your calendar app.`,
+      description: filtering
+        ? `${active.length} visible deadline${active.length === 1 ? "" : "s"} (current filters) — import into your calendar app.`
+        : `${active.length} open deadline${active.length === 1 ? "" : "s"} — import into your calendar app.`,
     });
   };
 
@@ -1653,13 +1686,29 @@ function AlaSection() {
             <Button
               variant="ghost"
               size="icon"
-              className="size-8 text-muted-foreground"
+              className="relative size-8 text-muted-foreground"
               disabled={!hasActiveDeadlines}
               onClick={exportAlaIcs}
-              aria-label="Export all open ALA deadlines as a calendar (.ics) file"
-              title="Export all open deadlines as .ics"
+              aria-label={
+                filtering && scopedActive
+                  ? `Export the ${scopedActive.length} visible open deadlines as a calendar (.ics) file`
+                  : "Export all open ALA deadlines as a calendar (.ics) file"
+              }
+              title={
+                filtering && scopedActive
+                  ? `Export the ${scopedActive.length} visible open deadlines (.ics) — current filters apply`
+                  : "Export all open deadlines as .ics"
+              }
             >
               <Download className="size-4" aria-hidden="true" />
+              {filtering && scopedActive != null && scopedActive.length > 0 && (
+                <span
+                  className="absolute -right-1 -top-1 flex size-3.5 min-w-3.5 items-center justify-center rounded-full bg-primary px-0.5 text-[8px] font-bold leading-none text-primary-foreground shadow-sm"
+                  aria-hidden="true"
+                >
+                  {scopedActive.length > 9 ? "9+" : scopedActive.length}
+                </span>
+              )}
             </Button>
             <Button
               variant="ghost"

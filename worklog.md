@@ -1617,3 +1617,30 @@ Unresolved issues / risks & next-phase priorities:
 5. Subject chips use the ERP course name (long — truncates at max-w-32 with tooltip); if the user prefers short codes, a one-line label swap is enough.
 6. Backlog unchanged: L/H/E columns folding (needs user consent), SMTP digest (needs credentials), TZ cosmetic, per-semester scoping (schema), weekly bunk-budget (timetable slots still empty), backup restore (needs user consent for a write endpoint).
 7. Keeper cron 430680 must stay alive; worklog protocol: append-only, three-section handover.
+
+---
+Task ID: 34
+Agent: Z.ai Code (main orchestrator)
+Task: Round task 02:00+08 — status assessment, cold-load QA, command palette expansion (ALA quick-filters + ERP portal links) and scope-aware .ics export that completes the Task 33 triage story.
+
+Current project status / assessment:
+- Server healthy all round: 200s throughout; browser CLOSED after QA; 0 console errors on settled loads. Live data unchanged: overall 66.67% (2/3, target 75%), 47 ALA rows (41 active = 21 pending + 20 overdue), title "(20) ERP Sync · 66.67%".
+- Cold-load QA confirmed Task 33 live (7 subject chips, aging tiers, result line). Gap analysis: Reminders got the triage axes (status × subject × day) but the ⌘K palette — the power path — could not reach them: no "show overdue ALAs" command (palette only navigated or focused one row via erp:focus-ala), no ERP portal shortcuts, and the "Show all N active deadlines" item dispatched erp:focus-ala with an empty string, which the handler ignores (it navigated but silently kept any active filters). Also the .ics export button always exported ALL 41 active deadlines even when the list was filtered — a student who triages to "CN overdue" (6 rows) could not export what they actually see.
+
+Completed modifications / verified:
+1. NEW EVENT — erp:filter-ala (reminders-tab.tsx AlaSection listener, detail = status key): a fresh triage entry that clears every other axis (query/subject/day) and applies the status; "all" resets everything. Mirrors the erp:focus-ala contract (150ms dispatch after tab navigation).
+2. NEW PALETTE GROUP — "ALA quick filters" (command-palette.tsx, after Upcoming deadlines, inside the assignments-loaded branch): "Show overdue ALAs" (AlertTriangle red, live count 20, disabled at 0), "Show ALAs due within 7 days" (Timer amber, count 2), "Clear ALA filters — show the full list" (ListFilter). Counts share the existing assignments-query cache (zero extra fetch) via the widened memo {deadlineItems, activeDeadlineCount, overdueCount, soonCount}.
+3. NEW PALETTE GROUP — "ERP portal · opens in a new tab": dashboard / attendance / assignments links built from shared ERP_BASE, window.open with noopener,noreferrer.
+4. FIXED — "Show all N active deadlines" now dispatches filterAla("all") instead of the no-op empty erp:focus-ala, so it genuinely resets filters.
+5. NEW FEATURE — scope-aware .ics export (AlaSection): while ANY filter axis is engaged the Download button exports exactly the visible ACTIVE rows (scopedActive from visibleGroups); unfiltered keeps the whole-semester export. Honest empty case → toast.info "Nothing to export". Toast description states the scope ("6 visible deadlines (current filters)…" vs "41 open deadlines…"). STYLING: the button gains a primary count badge (9+ cap) while scoped, plus a dynamic aria-label/title ("Export the N visible open deadlines…"), so the scope change is visible before clicking.
+6. Verification: tsc --noEmit → zero errors under app src/ (remaining output is the known non-src noise). agent-browser QA: palette headings Subjects / Upcoming deadlines · 41 active / ALA quick filters / Semester partition / Navigate / Actions / ERP portal ✓; "Show overdue ALAs 20" click → hash #reminders, Overdue chip pressed, "20 of 47 rows · 4 subjects shown", download aria-label "Export the 20 visible…" + badge "9+"; CN chip on top → badge "6" + label "6 visible"; scoped click → toast "deadlines-2026-10-02.ics downloaded — 6 visible deadlines (current filters)"; palette "Clear ALA filters" → 7 groups, badge gone, label "Export all open…", digest back; "Show ALAs due within 7 days 2" → chip Due ≤7d pressed, badge "2", "2 of 47 rows · 2 subjects shown". Screenshots: /tmp/qa-r34-palette.png (palette over dashboard), /tmp/qa-r34-palette-qf.png (ALA quick filters group + 9+ badge behind), /tmp/qa-r34-dark-badge.png (dark, Due ≤7d active + "2" badge + result line) — all clean. Console: 0 errors. Browser CLOSED; server 200 after.
+7. QA JOURNEY NOTES: (a) cmdk's default filter is an ordered subsequence on the item value — searching "clear ala" does NOT match value "ala clear filters show everything reset"; use in-order fragments ("ala show everything"). Cheap QA trap. (b) The top-bar "Search…" button opens the palette — reliable programmatic entry for palette QA.
+
+Unresolved issues / risks & next-phase priorities:
+1. next.config.ts unrecognized turbopack/memoryLimit key — unchanged Task 17 guidance (pre-existing non-src tsc noise).
+2. User decisions still pending: 2nd free notification channel (Telegram ⭐ / ntfy / Discord / email) and optional fixed daily WhatsApp digest time (digestTime unset — never send test/digest to the real phone during QA).
+3. MilestoneCelebration real target-crossing still pending live data (needs 1 more attended class → 3/4 = 75%).
+4. Dashboard subject sparklines still dormant — activates automatically at ≥2 snapshots.
+5. Portal palette links navigate the STUDENT's real ERP session in a new tab — read-only intent, same as existing drawer/deadline anchors; no new exposure.
+6. Backlog unchanged: L/H/E columns folding (needs user consent), SMTP digest (needs credentials), TZ cosmetic, per-semester scoping (schema), weekly bunk-budget (timetable slots still empty), backup restore (needs user consent for a write endpoint).
+7. Keeper cron 430680 must stay alive; worklog protocol: append-only, three-section handover.
