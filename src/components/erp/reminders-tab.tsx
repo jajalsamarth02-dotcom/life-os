@@ -1216,6 +1216,21 @@ function AlaSection() {
   const [sort, setSort] = useState<AlaSort>("deadline");
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
 
+  /* Deep-focus from the command palette (erp:focus-ala, detail = search text):
+     isolates the target ALA row by pre-filling the search box. */
+  useEffect(() => {
+    const handler = (e: Event) => {
+      const q = (e as CustomEvent<string>).detail;
+      if (typeof q === "string" && q.trim()) {
+        setQuery(q);
+        setStatus("all");
+        setSort("deadline");
+      }
+    };
+    window.addEventListener("erp:focus-ala", handler);
+    return () => window.removeEventListener("erp:focus-ala", handler);
+  }, []);
+
   const groups = useMemo<AlaGroup[]>(() => {
     if (!data) return [];
     const map = new Map<string, AlaGroup>();

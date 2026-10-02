@@ -1408,3 +1408,28 @@ Unresolved issues / risks & next-phase priorities:
 5. Backlog unchanged: L/H/E columns folding (server-side parser, needs user consent), SMTP digest (needs credentials), TZ cosmetic, per-semester scoping (schema), weekly bunk-budget (needs timetable slots — still empty), backup restore (needs user consent for a write endpoint).
 6. QA hook note: /#qa-celebrate intentionally ships as a harmless preview hook (strips itself, touches no data) — useful for future overlay QA.
 7. Keeper cron 430680 must stay alive; worklog protocol: append-only, three-section handover.
+
+---
+Task ID: 26
+Agent: Z.ai Code (main orchestrator)
+Task: Round task 00:00+08 — status assessment, cold-load QA, ⌘K deadline launcher (palette → ALA jump), class-streak milestone, styling polish (ping dot, animated best-ever).
+
+Current project status / assessment:
+- Server healthy all round: 200s throughout; next-server RSS ~2.0GB (pre-cap instance, ~stable across rounds; 900MB cap lands on next natural respawn — do NOT manual-restart, spawn reaping per Task 17). Memory ~1.43GB available after QA. No new OOM events.
+- Cold-load QA at round start: 0 console errors/warnings. Live data unchanged: overall 66.67% (2/3, target 75%), 8 subjects, 41/47 ALAs pending, next scheduled sync normal. Gap analysis vs R18-25: the ⌘K palette covered subjects/nav/actions but had NO deadline entries, and the milestones strip had no "current class streak" metric — both genuine gaps chosen for this round.
+
+Completed modifications / verified:
+1. NEW FEATURE — Deadline launcher in the command palette (command-palette.tsx): "Upcoming deadlines · N active" group listing the 8 nearest ACTIVE ALA/assignment rows, each with a status dot (red overdue / amber ≤7d / emerald later), title, subject code and a right-aligned relative due label (formatDistanceToNowStrict, e.g. "3 months overdue"). Joins the SHARED qk.assignments React-Query cache (already polled by the ALA section + app badge) — zero extra network traffic. Click → navigates to the Reminders tab and dispatches erp:focus-ala with the row's title.
+2. NEW WIRING — erp:focus-ala listener (reminders-tab.tsx AlaSection): pre-fills the ALA search box with the dispatched title, resets status filter to "all" and sort to "deadline", isolating the target row. VERIFIED end-to-end via agent-browser: palette click on "ALA 1 (CN)" → landed on /#reminders with the search box filled and exactly the COMPUTER NETWORKS group + that single row visible (screenshot /tmp/qa-r26-focus.png).
+3. NEW FEATURE — Class-streak chip (milestones.tsx): 4th milestone chip "N class streak" derived from consecutive overall-snapshot deltas (a clean attended batch extends the streak walking backwards; misses or corrections honestly end it). Grid now sm:grid-cols-2 lg:grid-cols-4. Cross-checked against /api/history: points 0/1 → 2/3 give one clean attended batch → chip shows "1 · attended in a row — keep going" (matches exactly). Zap icon, emerald tint when active, muted when 0.
+4. STYLING — (a) MilestonesStrip best-ever value now uses the spring AnimatedNumber (springs up whenever a new personal best lands); (b) NEXT UP strip gained a status-colored ping dot (2.2s animate-ping, red when the strip shows an overdue item, emerald otherwise); (c) palette deadline rows styled per due-urgency (dot + colored due label).
+5. Verification: tsc --noEmit → zero errors under src/ (6 pre-existing non-src findings unchanged). agent-browser session: palette snapshot shows the deadlines group between Subjects and Semester partition; full jump flow works; 4-chip milestones strip renders with honest live values (screenshot /tmp/qa-r26-dash.png); 0 console errors/warnings, 0 page errors. Browser CLOSED immediately after; server 200 after.
+
+Unresolved issues / risks & next-phase priorities:
+1. Pre-cap instance RSS ~2.0GB — if the kill line hits, expect a capped (900MB) respawn ≤3 min via keeper/harness; leave it alone. Consider a quiet-window `rm -rf .next` + keeper respawn if it keeps creeping across days.
+2. next.config.ts unrecognized turbopack/memoryLimit key — unchanged Task 17 guidance.
+3. User decisions still pending: 2nd free notification channel (Telegram ⭐ / ntfy / Discord / email) and optional fixed daily WhatsApp digest time (digestTime unset — never send test/digest to the real phone during QA).
+4. MilestoneCelebration real target-crossing still pending live data (needs 1 more attended class → 3/4 = 75%).
+5. Backlog unchanged: L/H/E columns folding (server-side parser, needs user consent), SMTP digest (needs credentials), TZ cosmetic, per-semester scoping (schema), weekly bunk-budget (needs timetable slots — still empty), backup restore (needs user consent for a write endpoint).
+6. Palette note: deadline items search-value includes "ala assignment deadline" tokens; subject rows remain the first group. If the student adds many ALAs, consider a palette "Show all 41" overflow entry.
+7. Keeper cron 430680 must stay alive; worklog protocol: append-only, three-section handover.

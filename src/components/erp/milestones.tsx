@@ -3,11 +3,12 @@
 import * as React from "react";
 import { AnimatePresence, motion } from "framer-motion";
 import { format } from "date-fns";
-import { CalendarCheck, Flame, Trophy, X } from "lucide-react";
+import { CalendarCheck, Flame, Trophy, X, Zap } from "lucide-react";
 import { toast } from "sonner";
 import { Card, CardContent } from "@/components/ui/card";
 import { cn } from "@/lib/utils";
 import type { HistoryPoint, HistoryResponse } from "./types";
+import { AnimatedNumber } from "./trend-chart";
 
 /* ------------------------------------------------------------------ */
 /* Milestone math (pure)                                               */
@@ -22,6 +23,9 @@ export interface MilestoneStats {
   daysAtTarget: number;
   /** Consecutive most-recent data days at/above target (0 when below now). */
   streak: number;
+  /** Consecutive attended class results walking back from the newest
+      snapshot delta (0 when the latest recorded class was missed). */
+  classStreak: number;
   snapshots: number;
 }
 
@@ -32,7 +36,7 @@ function dayKeyOf(iso: string): string {
 export function computeMilestones(history: HistoryResponse | undefined, target: number): MilestoneStats {
   const pts = history?.overall ?? [];
   if (pts.length === 0) {
-    return { best: null, since: null, daysAtTarget: 0, streak: 0, snapshots: 0 };
+    return { best: null, since: null, daysAtTarget: 0, streak: 0, classStreak: 0, snapshots: 0 };
   }
   const sorted = [...pts].sort((a, b) => new Date(a.t).getTime() - new Date(b.t).getTime());
 
@@ -47,6 +51,21 @@ export function computeMilestones(history: HistoryResponse | undefined, target: 
     else break;
   }
 
+  // Class streak: each consecutive snapshot pair with (present,total) growth is
+  // one class result. A clean batch (all newly-held classes attended) extends
+  // the streak when walking backwards; anything else (a miss, or a mixed/corrected
+  // batch) stops it. Honest with corrections: they simply end the streak.
+  let classStreak = 0;
+  for (let i = sorted.length - 1; i >= 1; i--) {
+    const prev = sorted[i - 1];
+    const cur = sorted[i];
+    const dTotal = cur.total - prev.total;
+    const dPresent = cur.present - prev.present;
+    if (dTotal <= 0) break; // no new classes / correction window — streak ends
+    if (dPresent === dTotal) classStreak++;
+    else break;
+  }
+
   let best = sorted[0];
   for (const p of sorted) if (p.percentage > best.percentage) best = p;
 
@@ -55,6 +74,7 @@ export function computeMilestones(history: HistoryResponse | undefined, target: 
     since: sorted[0].t,
     daysAtTarget: days.filter(([, p]) => p.percentage >= target).length,
     streak,
+    classStreak,
     snapshots: sorted.length,
   };
 }
@@ -85,7 +105,7 @@ export function MilestonesStrip({
           <Trophy className="size-3.5 text-amber-500" aria-hidden="true" />
           Milestones
         </p>
-        <div className="grid flex-1 gap-2 sm:grid-cols-3">
+        <div className="grid flex-1 gap-2 sm:grid-cols-2 lg:grid-cols-4">
           <div
             className="flex items-center gap-2.5 rounded-lg border border-amber-500/25 bg-amber-500/[0.06] px-3 py-2"
             title="Your highest overall attendance ever recorded by the tracker"
@@ -93,7 +113,7 @@ export function MilestonesStrip({
             <Trophy className="size-4 shrink-0 text-amber-500" aria-hidden="true" />
             <div className="min-w-0 leading-tight">
               <p className="text-sm font-semibold tabular-nums">
-                {bestPct.toFixed(2)}%
+                <AnimatedNumber value={bestPct} suffix="%" />
                 <span className="ml-1 text-[10px] font-medium uppercase tracking-wide text-muted-foreground">
                   best ever
                 </span>
@@ -142,6 +162,32 @@ export function MilestonesStrip({
               </p>
               <p className="truncate text-[10px] text-muted-foreground">
                 {stats.streak > 0 ? "at/above target in a row" : atTarget ? "— just crossed today" : "below target right now"}
+              </p>
+            </div>
+          </div>
+
+          <div
+            className={cn(
+              "flex items-center gap-2.5 rounded-lg border px-3 py-2",
+              stats.classStreak > 0
+                ? "border-emerald-500/25 bg-emerald-500/[0.06]"
+                : "border-border/60 bg-muted/40"
+            )}
+            title="Consecutive attended classes, derived from your sync snapshot deltas"
+          >
+            <Zap
+              className={cn("size-4 shrink-0", stats.classStreak > 0 ? "text-emerald-500" : "text-muted-foreground/50")}
+              aria-hidden="true"
+            />
+            <div className="min-w-0 leading-tight">
+              <p className="text-sm font-semibold tabular-nums">
+                {stats.classStreak}
+                <span className="ml-1 text-[10px] font-medium uppercase tracking-wide text-muted-foreground">
+                  class streak
+                </span>
+              </p>
+              <p className="truncate text-[10px] text-muted-foreground">
+                {stats.classStreak > 0 ? "attended in a row — keep going" : "attend the next one to start one"}
               </p>
             </div>
           </div>

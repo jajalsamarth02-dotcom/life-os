@@ -252,7 +252,17 @@ function NextUpStrip({ items }: { items: Reminder[] }) {
         <Hourglass className="size-4" aria-hidden="true" />
       </span>
       <div className="min-w-0 flex-1">
-        <p className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
+        <p className="flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
+          <span className="relative flex size-1.5 shrink-0" aria-hidden="true">
+            <span
+              className={cn(
+                "absolute inline-flex h-full w-full animate-ping rounded-full opacity-60",
+                isOverdue ? "bg-red-500" : "bg-emerald-500"
+              )}
+              style={{ animationDuration: "2.2s" }}
+            />
+            <span className={cn("relative inline-flex size-1.5 rounded-full", isOverdue ? "bg-red-500" : "bg-emerald-500")} />
+          </span>
           Next up {overdue.length > 0 && <span className="text-red-500">· {overdue.length} overdue</span>}
         </p>
         <p className="flex min-w-0 items-center gap-1.5">

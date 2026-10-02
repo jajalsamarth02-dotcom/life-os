@@ -1,8 +1,10 @@
 "use client";
 
 import * as React from "react";
+import { useQuery } from "@tanstack/react-query";
 import { useTheme } from "next-themes";
 import { toast } from "sonner";
+import { formatDistanceToNowStrict } from "date-fns";
 import {
   ALargeSmall,
   BarChart3,
@@ -31,7 +33,7 @@ import {
 } from "@/components/ui/command";
 import { cn } from "@/lib/utils";
 import { cycleTextSize, TEXT_SIZES } from "@/lib/text-size";
-import { postDemoEvolve, postSync, putSelectedSemester } from "./api";
+import { fetchAssignments, postDemoEvolve, postSync, putSelectedSemester, qk } from "./api";
 import type { AttendanceStatus, SubjectView } from "./types";
 import { useTextSize } from "./text-size-card";
 
@@ -114,6 +116,25 @@ export function CommandPalette({
     });
   };
 
+  /* Deadline launcher — joins the shared assignments query cache (already
+     polled by the ALA section and the app badge), so it costs no extra fetch. */
+  const assignmentsQ = useQuery({ queryKey: qk.assignments, queryFn: fetchAssignments, staleTime: 15_000 });
+  const nowMs = React.useMemo(() => Date.now(), [assignmentsQ.data]);
+  const deadlineItems = React.useMemo(() => {
+    const active = (assignmentsQ.data?.assignments ?? []).filter((a) => a.status === "ACTIVE");
+    return active
+      .sort((a, b) => new Date(a.dueAt).getTime() - new Date(b.dueAt).getTime())
+      .slice(0, 8);
+  }, [assignmentsQ.data]);
+  const openDeadline = (title: string) => {
+    run(() => {
+      onNavigate("reminders");
+      window.setTimeout(() => {
+        window.dispatchEvent(new CustomEvent("erp:focus-ala", { detail: title }));
+      }, 150);
+    });
+  };
+
   const setSemester = (value: string) => {
     run(async () => {
       try {
@@ -179,6 +200,54 @@ export function CommandPalette({
                   </span>
                 </CommandItem>
               ))}
+            </CommandGroup>
+            <CommandSeparator />
+          </>
+        )}
+
+        {deadlineItems.length > 0 && (
+          <>
+            <CommandGroup
+              heading={`Upcoming deadlines${assignmentsQ.data ? ` · ${(assignmentsQ.data.assignments ?? []).filter((a) => a.status === "ACTIVE").length} active` : ""}`}
+            >
+              {deadlineItems.map((a) => {
+                const due = new Date(a.dueAt).getTime();
+                const overdue = due < nowMs;
+                const soon = !overdue && due - nowMs <= 7 * 86_400_000;
+                return (
+                  <CommandItem
+                    key={a.id}
+                    value={`${a.title} ${a.subjectCode ?? ""} ala assignment deadline`}
+                    onSelect={() => openDeadline(a.title)}
+                  >
+                    <span
+                      className={cn(
+                        "size-2 shrink-0 rounded-full",
+                        overdue ? "bg-red-500" : soon ? "bg-amber-500" : "bg-emerald-500"
+                      )}
+                      aria-hidden="true"
+                    />
+                    <span className="truncate font-medium">{a.title}</span>
+                    <span className="truncate text-xs text-muted-foreground">
+                      {a.subjectCode ?? "—"}
+                    </span>
+                    <span
+                      className={cn(
+                        "ml-auto whitespace-nowrap text-xs font-medium tabular-nums",
+                        overdue
+                          ? "text-red-600 dark:text-red-400"
+                          : soon
+                            ? "text-amber-600 dark:text-amber-400"
+                            : "text-emerald-600 dark:text-emerald-400"
+                      )}
+                    >
+                      {overdue
+                        ? `${formatDistanceToNowStrict(new Date(a.dueAt))} overdue`
+                        : `in ${formatDistanceToNowStrict(new Date(a.dueAt))}`}
+                    </span>
+                  </CommandItem>
+                );
+              })}
             </CommandGroup>
             <CommandSeparator />
           </>
