@@ -1,0 +1,994 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    
+     <meta charset="utf-8" />
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+        <meta http-equiv="X-UA-Compatible" content="IE=edge" />
+        <meta name="robots" content="noindex" />
+        <meta name="csrf-token" content="SdF6kBIrENyPBUQazsSVskMUqG5tWZ2oawFfxuuT">
+
+                <!-- App Title -->
+        <title>Assignment | Gyanmanjari Innovative University</title>
+
+        <meta name="description" content="">
+        <meta name="keywords" content="">
+
+                <!-- App favicon -->
+        <link rel="shortcut icon" href="/public/uploads/setting/transparent_logo(1)_1697784281.png" type="image/x-icon">
+                
+        
+        <!-- fontawesome icon -->
+        <link rel="stylesheet" href="/public/dashboard/fonts/fontawesome/css/fontawesome-all.min.css">
+        <!-- data tables css -->
+        <link rel="stylesheet" href="/public/dashboard/plugins/data-tables/css/datatables.min.css">
+        <!-- material datetimepicker css -->
+        <link rel="stylesheet" href="/public/dashboard/plugins/material-datetimepicker/css/bootstrap-material-datetimepicker.css">
+
+        
+        <!-- page css -->
+        
+
+        <!-- vendor css -->
+        <link rel="stylesheet" href="/public/dashboard/css/style.css">
+
+                
+    
+    <style>
+        .pcoded-header .navbar-nav > li > .dropdown > a.dropdown-toggle::after,
+        .pcoded-header .navbar-nav > li > .dropdown.drp-user > a.dropdown-toggle::after {
+            display: none !important;
+        }
+    </style>
+
+</head>
+
+<body>
+
+    <!-- [ Pre-loader ] start -->
+    <div class="loader-bg">
+        <div class="loader-track">
+            <div class="loader-fill"></div>
+        </div>
+    </div>
+    <!-- [ Pre-loader ] End -->
+
+    <!-- [ navigation menu ] start -->
+    <nav class="pcoded-navbar active-lightblue title-lightblue navbar-lightblue brand-lightblue navbar-image-4 menu-item-icon-style2 ">
+        <div class="navbar-wrapper">
+            <div class="navbar-brand header-logo">
+                                                <a href="https://erp.gmiu.edu.in/student/dashboard" class="b-brand">
+                    <img src="/public/uploads/setting/transparent_logo_1697798719.png" alt="logo">
+                </a>
+                                                <a class="mobile-menu" id="mobile-collapse" href="#!"><span></span></a>
+            </div>
+
+
+                        <!--- Sidemenu -->
+            <!-- Sidemenu -->
+<div class="navbar-content scroll-div ps ps--active-y">
+    <ul class="nav pcoded-inner-navbar">
+
+        <li class="nav-item ">
+            <a href="https://erp.gmiu.edu.in/student/dashboard" class="nav-link">
+                <span class="pcoded-micon"><i class="fas fa-desktop"></i></span>
+                <span class="pcoded-mtext">Dashboard</span>
+            </a>
+        </li>
+
+        
+                    <li class="nav-item ">
+                <a href="https://erp.gmiu.edu.in/student/class-routine" class="nav-link">
+                    <span class="pcoded-micon"><i class="fas fa-clock"></i></span>
+                    <span class="pcoded-mtext">Class Routines</span>
+                </a>
+            </li>
+        
+        
+                    <li class="nav-item pcoded-hasmenu ">
+                <a href="#!" class="nav-link">
+                    <span class="pcoded-micon"><i class="fas fa-file-alt"></i></span>
+                    <span class="pcoded-mtext">Examinations</span>
+                </a>
+                <ul class="pcoded-submenu">
+                                            <li class="nav-item ">
+                            <a href="https://erp.gmiu.edu.in/student/exam-routine" class="nav-link">
+                                <span class="pcoded-mtext">Exam Schedules</span>
+                            </a>
+                        </li>
+                                                                <li class="nav-item ">
+                            <a href="https://erp.gmiu.edu.in/student/exam-form" class="nav-link">
+                                <span class="pcoded-mtext">Exam Form Actions</span>
+                            </a>
+                        </li>
+                                    </ul>
+            </li>
+        
+                    <li class="nav-item ">
+                <a href="https://erp.gmiu.edu.in/student/hundred-point-activity" class="nav-link">
+                    <span class="pcoded-micon"><i class="fas fa-calendar-check"></i></span>
+                    <span class="pcoded-mtext">100 Point Activity</span>
+                </a>
+            </li>
+        
+        
+                    <li class="nav-item ">
+                <a href="https://erp.gmiu.edu.in/student/attendance" class="nav-link">
+                    <span class="pcoded-micon"><i class="fas fa-calendar-check"></i></span>
+                    <span class="pcoded-mtext">Attendances</span>
+                </a>
+            </li>
+        
+                    <li
+                class="nav-item pcoded-hasmenu ">
+                <a href="#!" class="nav-link">
+                    <span class="pcoded-micon"><i class="fas fa-graduation-cap"></i></span>
+                    <span class="pcoded-mtext">Results</span>
+                </a>
+                <ul class="pcoded-submenu">
+                    
+                                            <li class="nav-item ">
+                            <a href="https://erp.gmiu.edu.in/student/result" class="nav-link">
+                                <span class="pcoded-mtext">Final Results</span>
+                            </a>
+                        </li>
+                        <li class="nav-item ">
+                            <a href="https://erp.gmiu.edu.in/student/assessment" class="nav-link">
+                                <span class="pcoded-mtext">Assessment Results</span>
+                            </a>
+                        </li>
+                    
+                    
+                </ul>
+            </li>
+        
+        
+        
+
+                    <li class="nav-item ">
+                <a href="https://erp.gmiu.edu.in/student/fees" class="nav-link">
+                    <span class="pcoded-micon"><i class="fas fa-money-bill-wave"></i></span>
+                    <span class="pcoded-mtext">Fees Reports</span>
+                </a>
+            </li>
+        
+                    <li class="nav-item ">
+                <a href="https://erp.gmiu.edu.in/student/student-section" class="nav-link">
+                    <span class="pcoded-micon"><i class="fas fa-users"></i></span>
+                    <span class="pcoded-mtext">Student Section</span>
+                </a>
+            </li>
+        
+        
+                    <li class="nav-item ">
+                <a href="https://erp.gmiu.edu.in/student/notice" class="nav-link">
+                    <span class="pcoded-micon"><i class="fas fa-bullhorn"></i></span>
+                    <span class="pcoded-mtext">Notices</span>
+                </a>
+            </li>
+        
+        
+
+                    <li class="nav-item active">
+                <a href="https://erp.gmiu.edu.in/student/assignment" class="nav-link">
+                    <span class="pcoded-micon"><i class="fas fa-newspaper"></i></span>
+                    <span class="pcoded-mtext">Assignments</span>
+                </a>
+            </li>
+        
+                    <li class="nav-item ">
+                <a href="https://erp.gmiu.edu.in/student/quiz" class="nav-link">
+                    <span class="pcoded-micon"><i class="fas fa-graduation-cap"></i></span>
+                    <span class="pcoded-mtext">Quiz</span>
+                </a>
+            </li>
+        
+                    
+                
+                                            <li class="nav-item ">
+                            <a href="https://erp.gmiu.edu.in/student/feed-back-form" class="nav-link">
+                                <span class="pcoded-micon"><i class="fas fa-comment-dots"></i></span>
+                                <span class="pcoded-mtext">Feedback Form</span>
+
+                            </a>
+                        </li>
+                    
+                    <li class="nav-item ">
+                        <a href="https://erp.gmiu.edu.in/student/feed-back-form/resolved" class="nav-link">
+                            <span class="pcoded-micon"><i class="fas fa-comment-dots"></i></span>
+                            <span class="pcoded-mtext">Resolved Feedback</span>
+                        </a>
+                    </li>
+
+                
+                    
+        <!-- <li class="nav-item ">
+            <a href="https://erp.gmiu.edu.in/student/transportation-request" class="nav-link">
+                <span class="pcoded-micon"><i class="fas fa-bus"></i></span>
+                <span class="pcoded-mtext">Transportation Request</span>
+            </a>
+        </li> -->
+
+                    <li class="nav-item ">
+                <a href="https://erp.gmiu.edu.in/student/download" class="nav-link">
+                    <span class="pcoded-micon"><i class="fas fa-download"></i></span>
+                    <span class="pcoded-mtext">Downloads</span>
+                </a>
+            </li>
+        
+        
+                    <li class="nav-item ">
+                <a href="https://erp.gmiu.edu.in/student/profile" class="nav-link">
+                    <span class="pcoded-micon"><i class="fas fa-id-card"></i></span>
+                    <span class="pcoded-mtext">My Profile</span>
+                </a>
+            </li>
+        
+    </ul>
+</div>
+<!-- End Sidebar -->            <!-- End Sidebar -->
+            
+        </div>
+    </nav>
+    <!-- [ navigation menu ] end -->
+
+
+    <!-- [ Header ] start -->
+    <header class="navbar pcoded-header navbar-expand-lg navbar-light headerpos-fixed header-lightblue">
+        <div class="m-header">
+            <a class="mobile-menu" id="mobile-collapse1" href="#!"><span></span></a>
+                                    <a href="https://erp.gmiu.edu.in/student/dashboard" class="b-brand">
+                <div class="b-bg">
+                    <img src="/public/uploads/setting/transparent_logo_1697798719.png" alt="logo" height="20">
+                </div>
+            </a>
+                                </div>
+        <a class="mobile-menu" id="mobile-header" href="#!">
+            <i class="feather icon-more-horizontal"></i>
+        </a>
+        <div class="collapse navbar-collapse">
+            <ul class="navbar-nav me-auto">
+                <li><a href="#!" class="full-screen" onclick="javascript:toggleFullScreen()"><i class="feather icon-maximize"></i></a></li>
+                <li>
+                    <h4 class="topbar-title">Gyanmanjari Innovative University</h4>
+                </li>
+            </ul>
+
+            <!-- [ Auth Nav ] start -->
+                        <ul class="navbar-nav ms-auto">
+                <!-- Language -->
+                
+                <!-- Developer Team -->
+                <li>
+                    <a href="https://erp.gmiu.edu.in/developers" class="fw-bold">
+                        <i class="fas fa-users fa-lg"></i> Developer Team
+                    </a>
+                </li>
+                <!-- Notification -->
+                <li>
+                    <div class="dropdown">
+                        <a class="dropdown-toggle" href="#" data-bs-toggle="dropdown">
+                                                                                            <i class="fa-solid fa-bell fa-lg fa-shake"></i>
+                                <span class="notification-active"></span>
+                                                                                        </i>
+                        </a>
+                                                <div class="dropdown-menu dropdown-menu-right notification">
+                            <div class="noti-head d-flex flex-row justify-content-between">
+                                <h6 class="d-inline-block m-b-0">Notifications</h6>
+                                <h6 class="d-inline-block m-b-0"><i class="fa-solid fa-check-double text-primary"></i> <a class="text-dark" href="https://erp.gmiu.edu.in/student/dashboard?notification_clear=true">Read All</a></h6>
+                            </div>
+                            <ul class="noti-body">
+                                                                                                                                <li class="notification">
+                                                                        <a class="media" href="https://erp.gmiu.edu.in/student/download/5535">
+                                                                            <div class="media-body">
+                                            <p><strong>Y1-AWD CODE</strong><span class="n-time text-muted"><i class="icon feather icon-clock m-r-10"></i>1 week ago</span></p>
+                                            <p><i class="fas fa-arrow-circle-right"></i> Content</p>
+                                        </div>
+                                    </a>
+                                </li>
+                                                                                                                                                                <li class="notification">
+                                                                        <a class="media" href="https://erp.gmiu.edu.in/student/download/5512">
+                                                                            <div class="media-body">
+                                            <p><strong>SE Unit - 6</strong><span class="n-time text-muted"><i class="icon feather icon-clock m-r-10"></i>2 weeks ago</span></p>
+                                            <p><i class="fas fa-arrow-circle-right"></i> Content</p>
+                                        </div>
+                                    </a>
+                                </li>
+                                                                                                                                                                <li class="notification">
+                                                                        <a class="media" href="https://erp.gmiu.edu.in/student/download/5490">
+                                                                            <div class="media-body">
+                                            <p><strong>AMAD Unit - 4</strong><span class="n-time text-muted"><i class="icon feather icon-clock m-r-10"></i>3 weeks ago</span></p>
+                                            <p><i class="fas fa-arrow-circle-right"></i> Content</p>
+                                        </div>
+                                    </a>
+                                </li>
+                                                                                                                                                                <li class="notification">
+                                                                        <a class="media" href="https://erp.gmiu.edu.in/student/download/5487">
+                                                                            <div class="media-body">
+                                            <p><strong>AI - UNIT - 5</strong><span class="n-time text-muted"><i class="icon feather icon-clock m-r-10"></i>3 weeks ago</span></p>
+                                            <p><i class="fas fa-arrow-circle-right"></i> Content</p>
+                                        </div>
+                                    </a>
+                                </li>
+                                                                                                                                                                <li class="notification">
+                                                                        <a class="media" href="https://erp.gmiu.edu.in/student/download/5455">
+                                                                            <div class="media-body">
+                                            <p><strong>SE Unit - 5</strong><span class="n-time text-muted"><i class="icon feather icon-clock m-r-10"></i>3 weeks ago</span></p>
+                                            <p><i class="fas fa-arrow-circle-right"></i> Content</p>
+                                        </div>
+                                    </a>
+                                </li>
+                                                                                                                                                                <li class="notification">
+                                                                        <a class="media" href="https://erp.gmiu.edu.in/student/download/5417">
+                                                                            <div class="media-body">
+                                            <p><strong>SE - Unit 4</strong><span class="n-time text-muted"><i class="icon feather icon-clock m-r-10"></i>3 weeks ago</span></p>
+                                            <p><i class="fas fa-arrow-circle-right"></i> Content</p>
+                                        </div>
+                                    </a>
+                                </li>
+                                                                                                                                                                <li class="notification">
+                                                                        <a class="media" href="https://erp.gmiu.edu.in/student/download/5405">
+                                                                            <div class="media-body">
+                                            <p><strong>AI unit 5</strong><span class="n-time text-muted"><i class="icon feather icon-clock m-r-10"></i>3 weeks ago</span></p>
+                                            <p><i class="fas fa-arrow-circle-right"></i> Content</p>
+                                        </div>
+                                    </a>
+                                </li>
+                                                                                                                                                                <li class="notification">
+                                                                        <a class="media" href="https://erp.gmiu.edu.in/student/download/5404">
+                                                                            <div class="media-body">
+                                            <p><strong>AI UNIT - 4</strong><span class="n-time text-muted"><i class="icon feather icon-clock m-r-10"></i>1 month ago</span></p>
+                                            <p><i class="fas fa-arrow-circle-right"></i> Content</p>
+                                        </div>
+                                    </a>
+                                </li>
+                                                                                            </ul>
+                        </div>
+                                            </div>
+                </li>
+
+                <!-- Profile -->
+                <li>
+                    <div class="dropdown drp-user">
+                        <a class="dropdown-toggle d-flex align-items-center gap-2" data-bs-toggle="dropdown" style="cursor: pointer; text-decoration: none;">
+                            <i class="far fa-user"></i>
+                        </a>
+                        <div class="dropdown-menu dropdown-menu-right profile-notification">
+                            <div class="pro-head">
+                                <img src="https://erp.gmiu.edu.in/student/photo" class="img-radius" alt="User Profile">
+                                <span>JAJAL SAMARTH</span>
+
+
+                                <a href="https://erp.gmiu.edu.in/student/logout" class="dud-logout" title="Logout"
+                                   onclick="event.preventDefault();
+                                                 document.getElementById('logout-form').submit();">
+                                    <i class="feather icon-log-out" style="font-size: 20px;"></i>
+                                </a>
+
+                                <form id="logout-form" action="https://erp.gmiu.edu.in/student/logout" method="POST" style="display: none;">
+                                    <input type="hidden" name="_token" value="SdF6kBIrENyPBUQazsSVskMUqG5tWZ2oawFfxuuT" autocomplete="off">                                </form>
+
+                            </div>
+                            <ul class="pro-body">
+                                <li><a href="https://erp.gmiu.edu.in/student/profile" class="dropdown-item"><i class="feather icon-user"></i> My Profile</a></li>
+                            </ul>
+                        </div>
+                    </div>
+                </li>
+            </ul>
+                        <!-- [ Auth Nav ] end -->
+
+        </div>
+    </header>
+    <!-- [ Header ] end -->
+
+
+    <!-- [ chat user list ] start -->
+    <section class="header-user-list">
+        <div class="h-list-header">
+            <div class="input-group">
+                <input type="text" id="search-friends" class="form-control" placeholder="Search Friend . . .">
+            </div>
+        </div>
+        <div class="h-list-body">
+            <a href="#!" class="h-close-text"><i class="feather icon-chevrons-right"></i></a>
+            <div class="main-friend-cont scroll-div">
+                <div class="main-friend-list">
+
+                </div>
+            </div>
+        </div>
+    </section>
+    <!-- [ chat user list ] end -->
+
+    <!-- [ chat message ] start -->
+    <section class="header-chat">
+        <div class="h-list-header">
+            <h6></h6>
+            <a href="#!" class="h-back-user-list"><i class="feather icon-chevron-left"></i></a>
+        </div>
+        <div class="h-list-body">
+            <div class="main-chat-cont scroll-div">
+                <div class="main-friend-chat">
+                    <div class="media chat-messages">
+                        
+                        <div class="media-body chat-menu-content">
+                            
+                        </div>
+                    </div>
+                    <div class="media chat-messages">
+                        <div class="media-body chat-menu-reply">
+                            
+                        </div>
+                    </div>
+                    <div class="media chat-messages">
+                        
+                        <div class="media-body chat-menu-content">
+                            
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </section>
+    <!-- [ chat message ] end -->
+
+
+    <!-- [ Main Content ] start -->
+    <div class="pcoded-main-container pb-3">
+        <div class="pcoded-wrapper">
+            <div class="pcoded-content">
+                <div class="pcoded-inner-content">
+                    
+                    <!-- start page title -->
+                    <!-- Include page breadcrumb -->
+                    <!-- [ breadcrumb ] start -->
+
+<!-- [ breadcrumb ] end -->                    <!-- end page title -->
+                    
+
+                    <!-- Start Content-->
+                    
+<!-- Start Content-->
+<div class="main-body">
+    <div class="page-wrapper">
+        <!-- [ Main Content ] start -->
+        <div class="row">
+            <div class="col-sm-8">
+                <div class="card">
+                    <div class="card-header">
+                        <h5>ALA-5</h5>
+                    </div>
+                    <div class="card-block">
+                        <a href="https://erp.gmiu.edu.in/student/assignment" class="btn btn-primary"><i class="fas fa-arrow-left"></i> Back</a>
+                    </div>
+                    <div class="card-block">
+                    <!-- Details View Start -->
+                    <div class="">
+                        <div class="row">
+                            <div class="col-md-6">
+                                <p><mark class="text-primary">Course:</mark> BETCE15324 - RESPONSIVE WEB &amp; MOBILE UI DESIGN</p><hr/>
+                                <p><mark class="text-primary">Session:</mark> GMIU-2026-27(ODD)</p><hr/>
+                                <p><mark class="text-primary">Semester:</mark> Sem 5</p><hr/>
+                                <p><mark class="text-primary">Section:</mark> Y1</p><hr/>
+                            </div>
+                            <div class="col-md-6">
+                                
+                                <p><mark class="text-primary">Max Marks:</mark> 10</p><hr/>
+                                
+                                <p><mark class="text-primary">Start Date:</mark> 
+                                                                        2026-07-30
+                                                                    </p><hr/>
+                                <p><mark class="text-primary">End Date:</mark> 
+                                                                        2026-10-30
+                                                                    </p><hr/>
+
+                                
+                                <p><mark class="text-primary">Submission Status:</mark> 
+                                                                        <span class="badge badge-pill badge-primary">Pending</span>
+                                                                    </p><hr/>
+                                <p><mark class="text-primary">Approval Status:</mark>
+                                                                            <span class="badge badge-pill badge-primary">Pending</span>
+                                                                    </p>
+
+                                <!-- Later For S3 -->
+                                
+                                
+                                
+                            </div>
+                        </div>
+                        <div class="row">
+                            <div class="col-md-12">
+                                <p><mark class="text-primary">Description:</mark> <p>Title</p>
+<p>Capstone Prototype Development &amp; Industry Handoff Using Justinmind</p>
+<p>Description</p>
+<p>In this capstone activity, students will work in groups of a maximum of three members to design and develop a complete web or mobile application prototype using Justinmind by integrating all the UI/UX concepts learned throughout the course. The prototype should include multiple interactive screens, responsive layouts, navigation, form validation, and user-friendly interfaces. Students must create a realistic prototype, test its functionality, prepare developer handoff documentation, and present their work professionally. Finally, each group must submit a comprehensive report in PDF format along with the exported Justinmind prototype.</p>
+<p>Learning Objectives</p>
+<p>After completing this activity, students will be able to:</p>
+<p>Integrate UI/UX design principles into a complete application prototype.</p>
+<p>Develop interactive and responsive prototypes using Justinmind.</p>
+<p>Apply usability, navigation, and form validation concepts.</p>
+<p>Prepare professional developer handoff documentation.</p>
+<p>Present and document a complete UI/UX project.</p>
+<p>Software Required</p>
+<p>Justinmind Prototyping Tool</p>
+<p>MS Word / Google Docs</p>
+<p>PDF Converter</p>
+<p>Activity Type</p>
+<p>Group Activity (Maximum 3 Students per Group)</p>
+<p>Activity Instructions</p>
+<p>Step 1: Select a Project</p>
+<p>Each group should select one application idea such as:</p>
+<p>Online Shopping Application</p>
+<p>Food Delivery Application</p>
+<p>Hospital Management System</p>
+<p>Student Management System</p>
+<p>Banking Application</p>
+<p>Travel Booking Application</p>
+<p>Library Management System</p>
+<p>Event Management System</p>
+<p>Fitness Tracking Application</p>
+<p>Online Learning Platform</p>
+<p>Step 2: Plan the Prototype</p>
+<p>Prepare a simple project plan including:</p>
+<p>Application name</p>
+<p>Project objective</p>
+<p>Target users</p>
+<p>Main features</p>
+<p>User flow</p>
+<p>Screen navigation structure</p>
+<p>Step 3: Design the Complete Prototype</p>
+<p>Create a complete interactive prototype in Justinmind.</p>
+<p>The prototype should include at least:</p>
+<p>Splash Screen</p>
+<p>Login/Register Screen</p>
+<p>Home Screen</p>
+<p>Menu/Dashboard</p>
+<p>Functional Pages</p>
+<p>Search Screen (if applicable)</p>
+<p>Profile Screen</p>
+<p>Settings Screen</p>
+<p>Confirmation or Success Screen</p>
+<p>Minimum 8&ndash;10 interactive screens should be developed.</p>
+<p>Step 4: Add Interactive Features</p>
+<p>Implement prototype interactions such as:</p>
+<p>Navigation between screens</p>
+<p>Buttons and menus</p>
+<p>Form validation</p>
+<p>Success and error messages</p>
+<p>Pop-up dialogs</p>
+<p>Interactive menus</p>
+<p>Responsive layouts for different devices</p>
+<p>Step 5: Test the Prototype</p>
+<p>Verify that:</p>
+<p>All navigation links work correctly.</p>
+<p>Buttons perform the intended actions.</p>
+<p>Forms display proper validation messages.</p>
+<p>User flow is smooth and error-free.</p>
+<p>Responsive layouts function properly on different screen sizes.</p>
+<p>Fix any identified issues before submission.</p>
+<p>Step 6: Export the Prototype</p>
+<p>Export the Justinmind prototype and prepare it for demonstration and developer handoff.</p>
+<p>Step 7: Capture Screenshots</p>
+<p>Include screenshots of:</p>
+<p>Splash Screen</p>
+<p>Login/Register Screen</p>
+<p>Home Screen</p>
+<p>Feature Screens</p>
+<p>Responsive Mobile View</p>
+<p>Tablet View</p>
+<p>Desktop View</p>
+<p>Interactive Prototype</p>
+<p>Final Prototype Overview</p>
+<p>Step 8: Prepare the Report</p>
+<p>The report should include:</p>
+<p>Cover Page</p>
+<p>Group Members' Names and Enrollment Numbers</p>
+<p>Subject Name and Code</p>
+<p>Project Title</p>
+<p>Aim and Objectives</p>
+<p>Software Used</p>
+<p>Application Description</p>
+<p>User Flow Diagram</p>
+<p>Screen Descriptions</p>
+<p>Prototype Features</p>
+<p>Screenshots of All Screens</p>
+<p>Prototype Testing Results</p>
+<p>Developer Handoff Summary</p>
+<p>Challenges Faced</p>
+<p>Learning Outcomes</p>
+<p>Conclusion</p>
+<p>Submission Guidelines</p>
+<p>Each group must submit:</p>
+<p>One PDF Report</p>
+<p>Exported Justinmind Prototype File</p>
+<p>Screenshots of all screens</p>
+<p>Presentation (if instructed by the faculty)</p>
+<p>Submit all files before the deadline.</p>
+<p>File Naming Format</p>
+<p>Report: GroupNo_BETCE15324_CapstonePrototype.pdf</p>
+<p>Prototype: GroupNo_BETCE15324_Prototype</p>
+<p>Example:</p>
+<p>Group05_BETCE15324_CapstonePrototype.pdf</p>
+<p>Group05_BETCE15324_Prototype</p>
+<p>Important Instructions</p>
+<p>This is a group activity with a maximum of 3 students per group.</p>
+<p>Each group must select a unique project topic. Duplicate project ideas, layouts, or reports are not permitted.</p>
+<p>The complete prototype, report, screenshots, and documentation must be created by the group members.</p>
+<p>Copying work from classmates, previous batches, or internet sources is strictly prohibited.</p>
+<p>All content in the report should be written in your own words.</p>
+<p>Reports or prototypes containing copied or duplicate content will be treated as plagiarism and may receive zero marks.</p>
+<p>Every group member must actively contribute to planning, designing, testing, documentation, and presentation.</p>
+<p>Evaluation Criteria (10 Marks)</p>
+<p>Criteria</p>
+<p>Marks</p>
+<p>Prototype Design &amp; Completeness</p>
+<p>3</p>
+<p>Interactive Features &amp; Navigation</p>
+<p>2</p>
+<p>Responsive Design &amp; Testing</p>
+<p>2</p>
+<p>Developer Handoff Documentation</p>
+<p>2</p>
+<p>Report Quality &amp; Timely Submission</p>
+<p>1</p>
+<p>Total</p>
+<p>10 Marks</p></p><hr/>
+                            </div>
+                        </div>
+                    </div>
+                    <!-- Details View End -->
+                    </div>
+                </div>
+            </div>
+            <div class="col-sm-4">
+                <div class="card">
+                    <div class="card-header">
+
+                        <!-- Later For S3 -->
+                        
+                                                
+                        
+                        
+                    </div>
+                                        <div class="card-block">
+                        <form class="needs-validation" novalidate action="https://erp.gmiu.edu.in/student/assignment/485178/update" method="post" enctype="multipart/form-data"> 
+                            <input type="hidden" name="_token" value="SdF6kBIrENyPBUQazsSVskMUqG5tWZ2oawFfxuuT" autocomplete="off">
+                            <div class="form-group">
+                                <label for="attach">Upload Assignment (Max: 20MB)</label>
+                                <input type="file" class="form-control" name="attach" id="attach" value="" accept=".pdf,.docx,.zip,.xlsx,.ppt,.csv,.mp4,.png,.jpg,.jpeg,.pptx,.odp">
+
+                                <!-- <div class="invalid-feedback">
+                                    Please Enter Assignment
+                                </div> -->
+                            </div>
+                            <p class="text-danger">* Please ensure you are uploading from your Local Storage. Do not select files directly from Google Drive.</p>
+                            <div class="d-inline-block border mt-3 mb-2" style="width:45%;"></div><p class="d-inline-block text-center" style="vertical-align:super;width:10%;">OR</p><div class="d-inline-block border mt-3 mb-2" style="width:45%;"></div>
+                            <div class="form-group">
+                                <label for="attach">Attach Link</label>
+                                <input type="text" name="link" class="form-control">
+
+                                <!-- <div class="invalid-feedback">
+                                    Please Enter Link
+                                </div> -->
+                            </div>
+                            <div class="d-flex justify-content-start my-2 align-items-center" style="gap:10px;">
+                                <div class="progress-spinner text-success spinner-border" role="status" style="width:15px;height:15px;display:none;"><span class="sr-only">Loading...</span></div>
+                                <p class="text-success fw-bold progress-text" style="margin-bottom:unset !important;"></p>
+                            </div>
+                            <div class="progress mb-3" style="display:none;">
+                                <div class="progress-bar" role="progressbar" style="width: 0%; border-radius: 10px;background-color:#14cc9e;"></div>
+                            </div>
+
+                            <div class="mt-3" style="display:none;" id="successMessage">
+                                <p class="fw-bold text-success">Assignment uploaded successfully!</p>
+                            </div>
+
+                            <div class="mt-3" style="display:none;" id="errorMessage">
+                                <p class="fw-bold text-danger">Assignment not uploaded.</p>
+                            </div>
+
+                            <button type="submit" class="btn btn-success"><i class="fas fa-upload"></i> Upload</button>
+                        </form>
+                    </div>
+                                    </div>
+            </div>
+        </div>
+        <!-- [ Main Content ] end -->
+    </div>
+</div>
+<!-- End Content-->
+
+                    <!-- End Content-->
+
+                </div>
+            </div>
+        </div>
+    </div>
+    <!-- [ Main Content ] end -->
+    
+
+    <!-- Required Js -->
+    <script src="/public/dashboard/plugins/jquery/js/jquery.min.js"></script>
+    <script src="/public/dashboard/plugins/popper/js/popper.min.js"></script>
+    <script src="/public/dashboard/plugins/bootstrap/js/bootstrap.min.js"></script>
+    <script src="/public/dashboard/plugins/jquery-scrollbar/js/perfect-scrollbar.min.js"></script>
+    <script src="/public/dashboard/js/pcoded.min.js"></script>
+
+    <!-- datatable Js -->
+    <script src="/public/dashboard/plugins/data-tables/js/datatables.min.js"></script>
+
+    <!-- form-validation Js -->
+    <script src="/public/dashboard/js/pages/form-validation.js"></script>
+
+    <!-- material datetimepicker Js -->
+    <script src="/public/dashboard/plugins/moment/js/moment-with-locales.min.js"></script>
+    <script src="/public/dashboard/plugins/material-datetimepicker/js/bootstrap-material-datetimepicker.js"></script>
+
+    <script type="text/javascript">
+            </script>
+    
+        <script type="text/javascript" class="flasher-js">
+        (function(window, document) {
+            const merge = (first, second) => {
+                if (Array.isArray(first) && Array.isArray(second)) {
+                    return [...first, ...second.filter(item => !first.includes(item))];
+                }
+
+                if (typeof first === 'object' && typeof second === 'object') {
+                    for (const [key, value] of Object.entries(second)) {
+                        first[key] = key in first ? { ...first[key], ...value } : value;
+                    }
+                    return first;
+                }
+
+                return undefined;
+            };
+
+            const mergeOptions = (...options) => {
+                const result = {};
+
+                options.forEach(option => {
+                    Object.entries(option).forEach(([key, value]) => {
+                        result[key] = key in result ? merge(result[key], value) : value;
+                    });
+                });
+
+                return result;
+            };
+
+            const renderCallback = (options) => {
+                if(!window.flasher) {
+                    throw new Error('Flasher is not loaded');
+                }
+
+                window.flasher.render(options);
+            };
+
+            const render = (options) => {
+                if (options instanceof Event) {
+                    options = options.detail;
+                }
+
+                if (['interactive', 'complete'].includes(document.readyState)) {
+                    renderCallback(options);
+                } else {
+                    document.addEventListener('DOMContentLoaded', () => renderCallback(options));
+                }
+            };
+
+            const addScriptAndRender = (options) => {
+                const mainScript = '/public/dashboard/plugins/flasher/flasher.min.js';
+
+                if (window.flasher || !mainScript || document.querySelector('script[src="' + mainScript + '"]')) {
+                    render(options);
+                } else {
+                    const tag = document.createElement('script');
+                    tag.src = mainScript;
+                    tag.type = 'text/javascript';
+                    
+                    tag.onload = () => render(options);
+
+                    document.head.appendChild(tag);
+                }
+            };
+
+            const addRenderListener = () => {
+                if (1 === document.querySelectorAll('script.flasher-js').length) {
+                    document.addEventListener('flasher:render', render);
+                }
+
+                
+            };
+
+            const options = [];
+            options.push({"envelopes":[],"scripts":[],"styles":[],"options":[],"context":[]});
+            options.push({"envelopes":[],"scripts":[],"styles":[],"options":[],"context":{"envelopes_only":true,"csp_script_nonce":"dc915ecbf9f0b0c7c9386970e12cb6e1","csp_style_nonce":"7d63745f64396b6ca645d14b9a65d176"}});
+/** {--FLASHER_REPLACE_ME--} **/
+            addScriptAndRender(mergeOptions(...options));
+            addRenderListener();
+        })(window, document);
+    </script>   
+
+
+    <!-- page js -->
+    <script>
+    $(document).ready(function () {
+        $('#uploadForm').submit(function (e) {
+            
+            e.preventDefault();
+            var formData = new FormData(this);
+
+            $.ajax({
+                url: $(this).attr('action'),
+                type: 'POST',
+                data: formData,
+                contentType: false,
+                processData: false,
+                xhr: function () {
+                    var xhr = new window.XMLHttpRequest();
+
+                    // Upload progress
+                    xhr.upload.addEventListener("progress", function (evt) {
+                        if (evt.lengthComputable) {
+                            var percentComplete = (evt.loaded / evt.total) * 100;
+                            if(percentComplete != 100){
+                                $('.progress-text').text(Math.trunc(percentComplete) + '%');
+                            }else{
+                                $('.progress-text').text("Do not refresh, we're processing your file...");
+                            }
+                            $('.progress-bar').width(percentComplete + '%');
+                        }
+                    }, false);
+
+                    return xhr;
+                },
+                success: function (data) {
+                    // Handle success response
+                    $('#successMessage').show().delay(3000).fadeOut();
+                    setTimeout(function () {
+                        location.reload(); // Refresh the page after 2 seconds
+                    }, 2000);
+                },
+                error: function (xhr, status, error) {
+                    // Handle error response
+                    $('#errorMessage').children("p").text(xhr.responseJSON.message);
+                    $('#errorMessage').show().delay(10000).fadeOut();
+                },
+                complete: function () {
+                    // Reset progress bar
+                    $('.progress-spinner').hide();
+                    $('.progress').hide();
+                    $('.progress-text').text("");
+                    $('.progress-bar').width('0%');
+                }
+            });
+
+            // Display progress bar
+            $('.progress').show();
+            $('.progress-spinner').show();
+        });
+    });
+</script>
+
+
+    <script type="text/javascript">
+        'use strict';
+        $(document).ready(function() {
+            // Date Picker
+            $('.date').bootstrapMaterialDatePicker({
+                setDate: new Date(),
+                weekStart: 0,
+                time: false
+            });
+
+            // Time Picker
+            $('.time').bootstrapMaterialDatePicker({
+                date: false,
+                format: 'HH:mm'
+            });
+        });
+    </script>
+
+    <script type="text/javascript">
+        'use strict';
+        $(document).ready(function() {
+            // [ Zero-configuration ] start
+            $('#basic-table').DataTable();
+            $('#basic-table2').DataTable();
+
+            var TableTitle = "Assignment | Gyanmanjari Innovative University ";
+            // [ HTML5-Export ] start
+            $('#export-table').DataTable({
+                dom: 'Bfrtip',
+                buttons: [
+                    {
+                        extend: 'copyHtml5',
+                        text: '<i class="fas fa-copy"></i>',
+                        exportOptions: {
+                            columns: ':not(:last-child)',
+                        }
+                    },
+                    {
+                        extend: 'excelHtml5',
+                        text: '<i class="fas fa-file-excel"></i>',
+                        exportOptions: {
+                            columns: ':not(:last-child)',
+                        },
+                        title: TableTitle,
+                    },
+                    {
+                        extend: 'csvHtml5',
+                        text: '<i class="fas fa-file"></i>',
+                        exportOptions: {
+                            columns: ':not(:last-child)',
+                        },
+                        title: TableTitle,
+                    },
+                    {
+                        extend: 'pdfHtml5',
+                        text: '<i class="fas fa-file-pdf"></i>',
+                        exportOptions: {
+                            columns: ':not(:last-child)',
+                        },
+                        title: TableTitle,
+                    },
+                    {
+                        extend: 'print',
+                        text: '<i class="fas fa-print"></i>',
+                        autoPrint: true,
+                        // title: '',
+                        footer: false,
+                        title: TableTitle,
+                        exportOptions: {
+                            columns: ':not(:last-child)',
+                        },
+                        customize: function ( win ) {
+                            $(win.document.body)
+                                .css( 'font-size', '10pt' )
+                                /*.prepend(
+                                    '<img src="http://datatables.net/media/images/logo-fade.png" style="position:absolute; top:0; left:0;" />'
+                                );*/
+         
+                            $(win.document.body).find( 'table' )
+                                .addClass( 'compact' )
+                                .css( 'font-size', 'inherit' );
+
+                            $(win.document.body).find( 'caption' )
+                                .css( 'font-size', '10px' );
+
+                            $(win.document.body).find('h1')
+                                .css({"text-align": "center", "font-size": "16pt"});
+                        }
+                    }
+                ]
+            });
+        });
+    </script>
+
+    
+    
+    
+    <script type="text/javascript">
+        "use strict";
+        $(document).ready(function(){
+            $("#mobile-collapse").on( "click", function(e) {
+               e.preventDefault();
+               $.ajaxSetup({
+                  headers: {
+                      'X-CSRF-TOKEN': $('meta[name="_token"]').attr('content')
+                  }
+              });
+            $.ajax({
+               url: "https://erp.gmiu.edu.in/set-cookie",
+               method: 'get',
+               data: {},
+               success: function(result){
+                  console.log(result.data);
+               }});
+            });
+        });
+    </script>
+                        
+</body>
+</html>

@@ -1,10 +1,15 @@
 import { NextResponse } from "next/server";
 import { db } from "@/lib/db";
+import { withSubjectMeta, resolveSubjectCode } from "@/lib/reminders";
+import { ASSIGNMENT_EXT_PREFIX } from "@/lib/sync/engine";
 
 export const dynamic = "force-dynamic";
 
 /**
  * GET /api/reminders?filter=all|erp|personal&includeDone=true
+ *
+ * ERP-synced ALA/assignment rows (externalId `erp:assign:*`) are excluded —
+ * they have their own subject-wise view via GET /api/assignments.
  */
 export async function GET(req: Request) {
   try {
@@ -16,13 +21,14 @@ export async function GET(req: Request) {
     if (filter === "erp") where.source = "ERP";
     if (filter === "personal") where.source = "PERSONAL";
     if (!includeDone) where.status = "ACTIVE";
+    where.NOT = { externalId: { startsWith: ASSIGNMENT_EXT_PREFIX } };
 
     const reminders = await db.reminder.findMany({
       where,
       orderBy: { dueAt: "asc" },
       take: 200,
     });
-    return NextResponse.json({ reminders });
+    return NextResponse.json({ reminders: await withSubjectMeta(reminders) });
   } catch (e) {
     return NextResponse.json(
       { error: e instanceof Error ? e.message : "Failed to load reminders" },
@@ -33,7 +39,7 @@ export async function GET(req: Request) {
 
 /**
  * POST /api/reminders — create a PERSONAL reminder.
- * Body: { title, type?, description?, dueAt (ISO string) }
+ * Body: { title, type?, description?, dueAt (ISO string), subjectCode? }
  */
 export async function POST(req: Request) {
   try {
@@ -49,16 +55,25 @@ export async function POST(req: Request) {
     const allowedTypes = ["EXAM", "PRACTICAL_EXAM", "VIVA", "ASSIGNMENT", "SUBMISSION", "OTHER"];
     const type = allowedTypes.includes(body.type) ? body.type : "OTHER";
 
+    const subject = await resolveSubjectCode(body.subjectCode);
+    if (!subject.ok) {
+      return NextResponse.json({ error: subject.error }, { status: 400 });
+    }
+
     const reminder = await db.reminder.create({
       data: {
         source: "PERSONAL",
         type,
         title,
         description: typeof body.description === "string" ? body.description.trim() || null : null,
+        subjectCode: subject.code,
         dueAt,
       },
     });
-    return NextResponse.json({ reminder }, { status: 201 });
+    return NextResponse.json(
+      { reminder: (await withSubjectMeta([reminder]))[0] },
+      { status: 201 }
+    );
   } catch (e) {
     return NextResponse.json(
       { error: e instanceof Error ? e.message : "Failed to create reminder" },

@@ -49,6 +49,11 @@ export interface Reminder {
   type: ReminderType;
   title: string;
   description: string | null;
+  /** Linked subject code (attendance warnings get it from sync; personal reminders may pick one). */
+  subjectCode: string | null;
+  /** Joined by /api/reminders so the client can group by subject without a second call. */
+  subjectName?: string | null;
+  subjectSemester?: number | null;
   dueAt: string;
   status: ReminderStatus;
   createdAt: string;
@@ -137,6 +142,10 @@ export interface DashboardResponse {
     items: Reminder[];
     todayCount: number;
     weekCount: number;
+    /** Pending (not yet Submitted) ERP ALA/assignment rows. */
+    alaPending: number;
+    /** All tracked ERP ALA/assignment rows. */
+    alaTotal: number;
   };
   erp: ErpSyncEnvelope;
   notifications: AppNotification[];
@@ -176,6 +185,21 @@ export interface TimetableSlotRow {
 
 export interface TimetableResponse {
   slots: TimetableSlotRow[];
+}
+
+/**
+ * One ERP-synced ALA/assignment row (Reminder with externalId `erp:assign:*`),
+ * joined with the resolved ERP course name for subject-wise grouping.
+ */
+export type AssignmentRow = Reminder;
+
+export interface AssignmentsResponse {
+  assignments: AssignmentRow[];
+  /** ERP course-code → course-name map resolved from assignment detail pages. */
+  courseNames: Record<string, string>;
+  semester: string;
+  mode: AppMode;
+  sync: { status: SyncStatus; lastSuccessAt: string | null };
 }
 
 export interface AppSettings {

@@ -1,4 +1,5 @@
 import {
+  ErpAssignmentSnapshot,
   ErpSnapshot,
   ErpSubjectSnapshot,
   SyncError,
@@ -34,6 +35,8 @@ const ATTENDANCE_PATHS = [
 ];
 /** The student profile carries the "Semester: Sem N" academic info. */
 const PROFILE_PATHS = ["/student/profile"];
+/** ALA / coursework list (verified: table with per-subject rows + deadlines). */
+const ASSIGNMENT_PATH = "/student/assignment";
 const REQUEST_TIMEOUT_MS = 15000;
 const UA =
   "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36 ERPStudentSync/1.0";
@@ -407,19 +410,167 @@ function guessType(title: string): ReminderType {
   return "OTHER";
 }
 
+/** A submission counts as complete only when the ERP clearly says so. */
+export function isSubmissionComplete(
+  submissionStatus: string | null | undefined,
+  approvalStatus?: string | null
+): boolean {
+  const sub = (submissionStatus ?? "").trim();
+  const appr = (approvalStatus ?? "").trim();
+  const submitted = /submit|complet|done|accept/i.test(sub) && !/pending|reject|cancel|not/i.test(sub);
+  // A rejected approval means the work is NOT accepted, whatever submission says.
+  const rejected = /reject|cancel/i.test(appr);
+  return submitted && !rejected;
+}
+
+/**
+ * GMIU Assignments-page parser (verified against the live ERP).
+ *
+ * Table header:
+ *   # | Title | Course | Session | Semester | Start Date | End Date |
+ *   Submission Status | Approval Status
+ * Row example:
+ *   1 | <a href="…/student/assignment/485178">ALA-5</a> | BETCE15324 |
+ *     GMIU-2026-27(ODD) | Sem 5 | 2026-07-30 | 2026-10-30 | Pending | Pending
+ *
+ * Rows are filtered to the student's current semester when one is supplied
+ * (the page lists every semester the student ever had — 135+ rows).
+ * Returns null when no such table is found (callers then report the page as
+ * unavailable rather than inventing data).
+ */
+export function parseGmiuAssignments(
+  html: string,
+  currentSemester: number | null
+): ErpAssignmentSnapshot[] | null {
+  const tables = html.match(/<table[\s\S]*?<\/table>/gi) ?? [];
+  for (const table of tables) {
+    const rows = table.match(/<tr[\s\S]*?<\/tr>/gi) ?? [];
+    if (rows.length < 2) continue;
+
+    // locate the header row
+    let headerCells: string[] = [];
+    let headerIdx = -1;
+    for (let i = 0; i < Math.min(rows.length, 4); i++) {
+      const cells = (rows[i].match(/<t[dh][^>]*>[\s\S]*?<\/t[dh]>/gi) ?? []).map((c) =>
+        stripTags(c).trim()
+      );
+      if (cells.some((c) => /^title$/i.test(c)) && cells.some((c) => /^course$/i.test(c))) {
+        headerCells = cells;
+        headerIdx = i;
+        break;
+      }
+    }
+    if (headerIdx < 0) continue;
+
+    const col = (target: RegExp) =>
+      headerCells.findIndex((c) => target.test(c));
+    const iTitle = col(/^title$/i);
+    const iCourse = col(/^course$/i);
+    const iSession = col(/^session$/i);
+    const iSemester = col(/^semester$/i);
+    const iStart = col(/^start\s*date$/i);
+    const iEnd = col(/^end\s*date$/i);
+    const iSub = col(/^submission\s*status$/i);
+    const iAppr = col(/^approval\s*status$/i);
+    if (iTitle < 0 || iCourse < 0 || iEnd < 0 || iSub < 0) continue;
+
+    const wantSemester =
+      currentSemester != null ? new RegExp(`^sem\\s*${currentSemester}$`, "i") : null;
+    const out: ErpAssignmentSnapshot[] = [];
+    for (const row of rows.slice(headerIdx + 1)) {
+      const cells = (row.match(/<t[dh][^>]*>[\s\S]*?<\/t[dh]>/gi) ?? []).map((c) =>
+        stripTags(c).trim()
+      );
+      if (iTitle >= cells.length || iCourse >= cells.length || iEnd >= cells.length) continue;
+      const title = (cells[iTitle] ?? "").replace(/\s+/g, " ").trim();
+      const courseCode = (cells[iCourse] ?? "").toUpperCase().replace(/\s+/g, "");
+      if (!title || !courseCode) continue;
+      if (wantSemester && !(wantSemester.test(cells[iSemester] ?? ""))) continue;
+
+      // Assignment id lives in the row's link (/student/assignment/485178).
+      const id = (row.match(/student\/assignment\/(\d+)/) ?? [])[1];
+      const start = /^\d{4}-\d{2}-\d{2}$/.test(cells[iStart] ?? "") ? cells[iStart] : null;
+      const end = /^\d{4}-\d{2}-\d{2}$/.test(cells[iEnd] ?? "") ? cells[iEnd] : null;
+      if (!end) continue; // no parseable last date → cannot be a deadline
+
+      out.push({
+        externalId: id ?? `${courseCode}|${title}|${start ?? "-"}`,
+        title,
+        courseCode,
+        session: cells[iSession] ?? null,
+        semesterLabel: cells[iSemester] ?? null,
+        startDate: start,
+        endDate: end,
+        submissionStatus: (cells[iSub] ?? "").replace(/\s+/g, " ") || "Unknown",
+        approvalStatus: iAppr >= 0 ? cells[iAppr] ?? null : null,
+      });
+    }
+    if (out.length > 0) return out;
+  }
+  return null;
+}
+
+/**
+ * Resolve course-code → course-name pairs from an assignment detail page
+ * ("Course: BETCE15324 - RESPONSIVE WEB & MOBILE UI DESIGN"). The list page
+ * carries only the code, so names come from one sampled detail page per code.
+ */
+function parseCourseName(html: string, courseCode: string): string | null {
+  const text = stripTags(html);
+  const esc = courseCode.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const m = text.match(new RegExp(`Course:\\s*${esc}\\s*-\\s*(.+?)(?:\\s+Session:|$)`));
+  return m ? m[1].replace(/\s+/g, " ").trim() || null : null;
+}
+
+async function resolveCourseNames(
+  rows: ErpAssignmentSnapshot[],
+  known: Record<string, string>,
+  cookies: Map<string, string>,
+  budget: number
+): Promise<Record<string, string>> {
+  const merged = { ...known };
+  const sampleByCode = new Map<string, ErpAssignmentSnapshot>();
+  for (const r of rows) {
+    if (!merged[r.courseCode] && /^\d+$/.test(r.externalId) && !sampleByCode.has(r.courseCode)) {
+      sampleByCode.set(r.courseCode, r);
+    }
+  }
+  let used = 0;
+  for (const [code, sample] of sampleByCode) {
+    if (used >= budget) break; // stay gentle on the ERP; the rest resolve on later syncs
+    const detail = await fetchWithSession(`/student/assignment/${sample.externalId}`, cookies);
+    used++;
+    if (!detail.html) continue;
+    const name = parseCourseName(detail.html, code);
+    if (name) merged[code] = name;
+    await new Promise((r) => setTimeout(r, 350)); // polite pacing between detail fetches
+  }
+  return merged;
+}
+
 interface CollectedSnapshot {
   subjects: ErpSubjectSnapshot[];
   complete: boolean;
   currentSemester: number | null;
   cookies: Map<string, string>;
+  assignments: ErpAssignmentSnapshot[];
+  assignmentsComplete: boolean;
+  courseNames: Record<string, string>;
 }
 
 /**
  * Walk the ERP pages with an authenticated session: dashboard → attendance
- * routes → (for the semester label) the student profile. Prefers the verified
- * GMIU attendance table; falls back to the generic parser when it is absent.
+ * routes → the Assignments (ALA) page → (for the semester label) the student
+ * profile. Prefers the verified GMIU parsers; missing optional pages degrade
+ * gracefully (assignments: [] / complete: false) instead of failing the sync.
  */
-async function collectSnapshot(sessionCookies: Map<string, string>): Promise<CollectedSnapshot> {
+async function collectSnapshot(
+  sessionCookies: Map<string, string>,
+  opts?: {
+    knownCourseNames?: Record<string, string>;
+    courseNameBudget?: number;
+  }
+): Promise<CollectedSnapshot> {
   const dash = await fetchWithSession(DASHBOARD_PATH, sessionCookies);
   if (!dash.html) {
     throw new SyncError("AUTH_FAILED", "Session did not survive login redirect.");
@@ -467,13 +618,45 @@ async function collectSnapshot(sessionCookies: Map<string, string>): Promise<Col
     for (const s of subjects) if (!s.semester) s.semester = currentSemester;
   }
 
-  return { subjects, complete, currentSemester, cookies: dash.cookies };
+  // --- ALA / assignments page (subject-wise rows with deadlines) ---
+  let assignments: ErpAssignmentSnapshot[] = [];
+  let assignmentsComplete = false;
+  let courseNames: Record<string, string> = { ...(opts?.knownCourseNames ?? {}) };
+  const att = await fetchWithSession(ASSIGNMENT_PATH, dash.cookies);
+  if (att.html && !att.html.includes('name="password"')) {
+    const parsed = parseGmiuAssignments(att.html, currentSemester);
+    if (parsed) {
+      assignments = parsed;
+      assignmentsComplete = true;
+      courseNames = await resolveCourseNames(
+        assignments,
+        courseNames,
+        att.cookies,
+        opts?.courseNameBudget ?? 2
+      );
+    }
+  }
+
+  return {
+    subjects,
+    complete,
+    currentSemester,
+    cookies: dash.cookies,
+    assignments,
+    assignmentsComplete,
+    courseNames,
+  };
 }
 
 export async function fetchLiveSnapshot(
   username: string,
   password: string,
-  savedCookie?: string | null
+  savedCookie?: string | null,
+  opts?: {
+    knownCourseNames?: Record<string, string>;
+    /** How many assignment-detail pages may be fetched to resolve course names. */
+    courseNameBudget?: number;
+  }
 ): Promise<LiveFetchResult> {
   // 1) try the saved session cookie first (gentle on the ERP)
   if (savedCookie) {
@@ -483,9 +666,9 @@ export async function fetchLiveSnapshot(
       if (i > 0) saved.set(pair.slice(0, i).trim(), pair.slice(i + 1).trim());
     }
     try {
-      const out = await collectSnapshot(saved);
+      const out = await collectSnapshot(saved, opts);
       return {
-        snapshot: buildSnapshot(out.subjects, out.complete, out.currentSemester),
+        snapshot: buildSnapshot(out),
         sessionCookie: cookieHeader(out.cookies),
       };
     } catch {
@@ -495,27 +678,26 @@ export async function fetchLiveSnapshot(
 
   // 2) full login flow
   const { cookies } = await login(username, password);
-  const out = await collectSnapshot(cookies);
+  const out = await collectSnapshot(cookies, opts);
   return {
-    snapshot: buildSnapshot(out.subjects, out.complete, out.currentSemester),
+    snapshot: buildSnapshot(out),
     sessionCookie: cookieHeader(out.cookies),
   };
 }
 
-function buildSnapshot(
-  subjects: ErpSubjectSnapshot[],
-  complete: boolean,
-  currentSemester?: number | null
-): ErpSnapshot {
+function buildSnapshot(out: CollectedSnapshot): ErpSnapshot {
   return {
     mode: "live",
     fetchedAt: new Date().toISOString(),
     // A verified GMIU attendance table is the FULL subject list of the
     // student's current semester → safe to remove disappeared local rows.
     // The generic fallback may be partial → never delete local data from it.
-    complete,
-    subjects,
-    currentSemester: currentSemester ?? null,
+    complete: out.complete,
+    subjects: out.subjects,
     reminders: [], // exam/deadline scraping is added once the real page structure is known
+    assignments: out.assignments,
+    assignmentsComplete: out.assignmentsComplete,
+    courseNames: out.courseNames,
+    currentSemester: out.currentSemester ?? null,
   };
 }

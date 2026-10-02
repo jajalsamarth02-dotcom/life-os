@@ -1,0 +1,983 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    
+     <meta charset="utf-8" />
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+        <meta http-equiv="X-UA-Compatible" content="IE=edge" />
+        <meta name="robots" content="noindex" />
+        <meta name="csrf-token" content="SdF6kBIrENyPBUQazsSVskMUqG5tWZ2oawFfxuuT">
+
+                <!-- App Title -->
+        <title>Dashboard | Gyanmanjari Innovative University</title>
+
+        <meta name="description" content="">
+        <meta name="keywords" content="">
+
+                <!-- App favicon -->
+        <link rel="shortcut icon" href="/public/uploads/setting/transparent_logo(1)_1697784281.png" type="image/x-icon">
+                
+        
+        <!-- fontawesome icon -->
+        <link rel="stylesheet" href="/public/dashboard/fonts/fontawesome/css/fontawesome-all.min.css">
+        <!-- data tables css -->
+        <link rel="stylesheet" href="/public/dashboard/plugins/data-tables/css/datatables.min.css">
+        <!-- material datetimepicker css -->
+        <link rel="stylesheet" href="/public/dashboard/plugins/material-datetimepicker/css/bootstrap-material-datetimepicker.css">
+
+        
+        <!-- page css -->
+            <!-- Full calendar css -->
+    <link rel="stylesheet" href="/public/dashboard/plugins/fullcalendar/css/fullcalendar.min.css">
+
+
+        <!-- vendor css -->
+        <link rel="stylesheet" href="/public/dashboard/css/style.css">
+
+                
+    
+    <style>
+        .pcoded-header .navbar-nav > li > .dropdown > a.dropdown-toggle::after,
+        .pcoded-header .navbar-nav > li > .dropdown.drp-user > a.dropdown-toggle::after {
+            display: none !important;
+        }
+    </style>
+
+</head>
+
+<body>
+
+    <!-- [ Pre-loader ] start -->
+    <div class="loader-bg">
+        <div class="loader-track">
+            <div class="loader-fill"></div>
+        </div>
+    </div>
+    <!-- [ Pre-loader ] End -->
+
+    <!-- [ navigation menu ] start -->
+    <nav class="pcoded-navbar active-lightblue title-lightblue navbar-lightblue brand-lightblue navbar-image-4 menu-item-icon-style2 ">
+        <div class="navbar-wrapper">
+            <div class="navbar-brand header-logo">
+                                                <a href="https://erp.gmiu.edu.in/student/dashboard" class="b-brand">
+                    <img src="/public/uploads/setting/transparent_logo_1697798719.png" alt="logo">
+                </a>
+                                                <a class="mobile-menu" id="mobile-collapse" href="#!"><span></span></a>
+            </div>
+
+
+                        <!--- Sidemenu -->
+            <!-- Sidemenu -->
+<div class="navbar-content scroll-div ps ps--active-y">
+    <ul class="nav pcoded-inner-navbar">
+
+        <li class="nav-item active">
+            <a href="https://erp.gmiu.edu.in/student/dashboard" class="nav-link">
+                <span class="pcoded-micon"><i class="fas fa-desktop"></i></span>
+                <span class="pcoded-mtext">Dashboard</span>
+            </a>
+        </li>
+
+        
+                    <li class="nav-item ">
+                <a href="https://erp.gmiu.edu.in/student/class-routine" class="nav-link">
+                    <span class="pcoded-micon"><i class="fas fa-clock"></i></span>
+                    <span class="pcoded-mtext">Class Routines</span>
+                </a>
+            </li>
+        
+        
+                    <li class="nav-item pcoded-hasmenu ">
+                <a href="#!" class="nav-link">
+                    <span class="pcoded-micon"><i class="fas fa-file-alt"></i></span>
+                    <span class="pcoded-mtext">Examinations</span>
+                </a>
+                <ul class="pcoded-submenu">
+                                            <li class="nav-item ">
+                            <a href="https://erp.gmiu.edu.in/student/exam-routine" class="nav-link">
+                                <span class="pcoded-mtext">Exam Schedules</span>
+                            </a>
+                        </li>
+                                                                <li class="nav-item ">
+                            <a href="https://erp.gmiu.edu.in/student/exam-form" class="nav-link">
+                                <span class="pcoded-mtext">Exam Form Actions</span>
+                            </a>
+                        </li>
+                                    </ul>
+            </li>
+        
+                    <li class="nav-item ">
+                <a href="https://erp.gmiu.edu.in/student/hundred-point-activity" class="nav-link">
+                    <span class="pcoded-micon"><i class="fas fa-calendar-check"></i></span>
+                    <span class="pcoded-mtext">100 Point Activity</span>
+                </a>
+            </li>
+        
+        
+                    <li class="nav-item ">
+                <a href="https://erp.gmiu.edu.in/student/attendance" class="nav-link">
+                    <span class="pcoded-micon"><i class="fas fa-calendar-check"></i></span>
+                    <span class="pcoded-mtext">Attendances</span>
+                </a>
+            </li>
+        
+                    <li
+                class="nav-item pcoded-hasmenu ">
+                <a href="#!" class="nav-link">
+                    <span class="pcoded-micon"><i class="fas fa-graduation-cap"></i></span>
+                    <span class="pcoded-mtext">Results</span>
+                </a>
+                <ul class="pcoded-submenu">
+                    
+                                            <li class="nav-item ">
+                            <a href="https://erp.gmiu.edu.in/student/result" class="nav-link">
+                                <span class="pcoded-mtext">Final Results</span>
+                            </a>
+                        </li>
+                        <li class="nav-item ">
+                            <a href="https://erp.gmiu.edu.in/student/assessment" class="nav-link">
+                                <span class="pcoded-mtext">Assessment Results</span>
+                            </a>
+                        </li>
+                    
+                    
+                </ul>
+            </li>
+        
+        
+        
+
+                    <li class="nav-item ">
+                <a href="https://erp.gmiu.edu.in/student/fees" class="nav-link">
+                    <span class="pcoded-micon"><i class="fas fa-money-bill-wave"></i></span>
+                    <span class="pcoded-mtext">Fees Reports</span>
+                </a>
+            </li>
+        
+                    <li class="nav-item ">
+                <a href="https://erp.gmiu.edu.in/student/student-section" class="nav-link">
+                    <span class="pcoded-micon"><i class="fas fa-users"></i></span>
+                    <span class="pcoded-mtext">Student Section</span>
+                </a>
+            </li>
+        
+        
+                    <li class="nav-item ">
+                <a href="https://erp.gmiu.edu.in/student/notice" class="nav-link">
+                    <span class="pcoded-micon"><i class="fas fa-bullhorn"></i></span>
+                    <span class="pcoded-mtext">Notices</span>
+                </a>
+            </li>
+        
+        
+
+                    <li class="nav-item ">
+                <a href="https://erp.gmiu.edu.in/student/assignment" class="nav-link">
+                    <span class="pcoded-micon"><i class="fas fa-newspaper"></i></span>
+                    <span class="pcoded-mtext">Assignments</span>
+                </a>
+            </li>
+        
+                    <li class="nav-item ">
+                <a href="https://erp.gmiu.edu.in/student/quiz" class="nav-link">
+                    <span class="pcoded-micon"><i class="fas fa-graduation-cap"></i></span>
+                    <span class="pcoded-mtext">Quiz</span>
+                </a>
+            </li>
+        
+                    
+                
+                                            <li class="nav-item ">
+                            <a href="https://erp.gmiu.edu.in/student/feed-back-form" class="nav-link">
+                                <span class="pcoded-micon"><i class="fas fa-comment-dots"></i></span>
+                                <span class="pcoded-mtext">Feedback Form</span>
+
+                            </a>
+                        </li>
+                    
+                    <li class="nav-item ">
+                        <a href="https://erp.gmiu.edu.in/student/feed-back-form/resolved" class="nav-link">
+                            <span class="pcoded-micon"><i class="fas fa-comment-dots"></i></span>
+                            <span class="pcoded-mtext">Resolved Feedback</span>
+                        </a>
+                    </li>
+
+                
+                    
+        <!-- <li class="nav-item ">
+            <a href="https://erp.gmiu.edu.in/student/transportation-request" class="nav-link">
+                <span class="pcoded-micon"><i class="fas fa-bus"></i></span>
+                <span class="pcoded-mtext">Transportation Request</span>
+            </a>
+        </li> -->
+
+                    <li class="nav-item ">
+                <a href="https://erp.gmiu.edu.in/student/download" class="nav-link">
+                    <span class="pcoded-micon"><i class="fas fa-download"></i></span>
+                    <span class="pcoded-mtext">Downloads</span>
+                </a>
+            </li>
+        
+        
+                    <li class="nav-item ">
+                <a href="https://erp.gmiu.edu.in/student/profile" class="nav-link">
+                    <span class="pcoded-micon"><i class="fas fa-id-card"></i></span>
+                    <span class="pcoded-mtext">My Profile</span>
+                </a>
+            </li>
+        
+    </ul>
+</div>
+<!-- End Sidebar -->            <!-- End Sidebar -->
+            
+        </div>
+    </nav>
+    <!-- [ navigation menu ] end -->
+
+
+    <!-- [ Header ] start -->
+    <header class="navbar pcoded-header navbar-expand-lg navbar-light headerpos-fixed header-lightblue">
+        <div class="m-header">
+            <a class="mobile-menu" id="mobile-collapse1" href="#!"><span></span></a>
+                                    <a href="https://erp.gmiu.edu.in/student/dashboard" class="b-brand">
+                <div class="b-bg">
+                    <img src="/public/uploads/setting/transparent_logo_1697798719.png" alt="logo" height="20">
+                </div>
+            </a>
+                                </div>
+        <a class="mobile-menu" id="mobile-header" href="#!">
+            <i class="feather icon-more-horizontal"></i>
+        </a>
+        <div class="collapse navbar-collapse">
+            <ul class="navbar-nav me-auto">
+                <li><a href="#!" class="full-screen" onclick="javascript:toggleFullScreen()"><i class="feather icon-maximize"></i></a></li>
+                <li>
+                    <h4 class="topbar-title">Gyanmanjari Innovative University</h4>
+                </li>
+            </ul>
+
+            <!-- [ Auth Nav ] start -->
+                        <ul class="navbar-nav ms-auto">
+                <!-- Language -->
+                
+                <!-- Developer Team -->
+                <li>
+                    <a href="https://erp.gmiu.edu.in/developers" class="fw-bold">
+                        <i class="fas fa-users fa-lg"></i> Developer Team
+                    </a>
+                </li>
+                <!-- Notification -->
+                <li>
+                    <div class="dropdown">
+                        <a class="dropdown-toggle" href="#" data-bs-toggle="dropdown">
+                                                                                            <i class="fa-solid fa-bell fa-lg fa-shake"></i>
+                                <span class="notification-active"></span>
+                                                                                        </i>
+                        </a>
+                                                <div class="dropdown-menu dropdown-menu-right notification">
+                            <div class="noti-head d-flex flex-row justify-content-between">
+                                <h6 class="d-inline-block m-b-0">Notifications</h6>
+                                <h6 class="d-inline-block m-b-0"><i class="fa-solid fa-check-double text-primary"></i> <a class="text-dark" href="https://erp.gmiu.edu.in/student/dashboard?notification_clear=true">Read All</a></h6>
+                            </div>
+                            <ul class="noti-body">
+                                                                                                                                <li class="notification">
+                                                                        <a class="media" href="https://erp.gmiu.edu.in/student/download/5535">
+                                                                            <div class="media-body">
+                                            <p><strong>Y1-AWD CODE</strong><span class="n-time text-muted"><i class="icon feather icon-clock m-r-10"></i>1 week ago</span></p>
+                                            <p><i class="fas fa-arrow-circle-right"></i> Content</p>
+                                        </div>
+                                    </a>
+                                </li>
+                                                                                                                                                                <li class="notification">
+                                                                        <a class="media" href="https://erp.gmiu.edu.in/student/download/5512">
+                                                                            <div class="media-body">
+                                            <p><strong>SE Unit - 6</strong><span class="n-time text-muted"><i class="icon feather icon-clock m-r-10"></i>2 weeks ago</span></p>
+                                            <p><i class="fas fa-arrow-circle-right"></i> Content</p>
+                                        </div>
+                                    </a>
+                                </li>
+                                                                                                                                                                <li class="notification">
+                                                                        <a class="media" href="https://erp.gmiu.edu.in/student/download/5490">
+                                                                            <div class="media-body">
+                                            <p><strong>AMAD Unit - 4</strong><span class="n-time text-muted"><i class="icon feather icon-clock m-r-10"></i>3 weeks ago</span></p>
+                                            <p><i class="fas fa-arrow-circle-right"></i> Content</p>
+                                        </div>
+                                    </a>
+                                </li>
+                                                                                                                                                                <li class="notification">
+                                                                        <a class="media" href="https://erp.gmiu.edu.in/student/download/5487">
+                                                                            <div class="media-body">
+                                            <p><strong>AI - UNIT - 5</strong><span class="n-time text-muted"><i class="icon feather icon-clock m-r-10"></i>3 weeks ago</span></p>
+                                            <p><i class="fas fa-arrow-circle-right"></i> Content</p>
+                                        </div>
+                                    </a>
+                                </li>
+                                                                                                                                                                <li class="notification">
+                                                                        <a class="media" href="https://erp.gmiu.edu.in/student/download/5455">
+                                                                            <div class="media-body">
+                                            <p><strong>SE Unit - 5</strong><span class="n-time text-muted"><i class="icon feather icon-clock m-r-10"></i>3 weeks ago</span></p>
+                                            <p><i class="fas fa-arrow-circle-right"></i> Content</p>
+                                        </div>
+                                    </a>
+                                </li>
+                                                                                                                                                                <li class="notification">
+                                                                        <a class="media" href="https://erp.gmiu.edu.in/student/download/5417">
+                                                                            <div class="media-body">
+                                            <p><strong>SE - Unit 4</strong><span class="n-time text-muted"><i class="icon feather icon-clock m-r-10"></i>3 weeks ago</span></p>
+                                            <p><i class="fas fa-arrow-circle-right"></i> Content</p>
+                                        </div>
+                                    </a>
+                                </li>
+                                                                                                                                                                <li class="notification">
+                                                                        <a class="media" href="https://erp.gmiu.edu.in/student/download/5405">
+                                                                            <div class="media-body">
+                                            <p><strong>AI unit 5</strong><span class="n-time text-muted"><i class="icon feather icon-clock m-r-10"></i>3 weeks ago</span></p>
+                                            <p><i class="fas fa-arrow-circle-right"></i> Content</p>
+                                        </div>
+                                    </a>
+                                </li>
+                                                                                                                                                                <li class="notification">
+                                                                        <a class="media" href="https://erp.gmiu.edu.in/student/download/5404">
+                                                                            <div class="media-body">
+                                            <p><strong>AI UNIT - 4</strong><span class="n-time text-muted"><i class="icon feather icon-clock m-r-10"></i>1 month ago</span></p>
+                                            <p><i class="fas fa-arrow-circle-right"></i> Content</p>
+                                        </div>
+                                    </a>
+                                </li>
+                                                                                            </ul>
+                        </div>
+                                            </div>
+                </li>
+
+                <!-- Profile -->
+                <li>
+                    <div class="dropdown drp-user">
+                        <a class="dropdown-toggle d-flex align-items-center gap-2" data-bs-toggle="dropdown" style="cursor: pointer; text-decoration: none;">
+                            <i class="far fa-user"></i>
+                        </a>
+                        <div class="dropdown-menu dropdown-menu-right profile-notification">
+                            <div class="pro-head">
+                                <img src="https://erp.gmiu.edu.in/student/photo" class="img-radius" alt="User Profile">
+                                <span>JAJAL SAMARTH</span>
+
+
+                                <a href="https://erp.gmiu.edu.in/student/logout" class="dud-logout" title="Logout"
+                                   onclick="event.preventDefault();
+                                                 document.getElementById('logout-form').submit();">
+                                    <i class="feather icon-log-out" style="font-size: 20px;"></i>
+                                </a>
+
+                                <form id="logout-form" action="https://erp.gmiu.edu.in/student/logout" method="POST" style="display: none;">
+                                    <input type="hidden" name="_token" value="SdF6kBIrENyPBUQazsSVskMUqG5tWZ2oawFfxuuT" autocomplete="off">                                </form>
+
+                            </div>
+                            <ul class="pro-body">
+                                <li><a href="https://erp.gmiu.edu.in/student/profile" class="dropdown-item"><i class="feather icon-user"></i> My Profile</a></li>
+                            </ul>
+                        </div>
+                    </div>
+                </li>
+            </ul>
+                        <!-- [ Auth Nav ] end -->
+
+        </div>
+    </header>
+    <!-- [ Header ] end -->
+
+
+    <!-- [ chat user list ] start -->
+    <section class="header-user-list">
+        <div class="h-list-header">
+            <div class="input-group">
+                <input type="text" id="search-friends" class="form-control" placeholder="Search Friend . . .">
+            </div>
+        </div>
+        <div class="h-list-body">
+            <a href="#!" class="h-close-text"><i class="feather icon-chevrons-right"></i></a>
+            <div class="main-friend-cont scroll-div">
+                <div class="main-friend-list">
+
+                </div>
+            </div>
+        </div>
+    </section>
+    <!-- [ chat user list ] end -->
+
+    <!-- [ chat message ] start -->
+    <section class="header-chat">
+        <div class="h-list-header">
+            <h6></h6>
+            <a href="#!" class="h-back-user-list"><i class="feather icon-chevron-left"></i></a>
+        </div>
+        <div class="h-list-body">
+            <div class="main-chat-cont scroll-div">
+                <div class="main-friend-chat">
+                    <div class="media chat-messages">
+                        
+                        <div class="media-body chat-menu-content">
+                            
+                        </div>
+                    </div>
+                    <div class="media chat-messages">
+                        <div class="media-body chat-menu-reply">
+                            
+                        </div>
+                    </div>
+                    <div class="media chat-messages">
+                        
+                        <div class="media-body chat-menu-content">
+                            
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </section>
+    <!-- [ chat message ] end -->
+
+
+    <!-- [ Main Content ] start -->
+    <div class="pcoded-main-container pb-3">
+        <div class="pcoded-wrapper">
+            <div class="pcoded-content">
+                <div class="pcoded-inner-content">
+                    
+                    <!-- start page title -->
+                    <!-- Include page breadcrumb -->
+                    <!-- [ breadcrumb ] start -->
+
+<!-- [ breadcrumb ] end -->                    <!-- end page title -->
+                    
+
+                    <!-- Start Content-->
+                    
+<!-- Start Content-->
+<div class="main-body">
+    <div class="page-wrapper">
+        <!-- [ Main Content ] start -->
+        <div class="row">
+
+
+
+                        <div class="col-sm-12 col-lg-12">
+                <div class="card">
+                                        <div class="card-header">
+                        <h5>Assignments</h5>
+                    </div>
+                    <div class="card-block">
+                        <!-- [ Data table ] start -->
+                        <div class="table-responsive">
+                            <table class="display table nowrap table-striped table-hover" style="width:100%">
+                                <thead>
+                                    <tr>
+                                        <th>Title</th>
+                                        <th>Course</th>
+                                        <th>Status</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                                                                                    <tr>
+                                        <td>
+                                            <a href="https://erp.gmiu.edu.in/student/assignment/485178">ALA-5</a>
+                                        </td>
+                                        <td>BETCE15324</td>
+                                        <td>
+                                                                                        <span class="badge badge-pill badge-primary">Pending</span>
+                                                                                    </td>
+                                    </tr>
+                                                                                                                                    <tr>
+                                        <td>
+                                            <a href="https://erp.gmiu.edu.in/student/assignment/485109">ALA-4</a>
+                                        </td>
+                                        <td>BETCE15324</td>
+                                        <td>
+                                                                                        <span class="badge badge-pill badge-primary">Pending</span>
+                                                                                    </td>
+                                    </tr>
+                                                                                                                                    <tr>
+                                        <td>
+                                            <a href="https://erp.gmiu.edu.in/student/assignment/485040">ALA-3</a>
+                                        </td>
+                                        <td>BETCE15324</td>
+                                        <td>
+                                                                                        <span class="badge badge-pill badge-primary">Pending</span>
+                                                                                    </td>
+                                    </tr>
+                                                                                                                                    <tr>
+                                        <td>
+                                            <a href="https://erp.gmiu.edu.in/student/assignment/484971">ALA-2</a>
+                                        </td>
+                                        <td>BETCE15324</td>
+                                        <td>
+                                                                                        <span class="badge badge-pill badge-primary">Pending</span>
+                                                                                    </td>
+                                    </tr>
+                                                                                                                                    <tr>
+                                        <td>
+                                            <a href="https://erp.gmiu.edu.in/student/assignment/484902">ALA - 1</a>
+                                        </td>
+                                        <td>BETCE15324</td>
+                                        <td>
+                                                                                        <span class="badge badge-pill badge-primary">Pending</span>
+                                                                                    </td>
+                                    </tr>
+                                                                                                                                    <tr>
+                                        <td>
+                                            <a href="https://erp.gmiu.edu.in/student/assignment/484171">AI_ALA-3</a>
+                                        </td>
+                                        <td>BETCE15314</td>
+                                        <td>
+                                                                                        <span class="badge badge-pill badge-primary">Pending</span>
+                                                                                    </td>
+                                    </tr>
+                                                                                                                                    <tr>
+                                        <td>
+                                            <a href="https://erp.gmiu.edu.in/student/assignment/484102">AI_ALA-2</a>
+                                        </td>
+                                        <td>BETCE15314</td>
+                                        <td>
+                                                                                        <span class="badge badge-pill badge-primary">Pending</span>
+                                                                                    </td>
+                                    </tr>
+                                                                                                                                    <tr>
+                                        <td>
+                                            <a href="https://erp.gmiu.edu.in/student/assignment/484033">AI_ALA-1</a>
+                                        </td>
+                                        <td>BETCE15314</td>
+                                        <td>
+                                                                                        <span class="badge badge-pill badge-success">Submitted</span>
+                                                                                    </td>
+                                    </tr>
+                                                                                                                                    <tr>
+                                        <td>
+                                            <a href="https://erp.gmiu.edu.in/student/assignment/479824">PDO Secure CRUD Challenge</a>
+                                        </td>
+                                        <td>BETCE15316</td>
+                                        <td>
+                                                                                        <span class="badge badge-pill badge-primary">Pending</span>
+                                                                                    </td>
+                                    </tr>
+                                                                                                                                    <tr>
+                                        <td>
+                                            <a href="https://erp.gmiu.edu.in/student/assignment/479755">Mini Project</a>
+                                        </td>
+                                        <td>BETCE15316</td>
+                                        <td>
+                                                                                        <span class="badge badge-pill badge-primary">Pending</span>
+                                                                                    </td>
+                                    </tr>
+                                                                                                </tbody>
+                            </table>
+                        </div>
+                        <!-- [ Data table ] end -->
+                    </div>
+                                    </div>
+            </div>
+            
+                        <div class="col-sm-12 col-lg-6">
+                <div class="card">
+                                        <div class="card-header">
+                        <h5>Student Fees</h5>
+                    </div>
+                    <div class="card-block">
+                        <!-- [ Data table ] start -->
+                        <div class="table-responsive">
+                            <table class="display table nowrap table-striped table-hover" style="width:100%">
+                                <thead>
+                                    <tr>
+                                        <th>Fees Type</th>
+                                        <th>Fee</th>
+                                        <th>Status</th>
+                                        <th>Action</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                                                      <tr>
+                                        <td>Tuition Fee</td>
+                                        <td>
+                                                                                        44000.00 
+                                             
+                                            ₹
+                                        </td>
+                                        <td>
+                                                                                        <span class="badge badge-pill badge-success">Paid</span>
+                                                                                    </td>
+                                        <td>
+                                                                                            N/A
+                                                                                    </td>
+                                    </tr>
+                                                                  </tbody>
+                            </table>
+                        </div>
+                        <!-- [ Data table ] end -->
+                    </div>
+                                    </div>
+            </div>
+
+            <div class="col-sm-12 col-lg-6">
+                <div class="card">
+                    <div class="card-header">
+                        <h5>Notifications</h5>
+                    </div>
+                    <div class="card-block">
+                        <!-- [ Data table ] start -->
+                        <div class="table-responsive">
+                            <table class="display table nowrap table-striped table-hover" style="width:100%">
+                                <thead>
+                                    <tr>
+                                        <th>Title</th>
+                                        <th>Type</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                                                                                                                            <tr>
+                                        <td>
+                                                                                        <a class="media" href="https://erp.gmiu.edu.in/student/download/5535">Y1-AWD CODE</a> <span>1 week ago</span>
+                                                                                    </td>
+                                        <td>Content</td>
+                                    </tr>
+                                                                                                                                                                              <tr>
+                                        <td>
+                                                                                        <a class="media" href="https://erp.gmiu.edu.in/student/download/5512">SE Unit - 6</a> <span>2 weeks ago</span>
+                                                                                    </td>
+                                        <td>Content</td>
+                                    </tr>
+                                                                                                                                                                              <tr>
+                                        <td>
+                                                                                        <a class="media" href="https://erp.gmiu.edu.in/student/download/5490">AMAD Unit - 4</a> <span>3 weeks ago</span>
+                                                                                    </td>
+                                        <td>Content</td>
+                                    </tr>
+                                                                                                                                                                              <tr>
+                                        <td>
+                                                                                        <a class="media" href="https://erp.gmiu.edu.in/student/download/5487">AI - UNIT - 5</a> <span>3 weeks ago</span>
+                                                                                    </td>
+                                        <td>Content</td>
+                                    </tr>
+                                                                                                                                                                              <tr>
+                                        <td>
+                                                                                        <a class="media" href="https://erp.gmiu.edu.in/student/download/5455">SE Unit - 5</a> <span>3 weeks ago</span>
+                                                                                    </td>
+                                        <td>Content</td>
+                                    </tr>
+                                                                                                                                                                              <tr>
+                                        <td>
+                                                                                        <a class="media" href="https://erp.gmiu.edu.in/student/download/5417">SE - Unit 4</a> <span>3 weeks ago</span>
+                                                                                    </td>
+                                        <td>Content</td>
+                                    </tr>
+                                                                                                                                                                              <tr>
+                                        <td>
+                                                                                        <a class="media" href="https://erp.gmiu.edu.in/student/download/5405">AI unit 5</a> <span>3 weeks ago</span>
+                                                                                    </td>
+                                        <td>Content</td>
+                                    </tr>
+                                                                                                                                                                              <tr>
+                                        <td>
+                                                                                        <a class="media" href="https://erp.gmiu.edu.in/student/download/5404">AI UNIT - 4</a> <span>1 month ago</span>
+                                                                                    </td>
+                                        <td>Content</td>
+                                    </tr>
+                                                                                                    </tbody>
+                            </table>
+                        </div>
+                        <!-- [ Data table ] end -->
+                    </div>
+                </div>
+            </div>
+            
+        </div>
+ 
+        <div class="row">
+            <div class="col-xl-8 col-md-8 col-sm-12">
+                <div class="card">
+                    <div class="card-header">
+                        <h5>Academic Calendar</h5>
+                    </div>
+                    <div class="card-block">
+
+                        <!-- [ Calendar ] start -->
+                        <div id='calendar' class='calendar'></div>
+                        <!-- [ Calendar ] end -->
+
+                    </div>
+                </div>
+            </div>
+            <!-- [Event List] start -->
+            <div class="col-xl-4 col-md-4 col-sm-12">
+                <div class="card statistial-visit">
+                    <div class="card-header">
+                        <h5>Upcoming Event</h5>
+                    </div>
+                    <div class="card-block">
+                                            </div>
+                </div>
+            </div>
+            <!-- [Event List] end -->
+        </div>
+        <!-- [ Main Content ] end -->
+    </div>
+</div>
+<!-- End Content-->
+
+                    <!-- End Content-->
+
+                </div>
+            </div>
+        </div>
+    </div>
+    <!-- [ Main Content ] end -->
+    
+
+    <!-- Required Js -->
+    <script src="/public/dashboard/plugins/jquery/js/jquery.min.js"></script>
+    <script src="/public/dashboard/plugins/popper/js/popper.min.js"></script>
+    <script src="/public/dashboard/plugins/bootstrap/js/bootstrap.min.js"></script>
+    <script src="/public/dashboard/plugins/jquery-scrollbar/js/perfect-scrollbar.min.js"></script>
+    <script src="/public/dashboard/js/pcoded.min.js"></script>
+
+    <!-- datatable Js -->
+    <script src="/public/dashboard/plugins/data-tables/js/datatables.min.js"></script>
+
+    <!-- form-validation Js -->
+    <script src="/public/dashboard/js/pages/form-validation.js"></script>
+
+    <!-- material datetimepicker Js -->
+    <script src="/public/dashboard/plugins/moment/js/moment-with-locales.min.js"></script>
+    <script src="/public/dashboard/plugins/material-datetimepicker/js/bootstrap-material-datetimepicker.js"></script>
+
+    <script type="text/javascript">
+            </script>
+    
+        <script type="text/javascript" class="flasher-js">
+        (function(window, document) {
+            const merge = (first, second) => {
+                if (Array.isArray(first) && Array.isArray(second)) {
+                    return [...first, ...second.filter(item => !first.includes(item))];
+                }
+
+                if (typeof first === 'object' && typeof second === 'object') {
+                    for (const [key, value] of Object.entries(second)) {
+                        first[key] = key in first ? { ...first[key], ...value } : value;
+                    }
+                    return first;
+                }
+
+                return undefined;
+            };
+
+            const mergeOptions = (...options) => {
+                const result = {};
+
+                options.forEach(option => {
+                    Object.entries(option).forEach(([key, value]) => {
+                        result[key] = key in result ? merge(result[key], value) : value;
+                    });
+                });
+
+                return result;
+            };
+
+            const renderCallback = (options) => {
+                if(!window.flasher) {
+                    throw new Error('Flasher is not loaded');
+                }
+
+                window.flasher.render(options);
+            };
+
+            const render = (options) => {
+                if (options instanceof Event) {
+                    options = options.detail;
+                }
+
+                if (['interactive', 'complete'].includes(document.readyState)) {
+                    renderCallback(options);
+                } else {
+                    document.addEventListener('DOMContentLoaded', () => renderCallback(options));
+                }
+            };
+
+            const addScriptAndRender = (options) => {
+                const mainScript = '/public/dashboard/plugins/flasher/flasher.min.js';
+
+                if (window.flasher || !mainScript || document.querySelector('script[src="' + mainScript + '"]')) {
+                    render(options);
+                } else {
+                    const tag = document.createElement('script');
+                    tag.src = mainScript;
+                    tag.type = 'text/javascript';
+                    
+                    tag.onload = () => render(options);
+
+                    document.head.appendChild(tag);
+                }
+            };
+
+            const addRenderListener = () => {
+                if (1 === document.querySelectorAll('script.flasher-js').length) {
+                    document.addEventListener('flasher:render', render);
+                }
+
+                
+            };
+
+            const options = [];
+            options.push({"envelopes":[],"scripts":[],"styles":[],"options":[],"context":[]});
+            options.push({"envelopes":[],"scripts":[],"styles":[],"options":[],"context":{"envelopes_only":true,"csp_script_nonce":"0f6f57b5efe3791a39341da91b464096","csp_style_nonce":"1942a041c5e4389b75794c9fe685d98b"}});
+/** {--FLASHER_REPLACE_ME--} **/
+            addScriptAndRender(mergeOptions(...options));
+            addRenderListener();
+        })(window, document);
+    </script>   
+
+
+    <!-- page js -->
+        <!-- Full calendar js -->
+    <script src="/public/dashboard/plugins/fullcalendar/js/lib/moment.min.js"></script>
+    <script src="/public/dashboard/plugins/fullcalendar/js/lib/jquery-ui.min.js"></script>
+    <script src="/public/dashboard/plugins/fullcalendar/js/fullcalendar.min.js"></script>
+
+
+    <script type="text/javascript">
+        // Full calendar
+        $(window).on('load', function() {
+            "use strict";
+            $('#calendar').fullCalendar({
+                header: {
+                    left: 'prev,next',
+                    center: 'title',
+                    right: 'today'
+                },
+                defaultDate: '2026-10-02',
+                editable: false,
+                droppable: false,
+                events: [
+
+                
+                ],
+            });
+        });
+    </script>
+
+
+    <script type="text/javascript">
+        'use strict';
+        $(document).ready(function() {
+            // Date Picker
+            $('.date').bootstrapMaterialDatePicker({
+                setDate: new Date(),
+                weekStart: 0,
+                time: false
+            });
+
+            // Time Picker
+            $('.time').bootstrapMaterialDatePicker({
+                date: false,
+                format: 'HH:mm'
+            });
+        });
+    </script>
+
+    <script type="text/javascript">
+        'use strict';
+        $(document).ready(function() {
+            // [ Zero-configuration ] start
+            $('#basic-table').DataTable();
+            $('#basic-table2').DataTable();
+
+            var TableTitle = "Dashboard | Gyanmanjari Innovative University ";
+            // [ HTML5-Export ] start
+            $('#export-table').DataTable({
+                dom: 'Bfrtip',
+                buttons: [
+                    {
+                        extend: 'copyHtml5',
+                        text: '<i class="fas fa-copy"></i>',
+                        exportOptions: {
+                            columns: ':not(:last-child)',
+                        }
+                    },
+                    {
+                        extend: 'excelHtml5',
+                        text: '<i class="fas fa-file-excel"></i>',
+                        exportOptions: {
+                            columns: ':not(:last-child)',
+                        },
+                        title: TableTitle,
+                    },
+                    {
+                        extend: 'csvHtml5',
+                        text: '<i class="fas fa-file"></i>',
+                        exportOptions: {
+                            columns: ':not(:last-child)',
+                        },
+                        title: TableTitle,
+                    },
+                    {
+                        extend: 'pdfHtml5',
+                        text: '<i class="fas fa-file-pdf"></i>',
+                        exportOptions: {
+                            columns: ':not(:last-child)',
+                        },
+                        title: TableTitle,
+                    },
+                    {
+                        extend: 'print',
+                        text: '<i class="fas fa-print"></i>',
+                        autoPrint: true,
+                        // title: '',
+                        footer: false,
+                        title: TableTitle,
+                        exportOptions: {
+                            columns: ':not(:last-child)',
+                        },
+                        customize: function ( win ) {
+                            $(win.document.body)
+                                .css( 'font-size', '10pt' )
+                                /*.prepend(
+                                    '<img src="http://datatables.net/media/images/logo-fade.png" style="position:absolute; top:0; left:0;" />'
+                                );*/
+         
+                            $(win.document.body).find( 'table' )
+                                .addClass( 'compact' )
+                                .css( 'font-size', 'inherit' );
+
+                            $(win.document.body).find( 'caption' )
+                                .css( 'font-size', '10px' );
+
+                            $(win.document.body).find('h1')
+                                .css({"text-align": "center", "font-size": "16pt"});
+                        }
+                    }
+                ]
+            });
+        });
+    </script>
+
+    
+    
+    
+    <script type="text/javascript">
+        "use strict";
+        $(document).ready(function(){
+            $("#mobile-collapse").on( "click", function(e) {
+               e.preventDefault();
+               $.ajaxSetup({
+                  headers: {
+                      'X-CSRF-TOKEN': $('meta[name="_token"]').attr('content')
+                  }
+              });
+            $.ajax({
+               url: "https://erp.gmiu.edu.in/set-cookie",
+               method: 'get',
+               data: {},
+               success: function(result){
+                  console.log(result.data);
+               }});
+            });
+        });
+    </script>
+                        
+</body>
+</html>

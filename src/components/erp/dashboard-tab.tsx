@@ -16,6 +16,7 @@ import {
   GraduationCap,
   Hourglass,
   Info,
+  ClipboardList,
   Layers,
   WifiOff,
   XCircle,
@@ -27,6 +28,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Separator } from "@/components/ui/separator";
 import { motion } from "framer-motion";
 import { cn } from "@/lib/utils";
+import { compactErrorText } from "@/lib/compact-error";
 import { fetchDashboard, fetchHistory, qk } from "./api";
 import { WeeklyDigestDialog } from "./digest-dialog";
 import { SubjectDrawer } from "./subject-drawer";
@@ -167,10 +169,16 @@ function RemindersPreview({
   items,
   todayCount,
   weekCount,
+  alaPending,
+  alaTotal,
+  onOpenReminders,
 }: {
   items: Reminder[];
   todayCount: number;
   weekCount: number;
+  alaPending: number;
+  alaTotal: number;
+  onOpenReminders: () => void;
 }) {
   const now = useNow();
   const groups: { key: string; label: string; className: string; items: Reminder[] }[] = [
@@ -215,6 +223,23 @@ function RemindersPreview({
               </div>
             ))}
           </div>
+        )}
+        {alaTotal > 0 && (
+          <button
+            type="button"
+            onClick={onOpenReminders}
+            aria-label={`Open the Reminders tab — ${alaPending} of ${alaTotal} ALA and assignment submissions still pending`}
+            className="mt-3 flex w-full items-center gap-2 rounded-lg border border-primary/25 bg-primary/[0.05] px-3 py-2 text-left text-xs transition-colors hover:bg-primary/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+          >
+            <ClipboardList className="size-3.5 shrink-0 text-primary" aria-hidden="true" />
+            <span className="min-w-0 flex-1 truncate">
+              <span className="font-semibold">ALA &amp; assignments</span>{" "}
+              <span className="text-muted-foreground">
+                · {alaPending} of {alaTotal} pending — subject-wise list in the Reminders tab
+              </span>
+            </span>
+            <ChevronRight className="size-3.5 shrink-0 text-muted-foreground" aria-hidden="true" />
+          </button>
         )}
       </CardContent>
     </Card>
@@ -383,7 +408,7 @@ function NotificationRow({
       </span>
       <div className="min-w-0 flex-1">
         <p className="text-sm font-medium leading-snug">{n.title}</p>
-        <p className="line-clamp-2 text-xs text-muted-foreground">{n.message}</p>
+        <p className="line-clamp-2 text-xs text-muted-foreground">{compactErrorText(n.message, 240)}</p>
         <p className="mt-0.5 text-[11px] text-muted-foreground/80">{ago(n.createdAt, now)}</p>
       </div>
       {!n.read && <span className="mt-1.5 size-1.5 shrink-0 rounded-full bg-primary" aria-label="unread" />}
@@ -410,9 +435,11 @@ function CardSkeletonLight({ className }: { className?: string }) {
 export function DashboardTab({
   onOpenAttendance,
   onOpenSettings,
+  onOpenReminders,
 }: {
   onOpenAttendance: () => void;
   onOpenSettings: () => void;
+  onOpenReminders: () => void;
 }) {
   const [sort, setSort] = useState<SubjectSort>("lowest");
   /* Store the CODE (not the object) and derive the view from fresh query data,
@@ -672,6 +699,9 @@ export function DashboardTab({
           items={data.reminders.items}
           todayCount={data.reminders.todayCount}
           weekCount={data.reminders.weekCount}
+          alaPending={data.reminders.alaPending}
+          alaTotal={data.reminders.alaTotal}
+          onOpenReminders={onOpenReminders}
         />
         <ErpStatusCard
           connected={data.erp.connected}

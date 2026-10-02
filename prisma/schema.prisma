@@ -88,6 +88,9 @@ model Reminder {
   type        String // EXAM | PRACTICAL_EXAM | VIVA | ASSIGNMENT | SUBMISSION | ATTENDANCE_WARNING | OTHER
   title       String
   description String?
+  // Optional subject link (subject.code). Attendance warnings set it from the
+  // sync engine; personal reminders may pick one. null = general/no subject.
+  subjectCode String?
   dueAt       DateTime
   status      String   @default("ACTIVE") // ACTIVE | DONE | DISMISSED
   createdAt   DateTime @default(now())

@@ -278,6 +278,7 @@ export default function Home() {
                     <DashboardTab
                       onOpenAttendance={() => setTab("attendance")}
                       onOpenSettings={() => setTab("settings")}
+                      onOpenReminders={() => setTab("reminders")}
                     />
                   )}
                   {key === "attendance" && <AttendanceTab onOpenSettings={() => setTab("settings")} />}

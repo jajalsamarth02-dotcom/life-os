@@ -1,16 +1,19 @@
 import { NextResponse } from "next/server";
 import { db } from "@/lib/db";
+import { withSubjectMeta, resolveSubjectCode } from "@/lib/reminders";
 
 export const dynamic = "force-dynamic";
 
 /**
  * PATCH /api/reminders/:id
- * Body: { status: "ACTIVE" | "DONE" | "DISMISSED" } and/or { dueAt: ISO string }
+ * Body: { status?, dueAt?, subjectCode? }
  *
  * - status: works for both ERP and personal reminders (ERP ones are re-synced
  *   from the source of truth when the ERP changes them).
  * - dueAt (snooze/reschedule): PERSONAL reminders only — the ERP owns the due
  *   dates of its own reminders, so the app never rewrites them locally.
+ * - subjectCode: PERSONAL reminders only — link/unlink a subject for the
+ *   subject-wise view (null or "" clears the link).
  */
 export async function PATCH(req: Request, { params }: { params: Promise<{ id: string }> }) {
   try {
@@ -32,8 +35,21 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ id: st
       dueAtDate = t;
     }
 
-    if (status === undefined && !hasDueAt) {
-      return NextResponse.json({ error: "Nothing to update: provide status and/or dueAt" }, { status: 400 });
+    const hasSubject = body.subjectCode !== undefined;
+    let subjectCode: string | null = null;
+    if (hasSubject) {
+      const resolved = await resolveSubjectCode(body.subjectCode);
+      if (!resolved.ok) {
+        return NextResponse.json({ error: resolved.error }, { status: 400 });
+      }
+      subjectCode = resolved.code;
+    }
+
+    if (status === undefined && !hasDueAt && !hasSubject) {
+      return NextResponse.json(
+        { error: "Nothing to update: provide status, dueAt and/or subjectCode" },
+        { status: 400 }
+      );
     }
 
     const existing = await db.reminder.findUnique({ where: { id } });
@@ -46,15 +62,22 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ id: st
         { status: 400 }
       );
     }
+    if (hasSubject && existing.source !== "PERSONAL") {
+      return NextResponse.json(
+        { error: "Only personal reminders can be linked to a subject — ERP reminders keep the subject the sync engine assigns." },
+        { status: 400 }
+      );
+    }
 
     const reminder = await db.reminder.update({
       where: { id },
       data: {
         ...(status !== undefined ? { status } : {}),
         ...(dueAtDate ? { dueAt: dueAtDate } : {}),
+        ...(hasSubject ? { subjectCode } : {}),
       },
     });
-    return NextResponse.json({ reminder });
+    return NextResponse.json({ reminder: (await withSubjectMeta([reminder]))[0] });
   } catch (e) {
     return NextResponse.json(
       { error: e instanceof Error ? e.message : "Failed to update reminder" },

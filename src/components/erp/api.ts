@@ -3,6 +3,7 @@
  */
 import type {
   AppSettings,
+  AssignmentsResponse,
   AttendanceResponse,
   DashboardResponse,
   DigestResponse,
@@ -72,6 +73,7 @@ export const qk = {
   timetable: ["timetable"] as const,
   reminders: (filter: RemindersFilter, includeDone: boolean) =>
     ["reminders", filter, includeDone] as const,
+  assignments: ["assignments"] as const,
   settings: ["settings"] as const,
   semesters: ["semesters"] as const,
   sync: ["sync"] as const,
@@ -111,6 +113,8 @@ export const fetchReminders = (filter: RemindersFilter, includeDone: boolean) =>
   api<{ reminders: Reminder[] }>(
     `/api/reminders?filter=${encodeURIComponent(filter)}&includeDone=${includeDone}`
   ).then((r) => r.reminders);
+/** ERP-synced ALA/assignment rows, subject-wise (includes Submitted rows). */
+export const fetchAssignments = () => api<AssignmentsResponse>("/api/assignments");
 export const fetchSettings = () => api<AppSettings>("/api/settings");
 export const fetchSemesters = () => api<SemestersResponse>("/api/semesters");
 export const fetchSyncLogs = () => api<SyncLogsResponse>("/api/sync");
@@ -153,6 +157,7 @@ export const createReminder = (payload: {
   type: string;
   description?: string;
   dueAt: string;
+  subjectCode?: string | null;
 }) =>
   api<{ reminder: Reminder }>("/api/reminders", {
     method: "POST",
@@ -163,6 +168,13 @@ export const updateReminderStatus = (id: string, status: string) =>
   api<{ reminder: Reminder }>(`/api/reminders/${id}`, {
     method: "PATCH",
     body: JSON.stringify({ status }),
+  });
+
+/** Link/unlink a subject on a PERSONAL reminder (null clears the link). */
+export const updateReminderSubject = (id: string, subjectCode: string | null) =>
+  api<{ reminder: Reminder }>(`/api/reminders/${id}`, {
+    method: "PATCH",
+    body: JSON.stringify({ subjectCode: subjectCode ?? "" }),
   });
 
 /** Snooze/reschedule a PERSONAL reminder (ERP reminders are sync-owned). */

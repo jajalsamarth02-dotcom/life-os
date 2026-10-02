@@ -708,3 +708,81 @@ Unresolved issues / risks & next-phase priorities:
    digest email delivery (needs SMTP); TZ-aware calendar events; per-semester scoping stored on
    slots themselves (schema change → needs a controlled dev-server restart after client regen).
 3. dev-server-keeper cron (job 430680) must stay alive; preview Caddy 502 self-heals ≤5 min.
+
+---
+Task ID: 11 (user request — ALA subject-wise list in Reminders)
+Agent: Z.ai Code (main orchestrator)
+Task: "in reminder add ala list sub wise and show complate or not and last date" —
+subject-wise ALA (Active Learning Assignment) list in the Reminders tab with
+completion status and last date, synced from the real ERP.
+
+Current project status / assessment:
+- LIVE mode healthy (real account, Sem 5, 8 subjects, overall 66.67%, freshness dot green,
+  keeper cron 430680 untouched). No regressions found in the pre-work QA sweep.
+
+Completed modifications / verified:
+0. ERP RECON (authorized probe with the stored session, scripts/probe-ala.ts + probe-assignment.ts):
+   discovered the real Assignments page https://erp.gmiu.edu.in/student/assignment — a table
+   "# | Title | Course | Session | Semester | Start Date | End Date | Submission Status |
+   Approval Status" with 135 rows across all semesters, 47 in Sem 5 across 7 courses,
+   statuses "Pending"/"Submitted" both present. Detail pages carry "Course: CODE - NAME".
+1. CONNECTOR (lib/erp/live.ts + types.ts): new ErpAssignmentSnapshot + snapshot.assignments /
+   assignmentsComplete / courseNames. parseGmiuAssignments() (header-index based, verified
+   offline against a saved page copy: 47 Sem-5 rows, unique ids from /student/assignment/{id}
+   hrefs, 1 row without a link gets a composite fallback id) filters rows to the ERP-detected
+   current semester. isSubmissionComplete() = Submitted-like AND approval not Rejected.
+   collectSnapshot() additionally fetches the Assignments page (1 request/sync) and resolves
+   course-code → course-name from ≤2 (scheduled) / ≤8 (manual) detail pages per run, 350 ms
+   apart — rate-limit friendly (spec #8). Missing page degrades to [] + complete:false.
+2. ENGINE (lib/sync/engine.ts): assignments sync as ASSIGNMENT reminders with externalId
+   "erp:assign:{id}" (spec #5 dedup), subjectCode = ERP course code, dueAt = End Date stored
+   as 12:00 UTC (same calendar date in any TZ, turns overdue late on the last date),
+   description = "Submission: X · Approval: Y · Start: D · Session: S", status DONE/ACTIVE
+   driven by ERP Submission Status (read-only mirror, spec #14; user DISMISSED is preserved).
+   Change events: one batched "N rows imported" event on first import; individual events on
+   status flip ("marked Submitted") and End-Date moves (+ REMINDER_CHANGE notification).
+   Removal guarded: generic reminder-removal skips erp:assign:*; assignments removed only when
+   assignmentsComplete. Course-name map persisted in Setting "erp.courseNames". Side effect:
+   three demo-era fake ERP reminders (Java Assignment, Web Tech Submission, Android Practical)
+   were purged by the removal block — live mirror is now fully real (spec #6/#13).
+3. APIs: new GET /api/assignments (all erp:assign:* rows incl. DONE + courseNames + mode/sync);
+   GET /api/reminders now excludes erp:assign:* (so the main list, browser due-notifications
+   and .ics export are uncluttered); GET /api/dashboard excludes them from items and adds
+   reminders.alaPending / alaTotal.
+4. UI (reminders-tab.tsx): new "ALA & Assignments" section pinned at the top of the Reminders
+   tab — summary badges (41 pending · 6 submitted), subject-wise collapsible groups sorted by
+   nearest pending deadline, each header with course name (ERP-resolved) + code badge +
+   submitted/total mini progress bar + "next last date"; rows show title, ALA badge
+   (title matches /\bala/i), Submission/Approval/Start/Session line, and the completion state
+   with LAST DATE: "Submitted" (emerald) / "Pending · last date {d MMM yyyy}" (amber) /
+   "Overdue — was due …" (red). Honest empty states per mode (none/demo/live) + footnote
+   explaining ERP-driven completion.
+5. UI (dashboard-tab.tsx + page.tsx): RemindersPreview gained a clickable "ALA & assignments ·
+   N of M pending — subject-wise list in the Reminders tab" footer (onOpenReminders → jumps to
+   the Reminders tab).
+
+Verification results:
+- Offline parser test (scripts/test-parse-assignments.ts): 47/18/134 rows for Sem 5/4/all,
+  unique ids, 6 Submitted, heuristics table all green. bun run lint clean.
+- First manual sync: 47 changes, all 7 course names resolved (Setting erp.courseNames);
+  second manual sync: 0 changes → dedup idempotent. Cross-checked APIs: /api/assignments
+  47 rows (41 pending / 6 submitted, DONE mapping correct), /api/reminders 0 assign rows,
+  /api/dashboard alaPending 41 / alaTotal 47, change feed shows the batched import event.
+- agent-browser E2E: 7 groups with real course names; group content verified (progress bar,
+  "0/6 submitted", "next last date 16 Jul 2026", mixed Pending/Submitted/Overdue rows);
+  collapse toggle works; dashboard ALA line navigates to Reminders; 0 console/page errors;
+  desktop 1280 light+dark screenshots clean; mobile 390 scrollWidth 390/390 (no overflow).
+- No dev-server restart, no production build; next-server process untouched.
+
+Unresolved issues / risks & next-phase priorities:
+1. Assignment rows are filtered by the ERP-detected current semester at parse time (Sem 5) and
+   ignore the app's selectedSemester partition — switching the partition to another semester
+   still shows the current semester's ALA list (ERP itself only publishes the current one).
+2. If the student stays in demo mode, /api/assignments still serves the real synced mirror
+   (honest data, but the demo empty-state copy won't show once real rows exist).
+3. Around Oct 30–31 (bulk End Dates) up to ~40 pending rows could pile into one "overdue" wall
+   if faculty doesn't update Submission Status — consider a per-group "all overdue" digest.
+4. Backlog unchanged: L/H/E columns not folded into totals; digest email delivery (needs SMTP);
+   TZ-aware calendar events; per-semester scoping stored on slots themselves (schema change →
+   controlled dev-server restart).
+5. dev-server-keeper cron (job 430680) must stay alive; preview Caddy 502 self-heals ≤5 min.

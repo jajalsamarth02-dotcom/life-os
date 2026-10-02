@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { db } from "@/lib/db";
 import { getSettings, semesterFilterOf } from "@/lib/settings";
-import { getSyncState } from "@/lib/sync/engine";
+import { getSyncState, ASSIGNMENT_EXT_PREFIX } from "@/lib/sync/engine";
 import { getSubjectViews, overallWithTarget } from "@/lib/views";
 
 export const dynamic = "force-dynamic";
@@ -23,9 +23,24 @@ export async function GET() {
 
     const now = new Date();
     const reminders = await db.reminder.findMany({
-      where: { status: "ACTIVE", dueAt: { gte: new Date(now.getTime() - 12 * 3600 * 1000) } },
+      where: {
+        status: "ACTIVE",
+        dueAt: { gte: new Date(now.getTime() - 12 * 3600 * 1000) },
+        // ALA/assignment rows live in their own subject-wise list (Reminders tab).
+        NOT: { externalId: { startsWith: ASSIGNMENT_EXT_PREFIX } },
+      },
       orderBy: { dueAt: "asc" },
       take: 20,
+    });
+    const alaPending = await db.reminder.count({
+      where: {
+        status: "ACTIVE",
+        type: "ASSIGNMENT",
+        externalId: { startsWith: ASSIGNMENT_EXT_PREFIX },
+      },
+    });
+    const alaTotal = await db.reminder.count({
+      where: { type: "ASSIGNMENT", externalId: { startsWith: ASSIGNMENT_EXT_PREFIX } },
     });
 
     const notifications = await db.notification.findMany({
@@ -53,6 +68,8 @@ export async function GET() {
         items: reminders,
         todayCount: reminders.filter((r) => r.dueAt <= todayEnd).length,
         weekCount: reminders.filter((r) => r.dueAt <= weekEnd).length,
+        alaPending,
+        alaTotal,
       },
       erp: {
         connected: !!conn,

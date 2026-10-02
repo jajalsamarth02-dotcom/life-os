@@ -8,8 +8,9 @@ import {
   type AppSettings,
 } from "@/lib/settings";
 import { attendancePercentage, classesToReachTarget } from "@/lib/attendance";
+import { compactErrorText } from "@/lib/compact-error";
 import { fetchDemoSnapshot } from "@/lib/erp/demo";
-import { fetchLiveSnapshot } from "@/lib/erp/live";
+import { fetchLiveSnapshot, isSubmissionComplete } from "@/lib/erp/live";
 import { ERROR_COPY, ErpSnapshot, SyncError, SyncErrorCode } from "@/lib/erp/types";
 import { decryptSecret, encryptSecret } from "@/lib/crypto";
 import { pruneSnapshots, recordSnapshots } from "@/lib/sync/history";
@@ -27,6 +28,10 @@ import { pruneSnapshots, recordSnapshots } from "@/lib/sync/history";
 
 const LOCK_KEY = "sync.lock";
 const LOCK_STALE_MS = 3 * 60 * 1000;
+/** Setting key holding the cached ERP course-code → course-name map (JSON). */
+const COURSE_NAMES_KEY = "erp.courseNames";
+/** ExternalId prefix for ERP-synced ALA/assignment reminders. */
+export const ASSIGNMENT_EXT_PREFIX = "erp:assign:";
 
 export interface SyncOutcome {
   ok: boolean;
@@ -117,13 +122,33 @@ async function fetchSnapshot(
     throw new SyncError("UNKNOWN", "Stored credentials could not be decrypted (key changed?).");
   }
 
-  const result = await fetchLiveSnapshot(conn.username, password, savedCookie);
+  // Cached course-code → course-name pairs (from assignment detail pages).
+  // Unknown codes are resolved lazily during the sync, a couple per run at
+  // most, to stay gentle on the ERP (spec #8).
+  let knownCourseNames: Record<string, string> = {};
+  try {
+    const raw = await getRawSetting(COURSE_NAMES_KEY);
+    if (raw) knownCourseNames = JSON.parse(raw);
+  } catch {
+    knownCourseNames = {};
+  }
+
+  const result = await fetchLiveSnapshot(conn.username, password, savedCookie, {
+    knownCourseNames,
+    // Manual/startup syncs may resolve more names at once; scheduled ones
+    // resolve at most two per run.
+    courseNameBudget: trigger === "scheduled" ? 2 : 8,
+  });
   if (result.sessionCookie) {
     // persist refreshed session so future syncs avoid re-login (gentle on the ERP)
     await db.erpConnection.update({
       where: { id: conn.id },
       data: { sessionCookieEnc: encryptSecret(result.sessionCookie) },
     });
+  }
+  const mergedNames = result.snapshot?.courseNames ?? {};
+  if (Object.keys(mergedNames).length > 0 && JSON.stringify(mergedNames) !== JSON.stringify(knownCourseNames)) {
+    await setRawSetting(COURSE_NAMES_KEY, JSON.stringify(mergedNames));
   }
   return { snapshot: result.snapshot!, mode: "live" };
 }
@@ -208,7 +233,10 @@ export async function runSync(
     const syncErr =
       err instanceof SyncError
         ? err
-        : new SyncError("UNKNOWN", err instanceof Error ? err.message : String(err));
+        : new SyncError(
+            "UNKNOWN",
+            compactErrorText(err instanceof Error ? err.message : String(err))
+          );
 
     const settings = await getSettings();
     const state = await getSyncState();
@@ -397,15 +425,120 @@ async function applySnapshot(snapshot: ErpSnapshot, settings: AppSettings): Prom
     }
   }
 
-  // remove ERP reminders that disappeared from a complete snapshot (ACTIVE only)
+  // remove ERP reminders that disappeared from a complete snapshot (ACTIVE only).
+  // ALA/assignment rows carry the erp:assign: prefix and are managed by the
+  // dedicated block below (they have their own completeness signal).
   if (snapshot.complete) {
     const erpReminders = await db.reminder.findMany({ where: { source: "ERP" } });
     for (const e of erpReminders) {
       if (e.type === "ATTENDANCE_WARNING") continue;
+      if ((e.externalId ?? "").startsWith(ASSIGNMENT_EXT_PREFIX)) continue;
       if (!seenExternal.has(e.externalId ?? "") && e.status === "ACTIVE") {
         await db.reminder.delete({ where: { id: e.id } });
         await changeEvent("REMINDER_REMOVED", null, `${e.title} — no longer on the ERP`);
         changes++;
+      }
+    }
+  }
+
+  // --- ERP assignments (ALA) — one ASSIGNMENT reminder per row, dedup via
+  //     externalId `erp:assign:{id}`. The ERP's own Submission Status drives
+  //     ACTIVE/DONE (read-only mirror, spec #14); dueAt is the End Date —
+  //     the "last date" the student must submit by.
+  if ((snapshot.assignments?.length ?? 0) > 0) {
+    const firstImport =
+      (await db.reminder.count({ where: { externalId: { startsWith: ASSIGNMENT_EXT_PREFIX } } })) === 0;
+    let created = 0;
+    const seenAssign = new Set<string>();
+    for (const a of snapshot.assignments!) {
+      const externalId = `${ASSIGNMENT_EXT_PREFIX}${a.externalId}`;
+      seenAssign.add(externalId);
+      const completed = isSubmissionComplete(a.submissionStatus, a.approvalStatus);
+      const status = completed ? "DONE" : "ACTIVE";
+      // Date-only from the ERP → store mid-day UTC so the calendar date is
+      // displayed identically in any timezone and the item only turns overdue
+      // late on the last date.
+      const dueAt = new Date(`${a.endDate}T12:00:00Z`);
+      const descriptionBits = [
+        `Submission: ${a.submissionStatus}`,
+        a.approvalStatus ? `Approval: ${a.approvalStatus}` : null,
+        a.startDate ? `Start: ${a.startDate}` : null,
+        a.session ? `Session: ${a.session}` : null,
+      ].filter((x): x is string => !!x);
+      const description = descriptionBits.join(" · ");
+
+      const existing = await db.reminder.findUnique({ where: { externalId } });
+      if (!existing) {
+        await db.reminder.create({
+          data: {
+            source: "ERP",
+            externalId,
+            type: "ASSIGNMENT",
+            title: a.title,
+            description,
+            subjectCode: a.courseCode,
+            dueAt,
+            status,
+          },
+        });
+        created++;
+        changes++;
+      } else {
+        const dueChanged = existing.dueAt.getTime() !== dueAt.getTime();
+        const metaChanged =
+          existing.title !== a.title ||
+          existing.description !== description ||
+          existing.subjectCode !== a.courseCode;
+        const statusChanged = existing.status !== status && existing.status !== "DISMISSED";
+        if (dueChanged || metaChanged || statusChanged) {
+          await db.reminder.update({
+            where: { id: existing.id },
+            data: { title: a.title, description, subjectCode: a.courseCode, dueAt, status },
+          });
+          if (statusChanged) {
+            await changeEvent(
+              "REMINDER_UPSERTED",
+              a.courseCode,
+              `${a.title} (${a.courseCode}) — ${completed ? "marked Submitted" : "back to Pending"} on the ERP`
+            );
+          }
+          if (dueChanged) {
+            await changeEvent(
+              "REMINDER_DATE_CHANGED",
+              a.courseCode,
+              `${a.title} (${a.courseCode}): last date ${formatDate(existing.dueAt)} → ${formatDate(dueAt)}`
+            );
+            await notify(
+              "REMINDER_CHANGE",
+              "Deadline updated by ERP",
+              `${a.title} (${a.courseCode}) last date moved from ${formatDate(existing.dueAt)} to ${formatDate(dueAt)}.`,
+              "warning"
+            );
+          }
+          if (!statusChanged && !dueChanged) changes++; // quiet metadata refresh
+        }
+      }
+    }
+
+    if (created > 0) {
+      await changeEvent(
+        "REMINDER_UPSERTED",
+        null,
+        `${created} ALA/assignment row${created === 1 ? "" : "s"} ${firstImport ? "imported" : "added"} from the ERP Assignments page`
+      );
+    }
+
+    // Removal — only when the Assignments page itself loaded fully this run.
+    if (snapshot.assignmentsComplete) {
+      const assignReminders = await db.reminder.findMany({
+        where: { source: "ERP", externalId: { startsWith: ASSIGNMENT_EXT_PREFIX } },
+      });
+      for (const e of assignReminders) {
+        if (!seenAssign.has(e.externalId ?? "") && e.status === "ACTIVE") {
+          await db.reminder.delete({ where: { id: e.id } });
+          await changeEvent("REMINDER_REMOVED", null, `${e.title} — no longer on the ERP Assignments page`);
+          changes++;
+        }
       }
     }
   }
@@ -465,6 +598,7 @@ export async function recomputeAttendanceWarnings(
             type: "ATTENDANCE_WARNING",
             title: `Attendance below target — ${sub.name}`,
             description,
+            subjectCode: sub.code,
             dueAt,
           },
         });
@@ -474,6 +608,7 @@ export async function recomputeAttendanceWarnings(
           data: {
             title: `Attendance below target — ${sub.name}`,
             description,
+            subjectCode: sub.code,
             dueAt,
           },
         });
@@ -488,6 +623,11 @@ function endOfToday(): Date {
   const d = new Date();
   d.setHours(23, 59, 59, 999);
   return d;
+}
+
+/** Compact date-only rendering for deadline change messages. */
+function formatDate(d: Date): string {
+  return d.toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" });
 }
 
 function formatDateTime(d: Date): string {

@@ -30,6 +30,32 @@ export interface ErpReminderSnapshot {
   dueAt: string;
 }
 
+/**
+ * One row of the ERP's Assignments page ("ALA" — Active Learning
+ * Assignments — plus other coursework). Verified GMIU table columns:
+ *   # | Title | Course | Session | Semester | Start Date | End Date |
+ *   Submission Status | Approval Status
+ */
+export interface ErpAssignmentSnapshot {
+  /** ERP assignment row id (from /student/assignment/{id}) — dedup key. */
+  externalId: string;
+  title: string;
+  /** ERP course code, e.g. "BETCE15324" — the subject-wise grouping key. */
+  courseCode: string;
+  /** Academic session label, e.g. "GMIU-2026-27(ODD)". */
+  session?: string | null;
+  /** Raw semester label from the row, e.g. "Sem 5". */
+  semesterLabel?: string | null;
+  /** ISO date (yyyy-mm-dd) the assignment opened; null when absent. */
+  startDate?: string | null;
+  /** ISO date (yyyy-mm-dd) — the LAST DATE / deadline shown to the student. */
+  endDate: string;
+  /** ERP submission state: "Pending" | "Submitted" | … (drives complete?). */
+  submissionStatus: string;
+  /** Faculty-side approval state: "Pending" | "Approved" | …. */
+  approvalStatus?: string | null;
+}
+
 export interface ErpSnapshot {
   mode: SnapshotMode;
   fetchedAt: string;
@@ -40,6 +66,15 @@ export interface ErpSnapshot {
   complete: boolean;
   subjects: ErpSubjectSnapshot[];
   reminders: ErpReminderSnapshot[];
+  /** ALA/assignment rows parsed from the ERP Assignments page ([] when the page was unavailable). */
+  assignments: ErpAssignmentSnapshot[];
+  /**
+   * true = the Assignments page loaded and parsed fully, so removal of
+   * locally-tracked assignments that vanished from the ERP is safe.
+   */
+  assignmentsComplete: boolean;
+  /** Course-code → course-name pairs resolved during this fetch (merged into the app's cache). */
+  courseNames?: Record<string, string>;
   /** Current semester detected on the ERP pages (1–8); null = not found. */
   currentSemester?: number | null;
   note?: string;

@@ -28,6 +28,7 @@ import {
 } from "lucide-react";
 import { toast } from "sonner";
 import { isIOS, promptInstall, useCanInstall, useIsInstalled } from "./install-prompt";
+import { compactErrorText } from "@/lib/compact-error";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -1284,11 +1285,11 @@ function SyncHistoryCard() {
                           <Tooltip>
                             <TooltipTrigger asChild>
                               <span className="block max-w-32 cursor-default truncate font-mono text-[11px] text-red-600 dark:text-red-400">
-                                {l.errorDetails}
+                                {compactErrorText(l.errorDetails, 120)}
                               </span>
                             </TooltipTrigger>
                             <TooltipContent className="max-w-72 break-all">
-                              <p className="font-mono text-[11px]">{l.errorDetails}</p>
+                              <p className="font-mono text-[11px]">{compactErrorText(l.errorDetails)}</p>
                             </TooltipContent>
                           </Tooltip>
                         ) : (

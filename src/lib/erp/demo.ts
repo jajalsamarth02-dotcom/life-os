@@ -242,6 +242,8 @@ export async function fetchDemoSnapshot(force = false): Promise<ErpSnapshot> {
     complete: true,
     subjects: state.subjects.map((s) => ({ ...s, semester: s.semester ?? state.currentSemester })),
     reminders,
+    assignments: [],
+    assignmentsComplete: false,
     currentSemester: state.currentSemester,
     note: "Simulated ERP data (DEMO) — replace with real ERP credentials in Settings for live synchronization.",
   };

@@ -1,0 +1,745 @@
+     1→"use client";
+     2→
+     3→import { useEffect, useMemo, useState } from "react";
+     4→import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+     5→import { motion } from "framer-motion";
+     6→import {
+     7→  AlertTriangle,
+     8→  BellRing,
+     9→  CalendarClock,
+    10→  CalendarPlus,
+    11→  CheckCircle2,
+    12→  ChevronDown,
+    13→  Clock,
+    14→  Loader2,
+    15→  Lock,
+    16→  Plus,
+    17→  Trash2,
+    18→  TriangleAlert,
+    19→  Undo2,
+    20→  XCircle,
+    21→} from "lucide-react";
+    22→import { toast } from "sonner";
+    23→import { Download } from "lucide-react";
+    24→import { downloadRemindersIcs } from "@/lib/ics";
+    25→import {
+    26→  AlertDialog,
+    27→  AlertDialogAction,
+    28→  AlertDialogCancel,
+    29→  AlertDialogContent,
+    30→  AlertDialogDescription,
+    31→  AlertDialogFooter,
+    32→  AlertDialogHeader,
+    33→  AlertDialogTitle,
+    34→} from "@/components/ui/alert-dialog";
+    35→import { Badge } from "@/components/ui/badge";
+    36→import { Button } from "@/components/ui/button";
+    37→import { Card, CardContent } from "@/components/ui/card";
+    38→import {
+    39→  DropdownMenu,
+    40→  DropdownMenuContent,
+    41→  DropdownMenuItem,
+    42→  DropdownMenuLabel,
+    43→  DropdownMenuSeparator,
+    44→  DropdownMenuTrigger,
+    45→} from "@/components/ui/dropdown-menu";
+    46→import {
+    47→  Collapsible,
+    48→  CollapsibleContent,
+    49→  CollapsibleTrigger,
+    50→} from "@/components/ui/collapsible";
+    51→import {
+    52→  Dialog,
+    53→  DialogContent,
+    54→  DialogDescription,
+    55→  DialogFooter,
+    56→  DialogHeader,
+    57→  DialogTitle,
+    58→  DialogTrigger,
+    59→} from "@/components/ui/dialog";
+    60→import { Input } from "@/components/ui/input";
+    61→import { Label } from "@/components/ui/label";
+    62→import {
+    63→  Select,
+    64→  SelectContent,
+    65→  SelectItem,
+    66→  SelectTrigger,
+    67→  SelectValue,
+    68→} from "@/components/ui/select";
+    69→import { Skeleton } from "@/components/ui/skeleton";
+    70→import { Switch } from "@/components/ui/switch";
+    71→import { Textarea } from "@/components/ui/textarea";
+    72→import { cn } from "@/lib/utils";
+    73→import {
+    74→  CHANGE_EVENT as BROWSER_REMINDERS_EVENT,
+    75→  isEnabled as browserRemindersEnabled,
+    76→  permissionState as browserRemindersPermission,
+    77→  requestPermission as requestNotificationPermission,
+    78→  setEnabled as setBrowserRemindersEnabled,
+    79→} from "@/lib/browser-reminders";
+    80→import {
+    81→  createReminder,
+    82→  deleteReminder,
+    83→  fetchReminders,
+    84→  qk,
+    85→  snoozeReminder,
+    86→  updateReminderStatus,
+    87→  ApiError,
+    88→} from "./api";
+    89→import { dueGroup, fmtDT, GROUP_META, SourceBadge, TypeIcon, typeLabel, useNow } from "./shared";
+    90→import { downloadCsv } from "./trend-chart";
+    91→import type { DueGroup } from "./shared";
+    92→import type { RemindersFilter, Reminder, ReminderType } from "./types";
+    93→
+    94→/* ------------------------------------------------------------------ */
+    95→
+    96→const NEW_TYPES: ReminderType[] = ["EXAM", "PRACTICAL_EXAM", "VIVA", "ASSIGNMENT", "SUBMISSION", "OTHER"];
+    97→
+    98→/** Compute a snooze target from "now" for the given preset. */
+    99→function snoozeTarget(preset: "h1" | "h3" | "tomorrow" | "week"): Date {
+   100→  const d = new Date();
+   101→  switch (preset) {
+   102→    case "h1":
+   103→      return new Date(d.getTime() + 60 * 60_000);
+   104→    case "h3":
+   105→      return new Date(d.getTime() + 3 * 60 * 60_000);
+   106→    case "tomorrow":
+   107→      d.setDate(d.getDate() + 1);
+   108→      d.setHours(9, 0, 0, 0);
+   109→      return d;
+   110→    case "week":
+   111→      d.setDate(d.getDate() + 7);
+   112→      d.setHours(9, 0, 0, 0);
+   113→      return d;
+   114→  }
+   115→}
+   116→
+   117→function ReminderRow({ r, onDeleted }: { r: Reminder; onDeleted: (r: Reminder) => void }) {
+   118→  const qc = useQueryClient();
+   119→  const now = useNow();
+   120→  const [confirmDelete, setConfirmDelete] = useState(false);
+   121→  const isWarn = r.type === "ATTENDANCE_WARNING";
+   122→  const done = r.status !== "ACTIVE";
+   123→  const dueMs = new Date(r.dueAt).getTime() - now;
+   124→  const overdue = r.status === "ACTIVE" && dueMs < 0;
+   125→  const dueSoon = r.status === "ACTIVE" && dueMs >= 0 && dueMs <= 24 * 3600 * 1000;
+   126→  const canExport = !done && !isWarn;
+   127→
+   128→  const setStatus = useMutation({
+   129→    mutationFn: (status: string) => updateReminderStatus(r.id, status),
+   130→    onSuccess: (_res, status) => {
+   131→      qc.invalidateQueries();
+   132→      toast.success(status === "DONE" ? "Marked as done" : "Moved back to active");
+   133→    },
+   134→    onError: (e) => {
+   135→      qc.invalidateQueries();
+   136→      toast.error("Could not update reminder", { description: e.message });
+   137→    },
+   138→  });
+   139→
+   140→  const del = useMutation({
+   141→    mutationFn: () => deleteReminder(r.id),
+   142→    onSuccess: () => {
+   143→      qc.invalidateQueries();
+   144→      toast.success("Reminder deleted");
+   145→      onDeleted(r);
+   146→    },
+   147→    onError: (e) => {
+   148→      const msg = e instanceof ApiError ? e.message : e.message;
+   149→      toast.error("Cannot delete reminder", { description: msg });
+   150→    },
+   151→  });
+   152→
+   153→  /* Snooze (personal reminders only — ERP owns its own due dates). */
+   154→  const snooze = useMutation({
+   155→    mutationFn: (preset: "h1" | "h3" | "tomorrow" | "week") =>
+   156→      snoozeReminder(r.id, snoozeTarget(preset).toISOString()),
+   157→    onSuccess: (_res, preset) => {
+   158→      qc.invalidateQueries();
+   159→      const target = snoozeTarget(preset);
+   160→      toast.success(`Snoozed until ${fmtDT(target.toISOString())}`);
+   161→    },
+   162→    onError: (e) => {
+   163→      qc.invalidateQueries();
+   164→      toast.error("Could not snooze reminder", { description: e.message });
+   165→    },
+   166→  });
+   167→  const canSnooze = r.source === "PERSONAL" && !done && r.type !== "ATTENDANCE_WARNING";
+   168→
+   169→  return (
+   170→    <motion.li
+   171→      layout
+   172→      initial={{ opacity: 0, y: 6 }}
+   173→      animate={{ opacity: 1, y: 0 }}
+   174→      transition={{ duration: 0.2 }}
+   175→      className={cn(
+   176→        "flex items-start gap-3 rounded-xl border p-3 transition-colors",
+   177→        isWarn
+   178→          ? "border-amber-500/40 bg-amber-500/[0.06] hover:bg-amber-500/10"
+   179→          : dueSoon
+   180→            ? "border-amber-500/35 bg-amber-500/[0.035] hover:bg-amber-500/[0.07]"
+   181→            : overdue
+   182→              ? "border-red-500/30 bg-red-500/[0.03] hover:bg-red-500/[0.06]"
+   183→              : "border-border/50 hover:bg-muted/40",
+   184→        done && "opacity-60"
+   185→      )}
+   186→    >
+   187→      <button
+   188→        type="button"
+   189→        role="checkbox"
+   190→        aria-checked={done}
+   191→        aria-label={done ? `Mark ${r.title} as active` : `Mark ${r.title} as done`}
+   192→        disabled={setStatus.isPending}
+   193→        onClick={() => setStatus.mutate(done ? "ACTIVE" : "DONE")}
+   194→        className={cn(
+   195→          "mt-0.5 flex size-5 shrink-0 items-center justify-center rounded-full border transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+   196→          done ? "border-emerald-500 bg-emerald-500 text-white" : "border-muted-foreground/40 hover:border-emerald-500"
+   197→        )}
+   198→      >
+   199→        {done && <CheckCircle2 className="size-4" aria-hidden="true" />}
+   200→      </button>
+   201→
+   202→      <TypeIcon type={r.type} className={isWarn ? "bg-amber-500/20 text-amber-700 dark:text-amber-400" : undefined} />
+   203→
+   204→      <div className="min-w-0 flex-1">
+   205→        <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
+   206→          <p className={cn("min-w-0 flex-1 text-sm font-medium leading-snug", done && "line-through decoration-muted-foreground/50")}>
+   207→            {r.title}
+   208→          </p>
+   209→          <SourceBadge source={r.source} />
+   210→          <Badge variant="secondary" className="hidden text-[11px] sm:inline-flex">{typeLabel(r.type)}</Badge>
+   211→        </div>
+   212→        {r.description && <p className="mt-0.5 line-clamp-2 text-xs text-muted-foreground">{r.description}</p>}
+   213→        <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-0.5">
+   214→          <span className={cn("text-xs", overdue ? "font-medium text-red-600 dark:text-red-400" : dueSoon ? "font-medium text-amber-600 dark:text-amber-400" : "text-muted-foreground")}>
+   215→            {overdue ? "Overdue · " : ""}
+   216→            {fmtDT(r.dueAt)}
+   217→          </span>
+   218→          {dueSoon && (
+   219→            <span className="inline-flex items-center gap-1 rounded-full border border-amber-500/40 bg-amber-500/10 px-2 py-0.5 text-[10px] font-semibold text-amber-700 dark:text-amber-400">
+   220→              <Clock className="size-3" aria-hidden="true" />
+   221→              due in {Math.max(1, Math.round(dueMs / 3600_000))}h
+   222→            </span>
+   223→          )}
+   224→          {isWarn && (
+   225→            <span className="inline-flex items-center gap-1 text-[11px] font-medium text-amber-600 dark:text-amber-400">
+   226→              <Lock className="size-3" aria-hidden="true" />
+   227→              auto-managed by ERP sync
+   228→            </span>
+   229→          )}
+   230→        </div>
+   231→      </div>
+   232→
+   233→      <div className="flex shrink-0 items-center gap-0.5">
+   234→        {done ? (
+   235→          <Button
+   236→            variant="ghost"
+   237→            size="icon"
+   238→            className="size-8"
+   239→            aria-label={`Move ${r.title} back to active`}
+   240→            onClick={() => setStatus.mutate("ACTIVE")}
+   241→            disabled={setStatus.isPending}
+   242→          >
+   243→            <Undo2 className="size-4" aria-hidden="true" />
+   244→          </Button>
+   245→        ) : null}
+   246→        {canExport && (
+   247→          <Button
+   248→            variant="ghost"
+   249→            size="icon"
+   250→            className="size-8 text-muted-foreground hover:bg-emerald-500/10 hover:text-emerald-600 dark:hover:text-emerald-400"
+   251→            aria-label={`Add ${r.title} to your calendar (.ics)`}
+   252→            onClick={() => {
+   253→              const filename = downloadRemindersIcs([
+   254→                {
+   255→                  id: r.id,
+   256→                  title: r.title,
+   257→                  description: r.description,
+   258→                  dueAt: r.dueAt,
+   259→                  type: r.type,
+   260→                  source: r.source,
+   261→                },
+   262→              ]);
+   263→              toast.success(`${filename} downloaded`, {
+   264→                description: `“${r.title}” added as a calendar event.`,
+   265→              });
+   266→            }}
+   267→          >
+   268→            <CalendarPlus className="size-4" aria-hidden="true" />
+   269→          </Button>
+   270→        )}
+   271→        {canSnooze && (
+   272→          <DropdownMenu>
+   273→            <DropdownMenuTrigger asChild>
+   274→              <Button
+   275→                variant="ghost"
+   276→                size="icon"
+   277→                className="size-8 text-muted-foreground hover:bg-amber-500/10 hover:text-amber-600 dark:hover:text-amber-400"
+   278→                aria-label={`Snooze ${r.title}`}
+   279→                disabled={snooze.isPending}
+   280→              >
+   281→                {snooze.isPending ? (
+   282→                  <Loader2 className="size-4 animate-spin" aria-hidden="true" />
+   283→                ) : (
+   284→                  <Clock className="size-4" aria-hidden="true" />
+   285→                )}
+   286→              </Button>
+   287→            </DropdownMenuTrigger>
+   288→            <DropdownMenuContent align="end" className="w-48">
+   289→              <DropdownMenuLabel className="text-[11px]">Snooze until…</DropdownMenuLabel>
+   290→              <DropdownMenuSeparator />
+   291→              <DropdownMenuItem onClick={() => snooze.mutate("h1")}>
+   292→                <Clock className="size-3.5 text-muted-foreground" aria-hidden="true" />
+   293→                In 1 hour
+   294→                <span className="ml-auto text-[10px] tabular-nums text-muted-foreground">
+   295→                  {fmtDT(snoozeTarget("h1").toISOString())}
+   296→                </span>
+   297→              </DropdownMenuItem>
+   298→              <DropdownMenuItem onClick={() => snooze.mutate("h3")}>
+   299→                <Clock className="size-3.5 text-muted-foreground" aria-hidden="true" />
+   300→                In 3 hours
+   301→                <span className="ml-auto text-[10px] tabular-nums text-muted-foreground">
+   302→                  {fmtDT(snoozeTarget("h3").toISOString())}
+   303→                </span>
+   304→              </DropdownMenuItem>
+   305→              <DropdownMenuItem onClick={() => snooze.mutate("tomorrow")}>
+   306→                <CalendarClock className="size-3.5 text-muted-foreground" aria-hidden="true" />
+   307→                Tomorrow 09:00
+   308→              </DropdownMenuItem>
+   309→              <DropdownMenuItem onClick={() => snooze.mutate("week")}>
+   310→                <CalendarClock className="size-3.5 text-muted-foreground" aria-hidden="true" />
+   311→                Next week
+   312→              </DropdownMenuItem>
+   313→            </DropdownMenuContent>
+   314→          </DropdownMenu>
+   315→        )}
+   316→        <Button
+   317→          variant="ghost"
+   318→          size="icon"
+   319→          className="size-8 text-muted-foreground hover:bg-red-500/10 hover:text-red-600 dark:hover:text-red-400"
+   320→          aria-label={`Delete ${r.title}`}
+   321→          onClick={() => {
+   322→            if (r.source === "ERP") {
+   323→              del.mutate(); // backend answers 400 with the honest reason → toast
+   324→            } else {
+   325→              setConfirmDelete(true);
+   326→            }
+   327→          }}
+   328→          disabled={del.isPending}
+   329→        >
+   330→          {r.source === "ERP" ? <Lock className="size-4" aria-hidden="true" /> : <Trash2 className="size-4" aria-hidden="true" />}
+   331→        </Button>
+   332→      </div>
+   333→
+   334→      <AlertDialog open={confirmDelete} onOpenChange={setConfirmDelete}>
+   335→        <AlertDialogContent>
+   336→          <AlertDialogHeader>
+   337→            <AlertDialogTitle>Delete this reminder?</AlertDialogTitle>
+   338→            <AlertDialogDescription>
+   339→              “{r.title}” is a personal reminder and will be removed permanently.
+   340→            </AlertDialogDescription>
+   341→          </AlertDialogHeader>
+   342→          <AlertDialogFooter>
+   343→            <AlertDialogCancel>Cancel</AlertDialogCancel>
+   344→            <AlertDialogAction
+   345→              className="bg-red-600 text-white hover:bg-red-700"
+   346→              onClick={() => del.mutate()}
+   347→            >
+   348→              Delete
+   349→            </AlertDialogAction>
+   350→          </AlertDialogFooter>
+   351→        </AlertDialogContent>
+   352→      </AlertDialog>
+   353→    </motion.li>
+   354→  );
+   355→}
+   356→
+   357→/* ------------------------------------------------------------------ */
+   358→
+   359→function NewReminderDialog() {
+   360→  const qc = useQueryClient();
+   361→  const [open, setOpen] = useState(false);
+   362→  const [title, setTitle] = useState("");
+   363→  const [type, setType] = useState<ReminderType>("EXAM");
+   364→  const [description, setDescription] = useState("");
+   365→  const [dueAtLocal, setDueAtLocal] = useState("");
+   366→
+   367→  /* Command palette → open this dialog */
+   368→  useEffect(() => {
+   369→    const handler = () => setOpen(true);
+   370→    window.addEventListener("erp:new-reminder", handler);
+   371→    return () => window.removeEventListener("erp:new-reminder", handler);
+   372→  }, []);
+   373→
+   374→  const create = useMutation({
+   375→    mutationFn: () =>
+   376→      createReminder({
+   377→        title: title.trim(),
+   378→        type,
+   379→        description: description.trim() || undefined,
+   380→        dueAt: new Date(dueAtLocal).toISOString(),
+   381→      }),
+   382→    onSuccess: () => {
+   383→      qc.invalidateQueries();
+   384→      toast.success("Reminder created");
+   385→      setOpen(false);
+   386→      setTitle("");
+   387→      setDescription("");
+   388→      setDueAtLocal("");
+   389→    },
+   390→    onError: (e) => toast.error("Could not create reminder", { description: e.message }),
+   391→  });
+   392→
+   393→  const valid = title.trim().length > 0 && dueAtLocal.length > 0 && !Number.isNaN(new Date(dueAtLocal).getTime());
+   394→
+   395→  return (
+   396→    <Dialog open={open} onOpenChange={setOpen}>
+   397→      <DialogTrigger asChild>
+   398→        <Button size="sm" className="h-9 gap-1.5" aria-label="Create a new reminder">
+   399→          <Plus className="size-4" aria-hidden="true" />
+   400→          New Reminder
+   401→        </Button>
+   402→      </DialogTrigger>
+   403→      <DialogContent className="sm:max-w-md">
+   404→        <DialogHeader>
+   405→          <DialogTitle>New personal reminder</DialogTitle>
+   406→          <DialogDescription>
+   407→            Personal reminders live only in this app — the ERP is never modified.
+   408→          </DialogDescription>
+   409→        </DialogHeader>
+   410→        <form
+   411→          className="space-y-4"
+   412→          onSubmit={(e) => {
+   413→            e.preventDefault();
+   414→            if (valid) create.mutate();
+   415→          }}
+   416→        >
+   417→          <div className="space-y-1.5">
+   418→            <Label htmlFor="rem-title">Title</Label>
+   419→            <Input
+   420→              id="rem-title"
+   421→              value={title}
+   422→              onChange={(e) => setTitle(e.target.value)}
+   423→              placeholder="e.g. Bring lab manual"
+   424→              required
+   425→              autoFocus
+   426→            />
+   427→          </div>
+   428→          <div className="space-y-1.5">
+   429→            <Label htmlFor="rem-type">Type</Label>
+   430→            <Select value={type} onValueChange={(v) => setType(v as ReminderType)}>
+   431→              <SelectTrigger id="rem-type" className="w-full">
+   432→                <SelectValue placeholder="Select a type" />
+   433→              </SelectTrigger>
+   434→              <SelectContent>
+   435→                {NEW_TYPES.map((t) => (
+   436→                  <SelectItem key={t} value={t}>
+   437→                    {typeLabel(t)}
+   438→                  </SelectItem>
+   439→                ))}
+   440→              </SelectContent>
+   441→            </Select>
+   442→          </div>
+   443→          <div className="space-y-1.5">
+   444→            <Label htmlFor="rem-desc">Description (optional)</Label>
+   445→            <Textarea
+   446→              id="rem-desc"
+   447→              value={description}
+   448→              onChange={(e) => setDescription(e.target.value)}
+   449→              placeholder="Any details you want to remember"
+   450→              rows={3}
+   451→            />
+   452→          </div>
+   453→          <div className="space-y-1.5">
+   454→            <Label htmlFor="rem-due">Due date &amp; time</Label>
+   455→            <Input
+   456→              id="rem-due"
+   457→              type="datetime-local"
+   458→              value={dueAtLocal}
+   459→              onChange={(e) => setDueAtLocal(e.target.value)}
+   460→              required
+   461→            />
+   462→          </div>
+   463→          <DialogFooter>
+   464→            <Button type="button" variant="outline" onClick={() => setOpen(false)}>
+   465→              Cancel
+   466→            </Button>
+   467→            <Button type="submit" disabled={!valid || create.isPending}>
+   468→              {create.isPending ? "Creating…" : "Create reminder"}
+   469→            </Button>
+   470→          </DialogFooter>
+   471→        </form>
+   472→      </DialogContent>
+   473→    </Dialog>
+   474→  );
+   475→}
+   476→
+   477→/* ------------------------------------------------------------------ */
+   478→
+   479→const GROUP_ORDER: DueGroup[] = ["overdue", "today", "tomorrow", "week", "later", "done"];
+   480→
+   481→function RemindersList({ items }: { items: Reminder[] }) {
+   482→  const now = useNow();
+   483→  const [doneOpen, setDoneOpen] = useState(false);
+   484→
+   485→  const grouped = useMemo(() => {
+   486→    const map = new Map<DueGroup, Reminder[]>();
+   487→    for (const g of GROUP_ORDER) map.set(g, []);
+   488→    for (const r of items) {
+   489→      map.get(dueGroup(r.dueAt, r.status, now))?.push(r);
+   490→    }
+   491→    return map;
+   492→  }, [items, now]);
+   493→
+   494→  if (items.length === 0) {
+   495→    return (
+   496→      <div className="flex flex-col items-center gap-2 rounded-xl border border-dashed border-border/80 bg-card/50 px-6 py-12 text-center">
+   497→        <CalendarClock className="size-8 text-muted-foreground/50" aria-hidden="true" />
+   498→        <p className="text-sm font-medium">No reminders here</p>
+   499→        <p className="max-w-sm text-xs text-muted-foreground">
+   500→          Active reminders from the ERP (exams, submissions, attendance warnings) and anything you add yourself will show up in this list.
+   501→        </p>
+   502→      </div>
+   503→    );
+   504→  }
+   505→
+   506→  const doneCount = grouped.get("done")?.length ?? 0;
+   507→
+   508→  return (
+   509→    <div className="space-y-5">
+   510→      {GROUP_ORDER.filter((g) => g !== "done").map((g) => {
+   511→        const list = grouped.get(g) ?? [];
+   512→        if (list.length === 0) return null;
+   513→        const meta = GROUP_META[g];
+   514→        return (
+   515→          <section key={g} aria-label={meta.label}>
+   516→            <h3 className={cn("mb-2 flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wide", meta.className)}>
+   517→              {g === "overdue" && <AlertTriangle className="size-3.5" aria-hidden="true" />}
+   518→              {meta.label}
+   519→              <span className="font-normal text-muted-foreground tabular-nums">({list.length})</span>
+   520→            </h3>
+   521→            <ul className="space-y-2">
+   522→              {list.map((r) => (
+   523→                <ReminderRow key={r.id} r={r} onDeleted={() => undefined} />
+   524→              ))}
+   525→            </ul>
+   526→          </section>
+   527→        );
+   528→      })}
+   529→
+   530→      {doneCount > 0 && (
+   531→        <Collapsible open={doneOpen} onOpenChange={setDoneOpen}>
+   532→          <CollapsibleTrigger asChild>
+   533→            <button
+   534→              type="button"
+   535→              className="flex w-full items-center gap-1.5 rounded-lg px-1 py-1 text-xs font-semibold uppercase tracking-wide text-muted-foreground transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+   536→              aria-expanded={doneOpen}
+   537→            >
+   538→              <ChevronDown className={cn("size-3.5 transition-transform", doneOpen && "rotate-180")} aria-hidden="true" />
+   539→              Done
+   540→              <span className="font-normal tabular-nums">({doneCount})</span>
+   541→            </button>
+   542→          </CollapsibleTrigger>
+   543→          <CollapsibleContent>
+   544→            <ul className="mt-2 space-y-2">
+   545→              {(grouped.get("done") ?? []).map((r) => (
+   546→                <ReminderRow key={r.id} r={r} onDeleted={() => undefined} />
+   547→              ))}
+   548→            </ul>
+   549→          </CollapsibleContent>
+   550→        </Collapsible>
+   551→      )}
+   552→    </div>
+   553→  );
+   554→}
+   555→
+   556→/* ------------------------------------------------------------------ */
+   557→
+   558→/** Compact opt-in banner for system due-reminders (only until a decision). */
+   559→function BrowserRemindersBanner() {
+   560→  const [state, setState] = useState<{ permission: string; enabled: boolean; dismissed: boolean }>({
+   561→    permission: "default",
+   562→    enabled: false,
+   563→    dismissed: true,
+   564→  });
+   565→  const [busy, setBusy] = useState(false);
+   566→
+   567→  useEffect(() => {
+   568→    const read = () => {
+   569→      let dismissed = true;
+   570→      try {
+   571→        dismissed = window.localStorage.getItem("erp.browserReminders.bannerDismissed") === "1";
+   572→      } catch {
+   573→        /* non-fatal */
+   574→      }
+   575→      setState({
+   576→        permission: browserRemindersPermission(),
+   577→        enabled: browserRemindersEnabled(),
+   578→        dismissed,
+   579→      });
+   580→    };
+   581→    read();
+   582→    window.addEventListener(BROWSER_REMINDERS_EVENT, read);
+   583→    return () => window.removeEventListener(BROWSER_REMINDERS_EVENT, read);
+   584→  }, []);
+   585→
+   586→  if (state.dismissed || state.permission !== "default") return null;
+   587→
+   588→  const dismiss = () => {
+   589→    try {
+   590→      window.localStorage.setItem("erp.browserReminders.bannerDismissed", "1");
+   591→    } catch {
+   592→      /* non-fatal */
+   593→    }
+   594→    setState((s) => ({ ...s, dismissed: true }));
+   595→  };
+   596→
+   597→  const enable = async () => {
+   598→    setBusy(true);
+   599→    const result = await requestNotificationPermission();
+   600→    setBusy(false);
+   601→    if (result === "granted") {
+   602→      setBrowserRemindersEnabled(true);
+   603→      toast.success("Browser reminders on");
+   604→    } else if (result === "denied") {
+   605→      toast.error("Permission denied", { description: "Allow notifications for this site in your browser settings." });
+   606→    }
+   607→    dismiss();
+   608→  };
+   609→
+   610→  return (
+   611→    <div className="flex flex-wrap items-center gap-2.5 rounded-xl border border-primary/25 bg-primary/[0.05] px-4 py-3">
+   612→      <CalendarClock className="size-4 shrink-0 text-primary" aria-hidden="true" />
+   613→      <p className="min-w-0 flex-1 text-xs sm:text-sm">
+   614→        <span className="font-medium">Never miss a deadline.</span>{" "}
+   615→        <span className="text-muted-foreground">Get a system alert when a reminder becomes due.</span>
+   616→      </p>
+   617→      <div className="flex items-center gap-1.5">
+   618→        <Button size="sm" className="h-7 gap-1 px-2.5 text-xs" onClick={enable} disabled={busy}
+   619→          aria-label="Enable browser due-reminder notifications">
+   620→          {busy ? <Loader2 className="size-3.5 animate-spin" aria-hidden="true" /> : <BellRing className="size-3.5" aria-hidden="true" />}
+   621→          Enable
+   622→        </Button>
+   623→        <Button variant="ghost" size="sm" className="h-7 px-2 text-xs text-muted-foreground" onClick={dismiss}
+   624→          aria-label="Dismiss browser reminders banner">
+   625→          Not now
+   626→        </Button>
+   627→      </div>
+   628→    </div>
+   629→  );
+   630→}
+   631→
+   632→export function RemindersTab() {
+   633→  const [filter, setFilter] = useState<RemindersFilter>("all");
+   634→  const [includeDone, setIncludeDone] = useState(false);
+   635→
+   636→  const { data, isPending, isError, error } = useQuery({
+   637→    queryKey: qk.reminders(filter, includeDone),
+   638→    queryFn: () => fetchReminders(filter, includeDone),
+   639→    refetchInterval: 20_000,
+   640→  });
+   641→
+   642→  return (
+   643→    <div className="space-y-4">
+   644→      <BrowserRemindersBanner />
+   645→      <Card className="rounded-xl border-border/60">
+   646→        <CardContent className="flex flex-wrap items-center gap-3 p-4">
+   647→          <div
+   648→            role="tablist"
+   649→            aria-label="Filter reminders"
+   650→            className="flex rounded-lg border border-border/60 bg-muted/60 p-0.5"
+   651→          >
+   652→            {(["all", "erp", "personal"] as const).map((f) => (
+   653→              <button
+   654→                key={f}
+   655→                type="button"
+   656→                role="tab"
+   657→                aria-selected={filter === f}
+   658→                onClick={() => setFilter(f)}
+   659→                className={cn(
+   660→                  "h-8 rounded-md px-3 text-xs font-medium capitalize transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+   661→                  filter === f ? "bg-background shadow-sm text-foreground" : "text-muted-foreground hover:text-foreground"
+   662→                )}
+   663→              >
+   664→                {f === "all" ? "All" : f === "erp" ? "ERP" : "Personal"}
+   665→              </button>
+   666→            ))}
+   667→          </div>
+   668→
+   669→          <label className="flex cursor-pointer items-center gap-2 text-xs text-muted-foreground">
+   670→            <Switch checked={includeDone} onCheckedChange={setIncludeDone} aria-label="Show completed reminders" />
+   671→            Show completed
+   672→          </label>
+   673→
+   674→          <div className="ml-auto flex items-center gap-2">
+   675→            {data && data.some((r) => r.status === "ACTIVE" && r.type !== "ATTENDANCE_WARNING") && (
+   676→              <Button
+   677→                variant="outline"
+   678→                size="sm"
+   679→                className="h-8 gap-1.5 text-xs"
+   680→                onClick={() => {
+   681→                  const active = data.filter(
+   682→                    (r) => r.status === "ACTIVE" && r.type !== "ATTENDANCE_WARNING"
+   683→                  );
+   684→                  const filename = downloadRemindersIcs(
+   685→                    active.map((r) => ({
+   686→                      id: r.id,
+   687→                      title: r.title,
+   688→                      description: r.description,
+   689→                      dueAt: r.dueAt,
+   690→                      type: r.type,
+   691→                      source: r.source,
+   692→                    }))
+   693→                  );
+   694→                  toast.success(`${filename} downloaded`, {
+   695→                    description: `${active.length} deadline${active.length === 1 ? "" : "s"} exported as calendar events.`,
+   696→                  });
+   697→                }}
+   698→                aria-label="Export active deadlines as a calendar (.ics) file"
+   699→              >
+   700→                <CalendarPlus className="size-3.5" aria-hidden="true" />
+   701→                .ics
+   702→              </Button>
+   703→            )}
+   704→            {data && data.length > 0 && (
+   705→              <Button
+   706→                variant="outline"
+   707→                size="sm"
+   708→                className="h-8 gap-1.5 text-xs"
+   709→                onClick={() =>
+   710→                  downloadCsv(
+   711→                    `reminders-${new Date().toISOString().slice(0, 10)}.csv`,
+   712→                    ["Title", "Source", "Type", "Due at", "Status", "Description"],
+   713→                    data.map((r) => [r.title, r.source, typeLabel(r.type), fmtDT(r.dueAt), r.status, r.description ?? ""])
+   714→                  )
+   715→                }
+   716→              >
+   717→                <Download className="size-3.5" aria-hidden="true" />
+   718→                Export CSV
+   719→              </Button>
+   720→            )}
+   721→            <NewReminderDialog />
+   722→          </div>
+   723→        </CardContent>
+   724→      </Card>
+   725→
+   726→      {isPending ? (
+   727→        <div className="space-y-2">
+   728→          {Array.from({ length: 4 }).map((_, i) => (
+   729→            <Skeleton key={i} className="h-20 w-full rounded-xl" />
+   730→          ))}
+   731→        </div>
+   732→      ) : isError ? (
+   733→        <Card className="rounded-xl border-red-500/30 bg-red-500/5">
+   734→          <CardContent className="flex items-center gap-3 p-6 text-sm text-red-600 dark:text-red-400">
+   735→            <XCircle className="size-5 shrink-0" aria-hidden="true" />
+   736→            Could not load reminders: {error?.message ?? "unknown error"}
+   737→          </CardContent>
+   738→        </Card>
+   739→      ) : (
+   740→        <RemindersList items={data ?? []} />
+   741→      )}
+   742→    </div>
+   743→  );
+   744→}
+   745→
