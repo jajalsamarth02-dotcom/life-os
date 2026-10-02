@@ -1134,3 +1134,31 @@ Unresolved issues / risks & next-phase priorities:
 4. Backlog unchanged: L/H/E columns, digest email (SMTP), TZ anchor, per-semester slot scoping,
    "mark all read" for notifications.
 5. dev-server-keeper cron (job 430680) must stay alive; preview Caddy 502 self-heals ≤5 min.
+
+---
+Task ID: 16 (webDevReview round 12, trace 1a0fc2dd5ff09b15-cron-agent-loop-202610022100 + user messages)
+Agent: Z.ai Code (main orchestrator)
+Task: Round 12 — fixed-time daily WhatsApp digest (backlog #3) + what-if planner upgrade; then incident response: user reported "Application error: a client-side exception" and asked "any other free api" then "dont change and runnn" (stability freeze).
+
+Current project status / assessment:
+- LIVE healthy: real account, demo OFF, Sem 5, 8 subjects, overall 66.67% (2/3, danger), sync idle 0 failures.
+- USER CONFIGURED WHATSAPP THEMSELVES: status enabled=true, configured=true (phone masked 91********13), lastAutoAt=null at round start. The NEXT scheduled sync fired the first real auto-digest (overdue ALA exists → hasOverdue=true, pending count changed from -1 baseline). Do NOT send test messages during QA anymore — it hits the student's real WhatsApp.
+- INCIDENT ROOT CAUSE (fixed): sandbox has ~4GB RAM. agent-browser (headless Chromium) left open across rounds + Turbopack next-dev recompiles together exceed the budget → kernel OOM-killer reaped next-server (dmesg: "Out of memory: Killed process ... next-server ... anon-rss:1937520kB"). Server crash-looped ~21:05-21:15; the user's open browser tab held stale Turbopack chunk refs across restarts → "Application error: a client-side exception" on the preview. NOT a code bug: fresh load + all 4 tabs = 0 console errors (verified twice).
+- STABILITY PROTOCOL (follow from now on): run `agent-browser close` at the END of every QA pass; never leave Chromium running alongside the dev server. Restart via the keeper's exact setsid/nohup command only.
+
+Completed modifications / verified (before the user's freeze — no changes after it):
+1. FEATURE — FIXED-TIME DAILY WHATSAPP DIGEST (was backlog #3): notify.wa.digestTime ("HH:MM" IST) + notify.wa.lastDigestDay (once-per-IST-day latch, late-fire after restart instead of never). istNow() via Intl en-CA Asia/Kolkata. maybeDailyDigest() called every scheduler tick (never throws); fires once/IST-day when past the set time regardless of changes — that is the point of a daily digest; sync-triggered maybeAutoNotify unchanged. API POST action "setDigestTime" {time|null} (400 on invalid HH:MM); GET status.digestTime. Settings WhatsAppCard gained a "Daily digest time (IST)" panel: time input + Schedule + Remove (ghost destructive hover), badge chip on the status line, toggle toast mentions the fixed time. API round-trip proven SAFELY with "23:59" (future-of-day so no tick can fire): invalid→400, save ok, status reflects, clear→None. Left unset for the user (their choice).
+2. FEATURE — WHAT-IF PLANNER (upgraded from one-way slider): attendance-tab WhatIfSlider→WhatIfPlanner with Attend/Skip segmented toggle (aria-pressed, emerald/red active states), slider 0..10; Attend=(present+n)/(total+n), Skip=present/(total+n); projection via AnimatedNumber + server-threshold status colors (attendanceStatus from lib/attendance — same grading the app will apply); delta pts chip; context line (back on track / within 5 pts / recovery classes needed). Rendered on all 8 subject cards.
+3. STYLING: planner panel border+bg-muted container, segmented control pill, projection color system (safe/warning/danger tokens), digest-time panel with primary Timer icon + mono time input; all token-based dark-mode safe.
+
+Verification results:
+- bun run lint clean; bunx tsc --noEmit zero src/ errors.
+- agent-browser fresh-load E2E (after restart): Dashboard 66.67% renders; Attendance 8× "What-if planner"; Reminders 42 submit/ERP affordances; Settings shows WhatsApp card + "Daily digest time (IST)"; 0 console errors on every tab; browser CLOSED after pass.
+- Server restored 200 via keeper method; WhatsApp state verified intact (enabled, digestTime None); ~2.2GB RAM headroom with server alone.
+
+Unresolved issues / risks & next-phase priorities:
+1. USER DECISION PENDING: free notification API menu offered (Telegram Bot ⭐ / ntfy.sh / Discord webhook / email SMTP / official Meta Cloud API vs Twilio sandbox trade-offs). Await their pick; notify layer is modular (lib/notify/whatsapp.ts pattern) so a second channel is a small, isolated add.
+2. If crash-loop recurs WITHOUT Chromium: consider reducing Turbopack memory (e.g. NODE_OPTIONS max-old-space) — needs a controlled restart; do not attempt while user is using the app.
+3. Backlog unchanged: L/H/E columns folding, SMTP email digest, TZ anchor cosmetic, per-semester slot scoping (schema change → controlled restart).
+4. User freeze is in effect: NO further code changes unless they ask or a bug is reproducible on fresh load.
+5. dev-server-keeper cron (430680) must stay alive; preview Caddy 502 self-heals ≤5 min.
