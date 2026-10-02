@@ -176,3 +176,58 @@
     animation: none;
   }
 }
+
+/* Keyboard shortcut chips (shortcuts dialog + tab hints) */
+.kbd {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 1.5rem;
+  height: 1.5rem;
+  padding: 0 0.375rem;
+  border-radius: 0.375rem;
+  border: 1px solid color-mix(in oklch, var(--foreground) 15%, transparent);
+  border-bottom-width: 2px;
+  background: var(--muted);
+  color: var(--foreground);
+  font-family: var(--font-mono);
+  font-size: 0.6875rem;
+  font-weight: 600;
+  line-height: 1;
+  user-select: none;
+}
+
+/* Tiny number hint inside tab triggers — quieter than the dialog version */
+.kbd-hint {
+  min-width: 1.1rem;
+  height: 1.1rem;
+  border: none;
+  border-bottom-width: 0;
+  background: color-mix(in oklch, var(--foreground) 6%, transparent);
+  color: var(--muted-foreground);
+  font-size: 0.5625rem;
+  border-radius: 0.25rem;
+}
+
+/* Pulsing dot for the "class in progress" header chip */
+@keyframes erp-pulse-dot {
+  0%,
+  100% {
+    box-shadow: 0 0 0 0 color-mix(in oklch, var(--color-emerald-500, #10b981) 55%, transparent);
+    opacity: 1;
+  }
+  70% {
+    box-shadow: 0 0 0 6px transparent;
+    opacity: 0.75;
+  }
+}
+
+.erp-pulse-dot {
+  animation: erp-pulse-dot 1.8s ease-out infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .erp-pulse-dot {
+    animation: none;
+  }
+}

@@ -3,12 +3,14 @@
 import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { motion } from "framer-motion";
-import { CheckCircle2, TrendingUp, Users, XCircle, Zap } from "lucide-react";
+import { CheckCircle2, PanelRightOpen, TrendingUp, Users, XCircle, Zap } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Slider } from "@/components/ui/slider";
 import { cn } from "@/lib/utils";
 import { fetchAttendance, fetchHistory, qk } from "./api";
+import { SubjectDrawer } from "./subject-drawer";
 import {
   EmptyHero,
   fmtPct2,
@@ -61,11 +63,13 @@ function SubjectCard({
   target,
   index,
   history,
+  onOpen,
 }: {
   s: SubjectView;
   target: number;
   index: number;
   history: HistoryResponse | undefined;
+  onOpen: () => void;
 }) {
   const c = statusColors(s.status);
   const safe = s.status === "safe";
@@ -147,8 +151,18 @@ function SubjectCard({
               : `Attend the next ${s.classesToTarget} ${s.classesToTarget === 1 ? "class" : "classes"} to reach ${target}%.`}
           </p>
 
-          <div className="mt-auto">
+          <div className="mt-auto space-y-2">
             <WhatIfSlider s={s} />
+            <Button
+              variant="outline"
+              size="sm"
+              className="h-8 w-full gap-1.5 text-xs"
+              onClick={onOpen}
+              aria-label={`Open details, trend and weekly classes for ${s.name}`}
+            >
+              <PanelRightOpen className="size-3.5" aria-hidden="true" />
+              Details · trend · weekly classes
+            </Button>
           </div>
         </CardContent>
       </Card>
@@ -157,6 +171,7 @@ function SubjectCard({
 }
 
 export function AttendanceTab({ onOpenSettings }: { onOpenSettings: () => void }) {
+  const [selectedSubject, setSelectedSubject] = useState<SubjectView | null>(null);
   const { data, isPending, isError, error } = useQuery({
     queryKey: qk.attendance,
     queryFn: fetchAttendance,
@@ -207,6 +222,15 @@ export function AttendanceTab({ onOpenSettings }: { onOpenSettings: () => void }
 
   return (
     <div className="space-y-4">
+      <SubjectDrawer
+        subject={selectedSubject}
+        target={target}
+        open={selectedSubject !== null}
+        onOpenChange={(o) => {
+          if (!o) setSelectedSubject(null);
+        }}
+      />
+
       {/* Summary strip */}
       <Card className="rounded-xl border-border/60">
         <CardContent className="flex flex-wrap items-center gap-5 p-4 sm:gap-8 sm:p-6">
@@ -247,7 +271,14 @@ export function AttendanceTab({ onOpenSettings }: { onOpenSettings: () => void }
       {/* Subject grid */}
       <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
         {subjects.map((s, i) => (
-          <SubjectCard key={s.id} s={s} target={target} index={i} history={history.data} />
+          <SubjectCard
+            key={s.id}
+            s={s}
+            target={target}
+            index={i}
+            history={history.data}
+            onOpen={() => setSelectedSubject(s)}
+          />
         ))}
       </div>
     </div>

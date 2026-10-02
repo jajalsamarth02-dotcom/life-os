@@ -113,3 +113,39 @@ Unresolved issues / risks & next-phase recommendations:
 1. Live ERP timetable scraping: once dashboard HTML is known, upsert TimetableSlot(source="live") inside the live connector; UI already supports the source label.
 2. Demo timetable was seeded once; new subjects added later by the simulator are NOT auto-added to the timetable (acceptable; Manage dialog covers it).
 3. Backlog: notification per-type preferences, weekly digest, timetable "next class" chip in the header, install-prompt UI for PWA.
+
+---
+Task ID: R4 (webDevReview round 4)
+Agent: Z.ai Code (autonomous review & feature round)
+Task: QA + subject detail drawer w/ what-if planner + header/notification/keyboard UX + styling polish
+
+Work Log / Current status assessment:
+- QA: app healthy at start of round (server up, 0 console/page errors, scheduler syncing demo data every ~15 min, no regressions). No user-visible bugs found → proceeded to feature work per backlog.
+
+Completed modifications:
+1. SUBJECT DETAIL DRAWER (flagship new feature — fulfills the dashboard's existing promise "Tap a subject for details and what-if planning", which previously just jumped tabs):
+   - New src/components/erp/subject-drawer.tsx using shadcn Sheet (right side, full-width on mobile, max-w-lg on desktop).
+   - Status-colored gradient header band (emerald/amber/red blur accent): code chip, StatusChip, name, last-updated, big AnimatedNumber %, MiniBar.
+   - 4-stat grid: Present / Missed / Total / To-reach (or ✓ On target).
+   - WHAT-IF PLANNER: Attend|Skip mode toggle (remounts state), slider 0–40 + keyboard-accessible (arrow keys verified), reset button.
+     Projections: attend → (present+n)/(total+n); skip → present/(total+n). Shows projected %, ±pts delta chip, projected status panel, plus shortcut buttons "Reach {target}% → attend N" (sets slider to classesToReachTarget) and "Max skips (M) — still {target}%".
+   - Per-subject Attendance trend (pure-SVG MiniAreaChart, last ≤30 snapshots, first→last labels).
+   - Weekly classes for the subject from /api/timetable — grouped by day, TODAY FIRST ordering, today highlighted, per-day time chips, {n}/week badge.
+   - Footer honesty note: recalculated from ERP mirror, never writes to ERP.
+   - Wired into BOTH DashboardTab subject rows (whole row opens drawer) and AttendanceTab cards (new "Details · trend · weekly classes" button; inline WhatIfSlider kept for quick planning).
+2. HEADER: live "next class" chip (lg+): ongoing class shows pulsing emerald dot + "CS-302 · ends in X min", upcoming shows "in X min"; tooltip with full name + time range; auto-hides when no classes remain today. Uses qk.timetable + dashboard subjects.
+3. NOTIFICATION CENTER: filter tabs All/Unread/Alerts with live counts (Alerts = warning+critical), per-filter empty states ("You're all caught up ✓" / "No alerts — everything looks good"). Mark-all-read retained.
+4. KEYBOARD SHORTCUTS (page.tsx): 1–4 switch tabs, S = Sync Now (guarded while syncing), T = theme toggle, ? toggles shortcuts help Dialog (also button in footer). Ignored while typing in inputs/textareas/selects/contentEditable and with modifier keys. Tab triggers now show tiny kbd number hints.
+5. STYLING polish (mandatory): .kbd + .kbd-hint keycap styles (mono, 2px bottom border, theme-aware via color-mix); .erp-pulse-dot keyframe for the ongoing-class dot; drawer header pr fix so the close button never overlaps the % on mobile; all animations respect prefers-reduced-motion.
+
+Verification results:
+- bun run lint: clean (fixed 1 error: setState-in-effect removed — planner resets via key={s.id} remount instead; 1 unused directive removed).
+- agent-browser E2E: drawer opens from dashboard rows AND attendance cards; "Reach 75% → attend 15" produced exactly (27+15)/(41+15)=75.00% (+9.15 pts); skip n=3 → 27/44=61.36% (−4.49 pts); slider arrow-key interaction works.
+- Shortcuts verified: 1/2/3/4 tab switching, ? dialog, T dark-mode toggle, S sync. Notification filters: All 10 / Unread 8 / Alerts 4 all correct.
+- Next-class chip live-verified ("CS-302 in 67 min" counting down). Drawer weekly classes ordered today-first (Fri first, highlighted).
+- Desktop light + dark, 390×844 mobile (drawer full-width) all screenshot-verified; 0 console errors, 0 page errors.
+
+Unresolved issues / risks & next-phase recommendations:
+1. Live ERP scrape parser still generic (needs one real student login to fine-tune) — demo mode covers everything meanwhile. TOP priority if credentials arrive.
+2. Drawer trend reads from /api/history snapshots; in live mode history accrues honestly (no backfill), so the trend panel may be empty on day one — expected and explained in its empty state.
+3. Backlog: per-type notification preferences, weekly digest (email/report), PWA install-prompt UI, "ongoing class" hero strip variant of the header chip, command palette (Ctrl+K).

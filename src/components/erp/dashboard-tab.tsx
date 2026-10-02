@@ -25,6 +25,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Separator } from "@/components/ui/separator";
 import { cn } from "@/lib/utils";
 import { fetchDashboard, fetchHistory, qk } from "./api";
+import { SubjectDrawer } from "./subject-drawer";
 import { TimetableCard } from "./timetable-card";
 import {
   ago,
@@ -408,6 +409,7 @@ export function DashboardTab({
   onOpenSettings: () => void;
 }) {
   const [sort, setSort] = useState<SubjectSort>("lowest");
+  const [selectedSubject, setSelectedSubject] = useState<SubjectView | null>(null);
   const { data, isPending, isError, error } = useQuery({
     queryKey: qk.dashboard,
     queryFn: fetchDashboard,
@@ -474,6 +476,16 @@ export function DashboardTab({
 
   return (
     <div className="space-y-4">
+      {/* Subject detail drawer (also covers what-if planning) */}
+      <SubjectDrawer
+        subject={selectedSubject}
+        target={target}
+        open={selectedSubject !== null}
+        onOpenChange={(o) => {
+          if (!o) setSelectedSubject(null);
+        }}
+      />
+
       {/* Row 0 — next deadline countdown */}
       <NextUpStrip items={data.reminders.items} />
 
@@ -575,7 +587,12 @@ export function DashboardTab({
           ) : (
             <div className="max-h-96 space-y-2 overflow-y-auto pr-1">
               {sorted.map((s) => (
-                <SubjectRow key={s.id} s={s} onOpen={onOpenAttendance} shimmer={data.erp.sync.status === "syncing"} />
+                <SubjectRow
+                  key={s.id}
+                  s={s}
+                  onOpen={() => setSelectedSubject(s)}
+                  shimmer={data.erp.sync.status === "syncing"}
+                />
               ))}
             </div>
           )}

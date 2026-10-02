@@ -6,6 +6,7 @@ import { format } from "date-fns";
 import {
   AlertCircle,
   Bell,
+  CalendarClock,
   CheckCircle2,
   GraduationCap,
   Info,
@@ -32,7 +33,7 @@ import {
   TooltipTrigger,
 } from "@/components/ui/tooltip";
 import { cn } from "@/lib/utils";
-import { fetchDashboard, postSync, markAllNotificationsRead, qk } from "./api";
+import { fetchDashboard, fetchTimetable, markAllNotificationsRead, postSync, qk } from "./api";
 import { ago, fmtDT, useNow } from "./shared";
 import type { AppMode, AppNotification, NotificationSeverity } from "./types";
 
@@ -121,6 +122,7 @@ function ThemeToggle() {
 function NotificationsBell({ notifications, unreadCount }: { notifications: AppNotification[]; unreadCount: number }) {
   const qc = useQueryClient();
   const now = useNow();
+  const [filter, setFilter] = React.useState<"all" | "unread" | "alerts">("all");
   const markAll = useMutation({
     mutationFn: markAllNotificationsRead,
     onSuccess: () => {
@@ -129,6 +131,21 @@ function NotificationsBell({ notifications, unreadCount }: { notifications: AppN
     },
     onError: (e) => toast.error(e.message),
   });
+
+  const alertCount = notifications.filter(
+    (n) => n.severity === "warning" || n.severity === "critical"
+  ).length;
+  const visible = notifications.filter((n) => {
+    if (filter === "unread") return !n.read;
+    if (filter === "alerts") return n.severity === "warning" || n.severity === "critical";
+    return true;
+  });
+
+  const FILTERS = [
+    { key: "all" as const, label: "All", count: notifications.length },
+    { key: "unread" as const, label: "Unread", count: unreadCount },
+    { key: "alerts" as const, label: "Alerts", count: alertCount },
+  ];
 
   return (
     <Popover>
@@ -156,16 +173,111 @@ function NotificationsBell({ notifications, unreadCount }: { notifications: AppN
             Mark all read
           </Button>
         </div>
+        <div className="flex gap-1 px-4 pb-2.5" role="tablist" aria-label="Filter notifications">
+          {FILTERS.map((f) => (
+            <button
+              key={f.key}
+              type="button"
+              role="tab"
+              aria-selected={filter === f.key}
+              onClick={() => setFilter(f.key)}
+              className={cn(
+                "flex items-center gap-1 rounded-full border px-2.5 py-1 text-[11px] font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+                filter === f.key
+                  ? "border-primary/40 bg-primary/10 text-primary"
+                  : "border-border/60 text-muted-foreground hover:bg-muted/60"
+              )}
+            >
+              {f.label}
+              <span
+                className={cn(
+                  "rounded-full px-1 text-[10px] tabular-nums",
+                  filter === f.key ? "bg-primary/15" : "bg-muted"
+                )}
+              >
+                {f.count}
+              </span>
+            </button>
+          ))}
+        </div>
         <Separator />
         <ul className="max-h-96 overflow-y-auto p-2" aria-label="Notification list">
-          {notifications.length === 0 ? (
-            <li className="px-3 py-8 text-center text-sm text-muted-foreground">No notifications yet</li>
+          {visible.length === 0 ? (
+            <li className="flex flex-col items-center gap-1.5 px-3 py-8 text-center">
+              <Bell className="size-6 text-muted-foreground/40" aria-hidden="true" />
+              <p className="text-sm text-muted-foreground">
+                {filter === "all" ? "No notifications yet" : filter === "unread" ? "You're all caught up ✓" : "No alerts — everything looks good"}
+              </p>
+            </li>
           ) : (
-            notifications.map((n) => <NotificationItem key={n.id} n={n} now={now} />)
+            visible.map((n) => <NotificationItem key={n.id} n={n} now={now} />)
           )}
         </ul>
       </PopoverContent>
     </Popover>
+  );
+}
+
+/* ------------------------------------------------------------------ */
+/* Live "next class" chip (today's timetable)                          */
+/* ------------------------------------------------------------------ */
+
+function NextClassChip({ subjects }: { subjects: { code: string; name: string }[] | undefined }) {
+  const now = useNow(30_000);
+  const timetable = useQuery({
+    queryKey: qk.timetable,
+    queryFn: fetchTimetable,
+    refetchInterval: 120_000,
+  });
+
+  const slots = timetable.data ?? [];
+  const d = new Date(now);
+  const today = d.getDay();
+  const nowMin = d.getHours() * 60 + d.getMinutes();
+
+  const todaySlots = slots
+    .filter((s) => s.dayOfWeek === today)
+    .sort((a, b) => a.startMin - b.startMin);
+  const ongoing = todaySlots.find((s) => s.startMin <= nowMin && nowMin < s.endMin);
+  const next = todaySlots.find((s) => s.startMin > nowMin);
+  const shown = ongoing ?? next;
+
+  if (!shown || timetable.isPending) return null;
+
+  const name = subjects?.find((x) => x.code === shown.subjectCode)?.name ?? shown.subjectCode;
+  const minsTo = ongoing ? shown.endMin - nowMin : shown.startMin - nowMin;
+  const hhmm = (m: number) =>
+    `${String(Math.floor(m / 60)).padStart(2, "0")}:${String(m % 60).padStart(2, "0")}`;
+
+  return (
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <span
+          className={cn(
+            "hidden cursor-default items-center gap-1.5 rounded-full border px-2.5 py-1 text-xs font-medium lg:inline-flex",
+            ongoing
+              ? "border-emerald-500/40 bg-emerald-500/10 text-emerald-700 dark:text-emerald-400"
+              : "border-border/70 bg-muted/50 text-muted-foreground"
+          )}
+        >
+          <span
+            className={cn(
+              "size-1.5 rounded-full",
+              ongoing ? "bg-emerald-500 erp-pulse-dot" : "bg-muted-foreground/50"
+            )}
+            aria-hidden="true"
+          />
+          <CalendarClock className="size-3.5 shrink-0" aria-hidden="true" />
+          <span className="font-mono text-[11px] font-semibold">{shown.subjectCode}</span>
+          <span className="tabular-nums">
+            {ongoing ? `ends in ${minsTo} min` : `in ${minsTo} min`}
+          </span>
+        </span>
+      </TooltipTrigger>
+      <TooltipContent>
+        {ongoing ? "Class in progress" : "Next class today"}: {name} · {hhmm(shown.startMin)}–{hhmm(shown.endMin)}
+      </TooltipContent>
+    </Tooltip>
   );
 }
 
@@ -212,6 +324,8 @@ export function AppHeader() {
           </div>
 
           <ModeBadge mode={mode} />
+
+          <NextClassChip subjects={data?.subjects} />
 
           {lastSyncAt ? (
             <Tooltip>
