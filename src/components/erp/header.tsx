@@ -13,6 +13,7 @@ import {
   Moon,
   OctagonAlert,
   RefreshCw,
+  Search,
   Sun,
 } from "lucide-react";
 import { useTheme } from "next-themes";
@@ -111,7 +112,7 @@ function ThemeToggle() {
     <Button
       variant="ghost"
       size="icon"
-      aria-label={isDark ? "Switch to light mode" : "Switch to dark mode"}
+      aria-label={mounted ? (isDark ? "Switch to light mode" : "Switch to dark mode") : "Toggle theme"}
       onClick={() => setTheme(isDark ? "light" : "dark")}
     >
       {mounted && isDark ? <Sun className="size-4.5" /> : <Moon className="size-4.5" />}
@@ -281,7 +282,7 @@ function NextClassChip({ subjects }: { subjects: { code: string; name: string }[
   );
 }
 
-export function AppHeader() {
+export function AppHeader({ onOpenPalette }: { onOpenPalette?: () => void }) {
   const qc = useQueryClient();
   const now = useNow();
   const { data } = useQuery({ queryKey: qk.dashboard, queryFn: fetchDashboard });
@@ -341,6 +342,19 @@ export function AppHeader() {
           )}
 
           <div className="ml-auto flex items-center gap-1 sm:gap-1.5">
+            {onOpenPalette && (
+              <Button
+                variant="outline"
+                size="sm"
+                className="erp-cmd-trigger h-9 gap-2 px-3 text-muted-foreground"
+                onClick={onOpenPalette}
+                aria-label="Open command palette (Control K)"
+              >
+                <Search className="size-4" aria-hidden="true" />
+                <span className="hidden text-xs md:inline">Search…</span>
+                <kbd className="kbd hidden md:inline-flex" aria-hidden="true">⌘K</kbd>
+              </Button>
+            )}
             <Button
               variant="outline"
               size="sm"

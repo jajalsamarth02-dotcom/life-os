@@ -172,6 +172,8 @@ export interface AppSettings {
   autoSyncEnabled: boolean;
   demoMode: boolean;
   minLiveSyncGapMinutes: number;
+  /** Per-type notification switches; missing key = enabled. */
+  notifyPrefs: Record<string, boolean>;
 }
 
 export interface SyncResponse {

@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { motion } from "framer-motion";
 import { CheckCircle2, PanelRightOpen, TrendingUp, Users, XCircle, Zap } from "lucide-react";
@@ -10,6 +10,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Slider } from "@/components/ui/slider";
 import { cn } from "@/lib/utils";
 import { fetchAttendance, fetchHistory, qk } from "./api";
+import { HistoryHeatmap } from "./history-heatmap";
 import { SubjectDrawer } from "./subject-drawer";
 import {
   EmptyHero,
@@ -171,7 +172,7 @@ function SubjectCard({
 }
 
 export function AttendanceTab({ onOpenSettings }: { onOpenSettings: () => void }) {
-  const [selectedSubject, setSelectedSubject] = useState<SubjectView | null>(null);
+  const [selectedCode, setSelectedCode] = useState<string | null>(null);
   const { data, isPending, isError, error } = useQuery({
     queryKey: qk.attendance,
     queryFn: fetchAttendance,
@@ -182,6 +183,20 @@ export function AttendanceTab({ onOpenSettings }: { onOpenSettings: () => void }
     queryFn: fetchHistory,
     refetchInterval: 60_000,
   });
+
+  /* Command palette → open a subject's detail drawer. The code is stored and
+     resolved against fetched data, so the drawer also opens when the event
+     arrives before the query has finished. */
+  useEffect(() => {
+    const handler = (e: Event) => {
+      const code = (e as CustomEvent<string>).detail;
+      if (typeof code === "string") setSelectedCode(code);
+    };
+    window.addEventListener("erp:open-subject", handler);
+    return () => window.removeEventListener("erp:open-subject", handler);
+  }, []);
+
+  const selectedSubject = data?.subjects.find((x) => x.code === selectedCode) ?? null;
 
   if (isPending) {
     return (
@@ -227,7 +242,7 @@ export function AttendanceTab({ onOpenSettings }: { onOpenSettings: () => void }
         target={target}
         open={selectedSubject !== null}
         onOpenChange={(o) => {
-          if (!o) setSelectedSubject(null);
+          if (!o) setSelectedCode(null);
         }}
       />
 
@@ -268,6 +283,11 @@ export function AttendanceTab({ onOpenSettings }: { onOpenSettings: () => void }
       {/* Trend chart (from sync snapshots) */}
       <TrendSection history={history.data} subjects={subjects} target={target} />
 
+      {/* Daily history heatmap (from sync snapshots) */}
+      {history.data && history.data.overall.length > 0 && (
+        <HistoryHeatmap overall={history.data.overall} target={target} />
+      )}
+
       {/* Subject grid */}
       <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
         {subjects.map((s, i) => (
@@ -277,7 +297,7 @@ export function AttendanceTab({ onOpenSettings }: { onOpenSettings: () => void }
             target={target}
             index={i}
             history={history.data}
-            onOpen={() => setSelectedSubject(s)}
+            onOpen={() => setSelectedCode(s.code)}
           />
         ))}
       </div>

@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { motion } from "framer-motion";
 import {
@@ -223,6 +223,13 @@ function NewReminderDialog() {
   const [type, setType] = useState<ReminderType>("EXAM");
   const [description, setDescription] = useState("");
   const [dueAtLocal, setDueAtLocal] = useState("");
+
+  /* Command palette → open this dialog */
+  useEffect(() => {
+    const handler = () => setOpen(true);
+    window.addEventListener("erp:new-reminder", handler);
+    return () => window.removeEventListener("erp:new-reminder", handler);
+  }, []);
 
   const create = useMutation({
     mutationFn: () =>

@@ -12,6 +12,7 @@ import {
   Keyboard,
   LayoutDashboard,
   RefreshCw,
+  Search,
   Settings as SettingsIcon,
   TriangleAlert,
   X,
@@ -32,6 +33,7 @@ import { DashboardTab } from "@/components/erp/dashboard-tab";
 import { AttendanceTab } from "@/components/erp/attendance-tab";
 import { RemindersTab } from "@/components/erp/reminders-tab";
 import { SettingsTab } from "@/components/erp/settings-tab";
+import { CommandPalette } from "@/components/erp/command-palette";
 import { fetchDashboard, postSync, qk } from "@/components/erp/api";
 import { fmtDT } from "@/components/erp/shared";
 
@@ -45,6 +47,7 @@ const TAB_ITEMS: { key: TabKey; label: string; icon: React.ElementType }[] = [
 ];
 
 const SHORTCUTS: { keys: string[]; description: string }[] = [
+  { keys: ["⌘K"], description: "Open the command palette" },
   { keys: ["1"], description: "Go to Dashboard" },
   { keys: ["2"], description: "Go to Attendance" },
   { keys: ["3"], description: "Go to Reminders" },
@@ -152,6 +155,7 @@ function DemoStrip({ onOpenSettings }: { onOpenSettings: () => void }) {
 export default function Home() {
   const [tab, setTab] = useState<TabKey>("dashboard");
   const [showShortcuts, setShowShortcuts] = useState(false);
+  const [paletteOpen, setPaletteOpen] = useState(false);
   const qc = useQueryClient();
   const { resolvedTheme, setTheme } = useTheme();
   const { data } = useQuery({ queryKey: qk.dashboard, queryFn: fetchDashboard, refetchInterval: 20_000 });
@@ -180,6 +184,11 @@ export default function Home() {
   /* Global keyboard shortcuts (ignored while typing in fields) */
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
+      if ((e.metaKey || e.ctrlKey) && (e.key === "k" || e.key === "K")) {
+        e.preventDefault();
+        setPaletteOpen((v) => !v);
+        return;
+      }
       if (e.metaKey || e.ctrlKey || e.altKey) return;
       const t = e.target as HTMLElement | null;
       if (
@@ -211,6 +220,13 @@ export default function Home() {
     return () => window.removeEventListener("keydown", onKey);
   }, [resolvedTheme, syncNow.isPending, sync?.status]);
 
+  /* Cross-component events (command palette → tabs) */
+  useEffect(() => {
+    const invalidate = () => qc.invalidateQueries();
+    window.addEventListener("erp:invalidate-all", invalidate);
+    return () => window.removeEventListener("erp:invalidate-all", invalidate);
+  }, [qc]);
+
   return (
     <div className="relative flex min-h-screen flex-col bg-background">
       {/* Decorative ambient gradient (subtle, theme-aware) */}
@@ -219,7 +235,7 @@ export default function Home() {
         <div className="absolute -right-24 top-64 h-56 w-56 rounded-full bg-amber-500/[0.05] blur-3xl" />
         <div className="absolute -left-24 top-96 h-56 w-56 rounded-full bg-emerald-500/[0.04] blur-3xl" />
       </div>
-      <AppHeader />
+      <AppHeader onOpenPalette={() => setPaletteOpen(true)} />
 
       <main className="relative mx-auto w-full max-w-6xl flex-1 px-4 py-4 sm:py-6">
         <div className="space-y-4">
@@ -271,6 +287,18 @@ export default function Home() {
       </main>
 
       <ShortcutsDialog open={showShortcuts} onOpenChange={setShowShortcuts} />
+      <CommandPalette
+        open={paletteOpen}
+        onOpenChange={setPaletteOpen}
+        onNavigate={(t) => setTab(t)}
+        onShowShortcuts={() => setShowShortcuts(true)}
+        onSyncNow={() => {
+          if (!syncNow.isPending && sync?.status !== "syncing") syncNow.mutate();
+        }}
+        syncing={syncNow.isPending || sync?.status === "syncing"}
+        demoMode={mode === "demo"}
+        subjects={data?.subjects}
+      />
 
       <footer className="relative mt-auto border-t border-border/60 bg-card/50">
         <div className="mx-auto flex w-full max-w-6xl flex-col items-center justify-between gap-1 px-4 py-3.5 pb-[max(0.875rem,env(safe-area-inset-bottom))] text-center text-xs text-muted-foreground sm:flex-row sm:text-left">

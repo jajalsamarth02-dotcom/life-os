@@ -157,10 +157,16 @@ export function TrendSection({
     selected.forEach((code) => {
       subjectByT.set(code, new Map((history.subjects[code] ?? []).map((p) => [p.t, p])));
     });
+    let prevDay = "";
     return times.map((t) => {
+      const d = new Date(t);
+      const dayKey = format(d, "yyyy-MM-dd");
+      // first point of a day shows the date; later points the same day show the time
+      const label = dayKey === prevDay ? format(d, "HH:mm") : format(d, "d MMM");
+      prevDay = dayKey;
       const row: Record<string, number | string | null> = {
         t,
-        label: format(new Date(t), "d MMM"),
+        label,
         overall: overallByT.get(t)?.percentage ?? null,
       };
       selected.forEach((code) => {

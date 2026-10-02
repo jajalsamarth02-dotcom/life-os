@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { db } from "@/lib/db";
-import { getSettings, updateSettings } from "@/lib/settings";
+import { getSettings, isNotifyType, updateSettings } from "@/lib/settings";
 import { recomputeAttendanceWarnings } from "@/lib/sync/engine";
 import { getSyncState } from "@/lib/sync/engine";
 
@@ -12,8 +12,9 @@ export async function GET() {
 }
 
 /**
- * PUT /api/settings — update target %, sync interval, auto-sync, demo mode.
- * Changing the target recalculates warnings immediately (no ERP call needed).
+ * PUT /api/settings — update target %, sync interval, auto-sync, demo mode,
+ * notification preferences. Changing the target recalculates warnings
+ * immediately (no ERP call needed).
  */
 export async function PUT(req: Request) {
   try {
@@ -28,6 +29,13 @@ export async function PUT(req: Request) {
     }
     if (typeof body.autoSyncEnabled === "boolean") patch.autoSyncEnabled = body.autoSyncEnabled;
     if (typeof body.demoMode === "boolean") patch.demoMode = body.demoMode;
+    if (body.notifyPrefs && typeof body.notifyPrefs === "object" && !Array.isArray(body.notifyPrefs)) {
+      const clean: Record<string, boolean> = {};
+      for (const [k, v] of Object.entries(body.notifyPrefs as Record<string, unknown>)) {
+        if (isNotifyType(k) && typeof v === "boolean") clean[k] = v;
+      }
+      patch.notifyPrefs = clean;
+    }
 
     const prev = await getSettings();
     const next = await updateSettings(patch);

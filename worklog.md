@@ -149,3 +149,71 @@ Unresolved issues / risks & next-phase recommendations:
 1. Live ERP scrape parser still generic (needs one real student login to fine-tune) — demo mode covers everything meanwhile. TOP priority if credentials arrive.
 2. Drawer trend reads from /api/history snapshots; in live mode history accrues honestly (no backfill), so the trend panel may be empty on day one — expected and explained in its empty state.
 3. Backlog: per-type notification preferences, weekly digest (email/report), PWA install-prompt UI, "ongoing class" hero strip variant of the header chip, command palette (Ctrl+K).
+
+---
+Task ID: R5 (webDevReview round 5)
+Agent: Z.ai Code (autonomous review & feature round)
+Task: QA + command palette (⌘K) + notification preferences + attendance heatmap + fixes/polish
+
+Work Log / Current status assessment:
+- QA found a REAL bug this round: a React hydration mismatch in the header ThemeToggle — the
+  aria-label wasn't gated by the `mounted` flag (icon was, label wasn't), so SSR rendered
+  "Switch to dark mode" while the hydrated client rendered "Switch to light mode" (visible as a
+  "1 Issue" red badge in the Next.js dev overlay). Fixed by gating the label: stable
+  "Toggle theme" until mounted. Verified gone after a fresh load (0 console/page errors).
+
+Completed modifications:
+1. BUG FIX: ThemeToggle hydration mismatch (src/components/erp/header.tsx) — aria-label now
+   `mounted ? (isDark ? "Switch to light mode" : "Switch to dark mode") : "Toggle theme"`.
+2. COMMAND PALETTE (⌘K / Ctrl+K) — new src/components/erp/command-palette.tsx (shadcn CommandDialog):
+   - Fuzzy subject search with code + live percentage → navigates to Attendance and opens the
+     subject detail drawer (event `erp:open-subject`; AttendanceTab stores the CODE and derives the
+     SubjectView from data, so the drawer also opens when the event arrives before the query
+     resolves — lint-clean, no setState-in-effect).
+   - Navigate (Dashboard/Attendance/Reminders/Settings with kbd hints), Sync now (reuses page's
+     syncNow mutation), New personal reminder (event `erp:new-reminder` opens the Reminders dialog),
+     theme toggle, Simulate ERP change (demo only), Keyboard shortcuts help.
+   - Header gained a "Search… ⌘K" trigger button (hidden label on small screens); Ctrl+K toggles.
+   - SHORTCUTS dialog now lists ⌘K first.
+3. NOTIFICATION PREFERENCES (per-type):
+   - src/lib/settings.ts: AppSettings.notifyPrefs (Record<string, boolean>, missing = on),
+     NOTIFY_TYPES whitelist (ERP_CHANGE, SYNC_SUCCESS, SYNC_FAILURE, ATTENDANCE_WARNING,
+     REMINDER_CHANGE), key-wise merge in updateSettings, isNotifyEnabled helper.
+   - engine notify() checks prefs BEFORE creating a notification (future events only — existing
+     notifications never retroactively hidden; stated in the UI).
+   - PUT /api/settings accepts + sanitizes notifyPrefs (unknown keys dropped).
+   - Settings UI: new "Notifications" card — 5 toggles w/ per-type icons (BellOff when muted),
+     "n/5 on" badge, dirty-gated Save button, skeleton loading, honest "applies to future events" note.
+   - E2E verified: toggled ERP_CHANGE off → save → GET /api/settings shows {"ERP_CHANGE": false} →
+     demo evolve applied 6 changes → ERP_CHANGE notification count unchanged (6→6) → re-enabled.
+4. ATTENDANCE HISTORY HEATMAP (new card on Attendance tab, src/components/erp/history-heatmap.tsx):
+   - GitHub-style 12-week calendar (Mon–Sun rows) built from /api/history overall snapshots
+     (last snapshot per local day wins), colored vs target: red <target−10 / amber <target /
+     emerald ≥target (two intensities), muted = no data, future cells transparent.
+   - Month labels mark the column CONTAINING the 1st of a month (handles mid-week month starts —
+     first version missed "Oct"); Mon/Wed/Fri day labels; hover caption (aria-live) with date,
+     percentage and present/total; legend with target note; horizontal scroll on tiny screens;
+     staggered pop-in animation (prefers-reduced-motion respected); empty state explains honest
+     live-mode accrual.
+5. CHART LABEL FIX: trend x-axis no longer repeats "2 Oct" when several syncs happen the same day —
+   first point of a day shows "d MMM", subsequent same-day points show "HH:mm".
+6. STYLING polish (mandatory): .erp-heat-cell staggered entrance keyframes (reduced-motion safe),
+   .erp-cmd-trigger hover state for the header search button, sonner --normal-offset raised so
+   toasts never cover sticky header actions, BellOff/idle-state styling in the prefs card.
+
+Verification results:
+- bun run lint: clean (fixed react-hooks/set-state-in-effect in AttendanceTab via derived state).
+- agent-browser fresh session: 0 console errors, 0 page errors; hydration "Issue" badge gone.
+- E2E: Ctrl+K opens palette; "web" → CS-304 → drawer opened on Attendance tab; palette
+  "New personal reminder" → Reminders tab + create dialog; prefs toggle → save → API-verified →
+  engine suppression verified via demo evolve; heatmap Oct label + caption "Fri 2 Oct — 72.13%
+  (132/183 classes)" correct; trend axis shows 07:46/07:52/09:58 for same-day syncs.
+- Desktop dark + light, 390×844 mobile all screenshot-verified. Sync state healthy (demo mode,
+  scheduler running, "Last ERP sync" ticking).
+
+Unresolved issues / risks & next-phase recommendations:
+1. Live ERP scrape parser still generic — needs one real student login to fine-tune against the
+   actual dashboard HTML (demo mode covers everything meanwhile). TOP priority if credentials arrive.
+2. In live mode the heatmap starts sparse (honest accrual); the empty state explains this.
+3. Backlog: PWA install-prompt UI, weekly digest report, per-reminder due-date notifications
+   (browser Notification API), "ongoing class" hero strip on the dashboard, Ctrl+K recent-actions.

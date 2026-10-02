@@ -1,5 +1,5 @@
 import { db } from "@/lib/db";
-import { getSettings, getRawSetting, setRawSetting } from "@/lib/settings";
+import { getSettings, getRawSetting, setRawSetting, isNotifyEnabled } from "@/lib/settings";
 import { attendancePercentage, classesToReachTarget } from "@/lib/attendance";
 import { fetchDemoSnapshot } from "@/lib/erp/demo";
 import { fetchLiveSnapshot } from "@/lib/erp/live";
@@ -57,12 +57,19 @@ function backoffMinutes(baseMinutes: number, failures: number): number {
   return Math.min(baseMinutes * Math.pow(2, Math.min(failures, 5)), 720);
 }
 
+/**
+ * Create an in-app notification — unless the user switched this type off in
+ * Settings → Notifications. Existing notifications are never retroactively
+ * hidden; preferences apply to future events only.
+ */
 async function notify(
   type: string,
   title: string,
   message: string,
   severity: "info" | "success" | "warning" | "critical" = "info"
 ) {
+  const prefs = (await getSettings()).notifyPrefs;
+  if (!isNotifyEnabled(prefs, type)) return;
   await db.notification.create({ data: { type, title, message, severity } });
 }
 

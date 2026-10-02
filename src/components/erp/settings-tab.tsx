@@ -1,9 +1,13 @@
 "use client";
 
+import * as React from "react";
 import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   AlertCircle,
+  Bell,
+  BellOff,
+  CalendarClock,
   CheckCircle2,
   FlaskConical,
   Info,
@@ -11,9 +15,11 @@ import {
   Loader2,
   Lock,
   LogOut,
+  RefreshCw,
   Save,
   ShieldCheck,
   Sparkles,
+  TriangleAlert,
 } from "lucide-react";
 import { toast } from "sonner";
 import {
@@ -381,6 +387,158 @@ function SyncSettingsCard() {
 }
 
 /* ------------------------------------------------------------------ */
+/* Notification preferences                                            */
+/* ------------------------------------------------------------------ */
+
+const NOTIFY_META: { key: string; label: string; description: string; icon: React.ElementType; className: string }[] = [
+  {
+    key: "ATTENDANCE_WARNING",
+    label: "Attendance warnings",
+    description: "A subject drops below your target — the most important alert",
+    icon: TriangleAlert,
+    className: "text-amber-500",
+  },
+  {
+    key: "REMINDER_CHANGE",
+    label: "Deadline updates",
+    description: "The ERP moved an exam or submission date",
+    icon: CalendarClock,
+    className: "text-primary",
+  },
+  {
+    key: "ERP_CHANGE",
+    label: "ERP data changes",
+    description: "Every sync that applies changes to your mirror",
+    icon: RefreshCw,
+    className: "text-emerald-500",
+  },
+  {
+    key: "SYNC_FAILURE",
+    label: "Sync failures",
+    description: "Recommended: know when data may be stale",
+    icon: AlertCircle,
+    className: "text-red-500",
+  },
+  {
+    key: "SYNC_SUCCESS",
+    label: "Connection restored",
+    description: "When a failing ERP connection works again",
+    icon: CheckCircle2,
+    className: "text-emerald-500",
+  },
+];
+
+function NotificationPrefsCard() {
+  const qc = useQueryClient();
+  const { data: settings } = useQuery({ queryKey: qk.settings, queryFn: fetchSettings });
+  const [draft, setDraft] = useState<Record<string, boolean> | null>(null);
+
+  const prefs = draft ?? settings?.notifyPrefs ?? {};
+  const enabledCount = NOTIFY_META.filter((m) => prefs[m.key] !== false).length;
+
+  const save = useMutation({
+    mutationFn: (next: Record<string, boolean>) => putSettings({ notifyPrefs: next }),
+    onSuccess: (_s, next) => {
+      setDraft(null);
+      qc.invalidateQueries({ queryKey: qk.settings });
+      const off = Object.entries(next).filter(([, v]) => !v).length;
+      toast.success(
+        off > 0 ? `Notifications updated — ${off} type${off === 1 ? "" : "s"} muted` : "All notifications enabled"
+      );
+    },
+    onError: (e) => toast.error("Could not save notification preferences", { description: e.message }),
+  });
+
+  const setPref = (key: string, value: boolean) => {
+    setDraft({ ...prefs, [key]: value });
+  };
+
+  const dirty =
+    draft !== null &&
+    NOTIFY_META.some((m) => (draft[m.key] ?? true) !== (settings?.notifyPrefs?.[m.key] ?? true));
+
+  return (
+    <Card className="rounded-xl border-border/60">
+      <CardHeader className="flex flex-row items-start justify-between space-y-0 pb-3">
+        <div>
+          <CardTitle className="flex items-center gap-2 text-base tracking-tight">
+            <Bell className="size-4 text-primary" aria-hidden="true" />
+            Notifications
+          </CardTitle>
+          <CardDescription>Choose which events create a notification</CardDescription>
+        </div>
+        <Badge variant="secondary" className="text-[11px] tabular-nums">
+          {enabledCount}/{NOTIFY_META.length} on
+        </Badge>
+      </CardHeader>
+      <CardContent className="space-y-3">
+        {!settings ? (
+          <div className="space-y-2">
+            {Array.from({ length: 3 }).map((_, i) => (
+              <Skeleton key={i} className="h-11 w-full rounded-lg" />
+            ))}
+          </div>
+        ) : (
+          <div className="grid gap-2 sm:grid-cols-2">
+            {NOTIFY_META.map((m) => {
+              const on = prefs[m.key] !== false;
+              const Icon = on ? m.icon : BellOff;
+              return (
+                <div
+                  key={m.key}
+                  className={cn(
+                    "flex items-center gap-3 rounded-lg border p-3 transition-colors",
+                    on ? "border-border/50 bg-card" : "border-border/40 bg-muted/40"
+                  )}
+                >
+                  <span
+                    className={cn(
+                      "flex size-8 shrink-0 items-center justify-center rounded-lg",
+                      on ? "bg-muted" : "bg-muted/60 opacity-50"
+                    )}
+                    aria-hidden="true"
+                  >
+                    <Icon className={cn("size-4", on ? m.className : "text-muted-foreground")} />
+                  </span>
+                  <div className="min-w-0 flex-1">
+                    <Label htmlFor={`notify-${m.key}`} className={cn("text-sm", !on && "text-muted-foreground")}>
+                      {m.label}
+                    </Label>
+                    <p className="truncate text-[11px] text-muted-foreground">{m.description}</p>
+                  </div>
+                  <Switch
+                    id={`notify-${m.key}`}
+                    checked={on}
+                    onCheckedChange={(v) => setPref(m.key, v)}
+                    disabled={save.isPending}
+                    aria-label={`${on ? "Disable" : "Enable"} ${m.label} notifications`}
+                  />
+                </div>
+              );
+            })}
+          </div>
+        )}
+        <div className="flex items-center justify-between gap-3">
+          <p className="text-[11px] text-muted-foreground">
+            Applies to future events — existing notifications are kept.
+          </p>
+          <Button
+            size="sm"
+            className="h-8 gap-1.5"
+            disabled={!dirty || save.isPending}
+            onClick={() => save.mutate(draft ?? {})}
+            aria-label="Save notification preferences"
+          >
+            {save.isPending ? <Loader2 className="size-3.5 animate-spin" aria-hidden="true" /> : <Save className="size-3.5" aria-hidden="true" />}
+            Save
+          </Button>
+        </div>
+      </CardContent>
+    </Card>
+  );
+}
+
+/* ------------------------------------------------------------------ */
 /* Demo mode card                                                      */
 /* ------------------------------------------------------------------ */
 
@@ -570,6 +728,7 @@ export function SettingsTab() {
         <ErpConnectionCard />
         <SyncSettingsCard />
       </div>
+      <NotificationPrefsCard />
       <DemoModeCard liveConnected={liveConnected} />
       <SyncHistoryCard />
 
