@@ -1072,3 +1072,65 @@ Unresolved issues / risks & next-phase priorities:
 3. Digest email still needs SMTP; parser 12:00Z anchor cosmetic; per-semester slot scoping
    (schema change → controlled restart).
 4. dev-server-keeper cron (job 430680) must stay alive; preview Caddy 502 self-heals ≤5 min.
+
+---
+Task ID: 15 (user request: ALA submit-into-portal + WhatsApp pending-work notifications)
+Agent: Z.ai Code (main orchestrator)
+Task: "when i upload ala so this system also submit into the portal and what about whatsapp notification for pending work" — ALA write-back to erp.gmiu.edu.in + WhatsApp alert channel.
+
+Current project status / assessment:
+- LIVE healthy (real account, demo OFF, Sem 5, 66.67%, sync idle 0 failures; scheduled sync at
+  12:45 ran clean WITH the new auto-notify hook loaded). Pre-work recon confirmed the ERP's
+  assignment DETAIL page (/student/assignment/{id}) carries a real student submission form:
+  POST /student/assignment/{id}/update, multipart/form-data, fields _token (CSRF) + attach
+  (file: .pdf .docx .zip .xlsx .ppt .csv .mp4 .png .jpg .jpeg .pptx .odp) + link (text URL).
+  Verified against the saved probe HTML (scripts/out-assignment-detail.html), zero ERP contact.
+
+Completed modifications / verified:
+1. FEATURE — ALA SUBMIT-TO-PORTAL (explicit write-back, spec-safe): new submitAssignment() in
+   lib/erp/live.ts (session via stored cookie → fresh login fallback → GET detail → extract
+   CSRF _token + action → POST multipart {attach?, link?} → re-fetch detail and ONLY report
+   success when the ERP itself shows "Submission Status: Submitted"; never fabricated). Guards:
+   numeric erpId only, 10 MB cap, ERP accept-list enforced, DONE rows rejected 409, always
+   user-initiated (never automatic). API: POST /api/assignments/[id]/submit (multipart
+   passthrough; persists rotated session cookie; on ERP confirmation marks row DONE exactly as
+   sync would + success Notification). UI: per-row "Submit" button on every pending ALA row
+   (41 rendered) → AlaSubmitDialog (file picker with accepted types + link input + can't-undo
+   warning; Submit-now disabled until input; success/failure panel with the ERP's own message;
+   invalidates assignments/dashboard/reminders queries). Footer copy + Settings privacy note
+   updated to reflect the one sanctioned write path.
+2. FEATURE — WHATSAPP PENDING-WORK ALERTS (CallMeBot): lib/notify/whatsapp.ts — config stored
+   AES-256-GCM encrypted in Setting notify.wa.enc (phone normalized, +91 auto-prefix for 10-digit
+   Indian numbers), enable flag + lastAutoAt/lastPendingCount/lastResult settings. buildPending-
+   Digest() renders real ERP data (pending/overdue counts, worst subjects, next 3 deadlines IST,
+   other active reminders). sendPendingDigest(manual|auto) + maybeAutoNotify() hooked into
+   runSync: scheduled-sync success only, max once/24h, only when pending count changed or
+   something is overdue, failures never break the sync. API /api/notify/whatsapp: GET status
+   (phone masked) + POST {save|enable|test|digest}. UI: Settings "WhatsApp alerts (BETA)" card —
+   3-step setup with callmebot link, phone+apikey inputs, Save / Send test / Send digest now,
+   disabled-when-unconfigured switch, last-result line. Privacy footer updated.
+3. E2E/VERIFICATION: bun lint clean; bunx tsc --noEmit zero src/ errors. API paths proven:
+   GET status honest-unconfigured → POST test 409 → POST save validation 400 → save ok (masked
+   91********10) → digest with fake key hit the REAL CallMeBot endpoint which answered
+   "apikey invalid" (outbound delivery path works; honest FAILED shown in lastResult) → test
+   config rows deleted, status back to unconfigured. Submit guards proven: DONE row → 409,
+   unknown id → 404 (no ERP contact; the real POST is left for the user's first manual use).
+   Browser E2E: 41 Submit buttons render; dialog opens with row context; Submit-now correctly
+   disabled until file/link; closed without submitting (no side effects). WhatsApp card verified
+   in Settings (screenshot), mobile 390/390, 0 live console errors. QA lessons: (a) clicking tabs
+   by DOM index [2] silently missed (role=tab exists elsewhere) — ALWAYS click via snapshot refs;
+   (b) console history keeps transient mid-edit compile errors — trust fresh reload + errors cmd.
+
+Unresolved issues / risks & next-phase priorities:
+1. The real multipart POST path is implemented against the verified form structure but has not
+   yet been fired at the ERP with a real file (by design — the user's first manual submit is the
+   test). If Laravel rejects (e.g. extra hidden fields), the dialog surfaces the ERP's exact
+   validation message and nothing local changes — safe failure mode.
+2. CallMeBot is a free personal relay (no SLA); if the student wants guaranteed delivery the
+   next step is Twilio/WhatsApp Business or a self-hosted gateway (config shape already isolated
+   in lib/notify/whatsapp.ts).
+3. Auto-digest is 1/day max; a "send daily at fixed time" option would need a scheduler tick at
+   that time (minor change on top of maybeAutoNotify).
+4. Backlog unchanged: L/H/E columns, digest email (SMTP), TZ anchor, per-semester slot scoping,
+   "mark all read" for notifications.
+5. dev-server-keeper cron (job 430680) must stay alive; preview Caddy 502 self-heals ≤5 min.
