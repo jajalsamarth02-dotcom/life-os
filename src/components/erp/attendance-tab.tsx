@@ -9,6 +9,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Slider } from "@/components/ui/slider";
 import { cn } from "@/lib/utils";
+import { attendanceStatus } from "@/lib/attendance";
 import { fetchAttendance, fetchHistory, qk } from "./api";
 import { HistoryHeatmap } from "./history-heatmap";
 import { SubjectDrawer } from "./subject-drawer";
@@ -26,29 +27,89 @@ import type { HistoryResponse, SubjectView } from "./types";
 
 const SUBJECT_LINE_COLORS = ["#10b981", "#f59e0b", "#84cc16", "#f97316", "#14b8a6", "#a8a29e", "#ef4444"];
 
-/* What-if: attending the next N classes projects (present+N)/(total+N). */
-function WhatIfSlider({ s }: { s: SubjectView }) {
+/*
+ * What-if planner: simulate the next classes two ways —
+ *   Attend n → (present+n)/(total+n)
+ *   Skip n   →  present/(total+n)
+ * The projection re-uses the server's status thresholds (safe ≥ target,
+ * warning ≥ target−5, danger below), so what you see here is exactly how
+ * the app will grade the result after it happens.
+ */
+function WhatIfPlanner({ s }: { s: SubjectView }) {
+  const [mode, setMode] = useState<"attend" | "skip">("attend");
   const [n, setN] = useState(0);
-  const projected = n === 0 ? s.percentage : ((s.present + n) / (s.total + n)) * 100;
+  const futureTotal = s.total + n;
+  const projected =
+    n === 0 || futureTotal === 0
+      ? s.percentage
+      : mode === "attend"
+        ? ((s.present + n) / futureTotal) * 100
+        : (s.present / futureTotal) * 100;
+  const projectedStatus = attendanceStatus(projected, s.targetPct, futureTotal || 1);
+  const c = statusColors(projectedStatus);
+  const delta = projected - s.percentage;
+
   return (
-    <div className="mt-3 rounded-lg bg-muted/60 p-3">
-      <div className="flex items-center justify-between gap-2 text-xs">
-        <span className="flex items-center gap-1.5 font-medium text-muted-foreground">
+    <div className="mt-3 rounded-lg border border-border/60 bg-muted/60 p-3">
+      <div className="flex items-center justify-between gap-2">
+        <span className="flex items-center gap-1.5 text-xs font-medium text-muted-foreground">
           <Zap className="size-3.5 text-amber-500" aria-hidden="true" />
-          If I attend the next <b className="tabular-nums text-foreground">{n}</b>{" "}
-          {n === 1 ? "class" : "classes"}
+          What-if planner
         </span>
-        <span className={cn("font-semibold tabular-nums", n === 0 ? "text-foreground" : statusColors("safe").text)}>
-          → {fmtPct2(projected)}
-        </span>
+        <div
+          className="flex rounded-full border border-border/60 bg-background p-0.5"
+          role="group"
+          aria-label="Simulation mode"
+        >
+          {(["attend", "skip"] as const).map((m) => (
+            <button
+              key={m}
+              type="button"
+              onClick={() => {
+                setMode(m);
+                setN(0);
+              }}
+              aria-pressed={mode === m}
+              className={cn(
+                "rounded-full px-2.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+                mode === m
+                  ? m === "attend"
+                    ? "bg-emerald-500/15 text-emerald-700 dark:text-emerald-400"
+                    : "bg-red-500/15 text-red-700 dark:text-red-400"
+                  : "text-muted-foreground hover:text-foreground"
+              )}
+            >
+              {m === "attend" ? "Attend" : "Skip"}
+            </button>
+          ))}
+        </div>
       </div>
+
+      <p className="mt-2 text-xs text-muted-foreground">
+        If I <b className={mode === "attend" ? "text-emerald-700 dark:text-emerald-400" : "text-red-700 dark:text-red-400"}>
+          {mode === "attend" ? "attend" : "miss"}
+        </b>{" "}
+        the next <b className="tabular-nums text-foreground">{n}</b> {n === 1 ? "class" : "classes"}
+      </p>
+      <div className="mt-0.5 flex items-baseline gap-1.5">
+        <span className={cn("text-lg font-bold tabular-nums", c.text)}>
+          <AnimatedNumber value={projected} suffix="%" />
+        </span>
+        {n > 0 && (
+          <span className={cn("text-[11px] font-medium tabular-nums", c.text)}>
+            ({delta >= 0 ? "+" : "−"}{Math.abs(delta).toFixed(2)} pts)
+          </span>
+        )}
+        <span className="ml-auto text-[10px] text-muted-foreground">target {s.targetPct}%</span>
+      </div>
+
       <Slider
         className="mt-2.5"
         value={[n]}
         min={0}
         max={10}
         step={1}
-        aria-label={`Simulate attending the next classes for ${s.name}`}
+        aria-label={`Simulate ${mode === "attend" ? "attending" : "skipping"} the next classes for ${s.name}`}
         onValueChange={(v) => setN(v[0] ?? 0)}
       />
       <div className="mt-1 flex justify-between text-[10px] text-muted-foreground/70 tabular-nums">
@@ -56,6 +117,18 @@ function WhatIfSlider({ s }: { s: SubjectView }) {
         <span>5</span>
         <span>10</span>
       </div>
+
+      {n > 0 && (
+        <p className={cn("mt-2 text-[11px] leading-snug", c.text)}>
+          {projectedStatus === "safe"
+            ? mode === "attend"
+              ? `Back on track — ${s.targetPct}% target met with ${n} attended.`
+              : `Still at/above the ${s.targetPct}% target.`
+            : projectedStatus === "warning"
+              ? `Within 5 pts of the ${s.targetPct}% target — close, not safe.`
+              : `Below the ${s.targetPct}% target — ${s.classesToTarget} attended ${s.classesToTarget === 1 ? "class" : "classes"} needed to recover.`}
+        </p>
+      )}
     </div>
   );
 }
@@ -171,7 +244,7 @@ function SubjectCard({
           </p>
 
           <div className="mt-auto space-y-2">
-            <WhatIfSlider s={s} />
+            <WhatIfPlanner s={s} />
             <Button
               variant="outline"
               size="sm"

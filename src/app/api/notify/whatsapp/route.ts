@@ -3,6 +3,7 @@ import {
   getWaStatus,
   saveWaConfig,
   setWaEnabled,
+  setWaDigestTime,
   sendWhatsAppText,
   sendPendingDigest,
 } from "@/lib/notify/whatsapp";
@@ -17,11 +18,11 @@ export async function GET() {
 }
 
 /**
- * POST /api/notify/whatsapp — { action: "save" | "enable" | "test" | "digest" }.
+ * POST /api/notify/whatsapp — { action: "save" | "enable" | "setDigestTime" | "test" | "digest" }.
  * Nothing is ever sent while unconfigured or disabled — honest by design.
  */
 export async function POST(req: NextRequest) {
-  let body: { action?: string; phone?: string; apikey?: string; enabled?: boolean };
+  let body: { action?: string; phone?: string; apikey?: string; enabled?: boolean; time?: string | null };
   try {
     body = await req.json();
   } catch {
@@ -40,6 +41,12 @@ export async function POST(req: NextRequest) {
       }
       case "enable": {
         await setWaEnabled(Boolean(body.enabled));
+        const status = await getWaStatus();
+        return NextResponse.json({ ok: true, status });
+      }
+      case "setDigestTime": {
+        const time = typeof body.time === "string" && body.time.trim() ? body.time.trim() : null;
+        await setWaDigestTime(time);
         const status = await getWaStatus();
         return NextResponse.json({ ok: true, status });
       }

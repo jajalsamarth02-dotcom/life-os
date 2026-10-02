@@ -254,13 +254,15 @@ export interface WaStatusResponse {
   lastAutoAt: string | null;
   lastPendingCount: number | null;
   lastResult: string | null;
+  /** "HH:MM" IST when a fixed daily digest is scheduled; null = sync-triggered only. */
+  digestTime: string | null;
 }
 
 export const fetchWaStatus = () => api<WaStatusResponse>("/api/notify/whatsapp");
 
 export const postWaAction = (
-  action: "save" | "enable" | "test" | "digest",
-  payload?: { phone?: string; apikey?: string; enabled?: boolean }
+  action: "save" | "enable" | "setDigestTime" | "test" | "digest",
+  payload?: { phone?: string; apikey?: string; enabled?: boolean; time?: string | null }
 ) =>
   api<{ ok?: boolean; status?: WaStatusResponse; snippet?: string; text?: string; message?: string }>(
     "/api/notify/whatsapp",

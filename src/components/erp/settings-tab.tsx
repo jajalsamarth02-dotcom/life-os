@@ -25,7 +25,9 @@ import {
   ShieldCheck,
   Sparkles,
   Target,
+  Timer,
   TriangleAlert,
+  X,
 } from "lucide-react";
 import { toast } from "sonner";
 import { isIOS, promptInstall, useCanInstall, useIsInstalled } from "./install-prompt";
@@ -1320,7 +1322,8 @@ function WhatsAppCard() {
   const { data: status } = useQuery({ queryKey: qk.waStatus, queryFn: fetchWaStatus });
   const [phone, setPhone] = useState("");
   const [apikey, setApikey] = useState("");
-  const [busy, setBusy] = useState<null | "save" | "test" | "digest">(null);
+  const [digestTime, setDigestTime] = useState("");
+  const [busy, setBusy] = useState<null | "save" | "test" | "digest" | "time" | "clearTime">(null);
 
   const refresh = () => qc.invalidateQueries({ queryKey: qk.waStatus });
 
@@ -1361,7 +1364,9 @@ function WhatsAppCard() {
       await postWaAction("enable", { enabled });
       toast[enabled ? "success" : "info"](enabled ? "WhatsApp alerts enabled" : "WhatsApp alerts disabled", {
         description: enabled
-          ? "A short pending-work digest is sent at most once a day, right after a scheduled sync, when something changed."
+          ? status?.digestTime
+            ? `A pending-work digest arrives daily at ${status.digestTime} IST, plus sync-triggered alerts when something changed.`
+            : "A short pending-work digest is sent at most once a day, right after a scheduled sync, when something changed."
           : undefined,
       });
       refresh();
@@ -1370,8 +1375,29 @@ function WhatsAppCard() {
     }
   };
 
+  const saveDigestTime = async (time: string | null) => {
+    setBusy(time ? "time" : "clearTime");
+    try {
+      await postWaAction("setDigestTime", { time });
+      toast.success(
+        time ? `Daily digest scheduled for ${time} IST` : "Fixed daily digest removed",
+        {
+          description: time
+            ? "Sent every day at that IST time, even if nothing changed since the last sync."
+            : "Auto digests now fire only after scheduled syncs when something changed.",
+        }
+      );
+      refresh();
+    } catch (e) {
+      toast.error("Could not save the digest time", { description: e instanceof ApiError ? e.message : "Try again." });
+    } finally {
+      setBusy(null);
+    }
+  };
+
   const enabled = status?.enabled ?? false;
   const configured = status?.configured ?? false;
+  const savedTime = status?.digestTime ?? null;
 
   return (
     <Card className="rounded-xl border-border/60">
@@ -1416,7 +1442,10 @@ function WhatsAppCard() {
             <Badge variant="secondary" className="font-mono text-[10px]">{status?.phoneMasked}</Badge>
             {enabled ? (
               <span className="flex items-center gap-1 text-emerald-600 dark:text-emerald-400">
-                <BellRing className="size-3" aria-hidden="true" /> auto-digest on (max 1/day, after scheduled syncs when something changed)
+                <BellRing className="size-3" aria-hidden="true" />
+                {savedTime
+                  ? `auto-digest on — daily at ${savedTime} IST, plus after syncs when something changed`
+                  : "auto-digest on (max 1/day, after scheduled syncs when something changed)"}
               </span>
             ) : (
               <span>Sending is off — flip the switch to enable auto digests.</span>
@@ -1454,6 +1483,63 @@ function WhatsAppCard() {
             {busy === "digest" ? <Loader2 className="size-3.5 animate-spin" aria-hidden="true" /> : <CalendarClock className="size-3.5" aria-hidden="true" />}
             Send pending-work digest now
           </Button>
+        </div>
+
+        <div className="rounded-lg border border-border/60 bg-muted/40 p-3">
+          <div className="flex items-center justify-between gap-2">
+            <span className="flex items-center gap-1.5 text-xs font-medium">
+              <Timer className="size-3.5 text-primary" aria-hidden="true" />
+              Daily digest time (IST)
+              {savedTime && (
+                <Badge variant="outline" className="border-primary/40 font-mono text-[10px] text-primary">
+                  {savedTime}
+                </Badge>
+              )}
+            </span>
+            <span className="text-[10px] text-muted-foreground">optional</span>
+          </div>
+          <p className="mt-1 text-[11px] leading-snug text-muted-foreground">
+            Schedule one guaranteed digest per day at a fixed IST time — sent even when nothing changed
+            since the last sync. Leave empty to only notify after scheduled syncs.
+          </p>
+          <div className="mt-2 flex flex-wrap items-center gap-2">
+            <Input
+              type="time"
+              step={60}
+              className="h-9 w-32 font-mono text-xs"
+              value={digestTime}
+              onChange={(e) => setDigestTime(e.target.value)}
+              placeholder={savedTime ?? "20:30"}
+              aria-label="Daily digest time in IST, 24-hour"
+            />
+            <Button
+              size="sm"
+              variant="outline"
+              className="h-9 gap-1.5"
+              disabled={!configured || busy !== null || !digestTime}
+              onClick={() => saveDigestTime(digestTime)}
+              aria-label="Save daily digest time"
+            >
+              {busy === "time" ? <Loader2 className="size-3.5 animate-spin" aria-hidden="true" /> : <Timer className="size-3.5" aria-hidden="true" />}
+              Schedule
+            </Button>
+            {savedTime && (
+              <Button
+                size="sm"
+                variant="ghost"
+                className="h-9 gap-1.5 text-muted-foreground hover:text-destructive"
+                disabled={busy !== null}
+                onClick={() => {
+                  setDigestTime("");
+                  void saveDigestTime(null);
+                }}
+                aria-label="Remove daily digest schedule"
+              >
+                {busy === "clearTime" ? <Loader2 className="size-3.5 animate-spin" aria-hidden="true" /> : <X className="size-3.5" aria-hidden="true" />}
+                Remove
+              </Button>
+            )}
+          </div>
         </div>
 
         {status?.lastResult && (

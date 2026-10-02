@@ -19,6 +19,26 @@ const SETTING_ENABLED = "notify.wa.enabled";
 const SETTING_LAST_AUTO = "notify.wa.lastAutoAt";
 const SETTING_LAST_COUNT = "notify.wa.lastPendingCount";
 const SETTING_LAST_RESULT = "notify.wa.lastResult";
+const SETTING_DIGEST_TIME = "notify.wa.digestTime";
+const SETTING_LAST_DIGEST_DAY = "notify.wa.lastDigestDay";
+
+/** IST date helpers — the daily digest anchors to India/Kolkata wall-clock time. */
+const IST_PARTS = new Intl.DateTimeFormat("en-CA", {
+  timeZone: "Asia/Kolkata",
+  year: "numeric",
+  month: "2-digit",
+  day: "2-digit",
+  hour: "2-digit",
+  minute: "2-digit",
+  hour12: false,
+});
+
+function istNow(): { day: string; minutes: number } {
+  const parts = Object.fromEntries(IST_PARTS.formatToParts(new Date()).map((p) => [p.type, p.value]));
+  const hour = parseInt(parts.hour === "24" ? "0" : parts.hour, 10);
+  const day = `${parts.year}-${parts.month}-${parts.day}`;
+  return { day, minutes: hour * 60 + parseInt(parts.minute, 10) };
+}
 
 export interface WaConfig {
   /** International format without + (CallMeBot), e.g. 9198XXXXXXXX. */
@@ -33,6 +53,8 @@ export interface WaStatus {
   lastAutoAt: string | null;
   lastPendingCount: number | null;
   lastResult: string | null;
+  /** "HH:MM" in IST when a fixed daily digest is scheduled; null = sync-triggered only. */
+  digestTime: string | null;
 }
 
 async function getRawSetting(key: string): Promise<string | null> {
@@ -74,13 +96,30 @@ export async function setWaEnabled(enabled: boolean): Promise<void> {
   await setRawSetting(SETTING_ENABLED, enabled ? "1" : "0");
 }
 
+/**
+ * Set (or clear) the fixed daily digest time, "HH:MM" in IST.
+ * Clearing also resets the once-per-day latch so a freshly chosen later
+ * time can still fire on the same day.
+ */
+export async function setWaDigestTime(time: string | null): Promise<void> {
+  if (time === null || time === "") {
+    await db.setting.deleteMany({ where: { key: { in: [SETTING_DIGEST_TIME, SETTING_LAST_DIGEST_DAY] } } });
+    return;
+  }
+  if (!/^([01]\d|2[0-3]):[0-5]\d$/.test(time)) {
+    throw new Error("Digest time must be HH:MM (24h), e.g. 20:30.");
+  }
+  await setRawSetting(SETTING_DIGEST_TIME, time);
+}
+
 export async function getWaStatus(): Promise<WaStatus> {
-  const [enabled, config, lastAutoAt, lastCount, lastResult] = await Promise.all([
+  const [enabled, config, lastAutoAt, lastCount, lastResult, digestTime] = await Promise.all([
     getRawSetting(SETTING_ENABLED),
     getWaConfig(),
     getRawSetting(SETTING_LAST_AUTO),
     getRawSetting(SETTING_LAST_COUNT),
     getRawSetting(SETTING_LAST_RESULT),
+    getRawSetting(SETTING_DIGEST_TIME),
   ]);
   const phone = config?.phone ?? null;
   return {
@@ -90,6 +129,7 @@ export async function getWaStatus(): Promise<WaStatus> {
     lastAutoAt,
     lastPendingCount: lastCount ? parseInt(lastCount, 10) : null,
     lastResult,
+    digestTime: digestTime && /^([01]\d|2[0-3]):[0-5]\d$/.test(digestTime) ? digestTime : null,
   };
 }
 
@@ -170,6 +210,36 @@ async function countPendingAla(): Promise<number> {
   return db.reminder.count({
     where: { type: "ASSIGNMENT", status: "ACTIVE", externalId: { startsWith: ASSIGNMENT_EXT_PREFIX } },
   });
+}
+
+/**
+ * Fixed-time daily digest, anchored to IST wall-clock time. Called once a
+ * minute by the background scheduler. Fires at most once per IST day (a
+ * day-latch makes up missed minutes fire late instead of never, e.g. after
+ * a server restart), regardless of whether anything changed — that is the
+ * point of a daily digest. Never throws.
+ */
+export async function maybeDailyDigest(): Promise<void> {
+  try {
+    const [enabled, config, timeStr] = await Promise.all([
+      getRawSetting(SETTING_ENABLED),
+      getWaConfig(),
+      getRawSetting(SETTING_DIGEST_TIME),
+    ]);
+    if (enabled !== "1" || !config || !timeStr || !/^([01]\d|2[0-3]):[0-5]\d$/.test(timeStr)) return;
+
+    const { day, minutes } = istNow();
+    const lastDay = await getRawSetting(SETTING_LAST_DIGEST_DAY);
+    if (lastDay === day) return;
+
+    const [h, m] = timeStr.split(":").map(Number);
+    if (minutes < h * 60 + m) return; // not yet due today
+
+    await sendPendingDigest("auto");
+    await setRawSetting(SETTING_LAST_DIGEST_DAY, day);
+  } catch (e) {
+    console.error("[erp-sync] whatsapp daily digest failed:", e);
+  }
 }
 
 /**
