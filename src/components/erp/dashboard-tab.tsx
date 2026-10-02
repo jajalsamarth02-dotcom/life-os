@@ -437,7 +437,14 @@ export function DashboardTab({
     const first = pts.find((p) => new Date(p.t).getTime() >= cutoff) ?? pts[0];
     const last = pts[pts.length - 1];
     const d = last.percentage - first.percentage;
-    return Math.abs(d) < 0.005 ? null : d;
+    if (Math.abs(d) < 0.005) return null;
+    // Be honest about the window: when tracked history is younger than the
+    // 7-day span (e.g. live tracking just started), label the real span.
+    const spanDays = Math.max(
+      0,
+      (new Date(last.t).getTime() - new Date(first.t).getTime()) / 86_400_000
+    );
+    return { delta: d, spanDays, fullWeek: spanDays >= 6.5 };
   }, [history.data]);
 
   if (isPending) {
@@ -543,13 +550,22 @@ export function DashboardTab({
                   <span
                     className={cn(
                       "rounded-full px-2 py-0.5 text-[11px] font-semibold tabular-nums",
-                      weekDelta >= 0
+                      weekDelta.delta >= 0
                         ? "bg-emerald-500/10 text-emerald-600 dark:text-emerald-400"
                         : "bg-red-500/10 text-red-600 dark:text-red-400"
                     )}
-                    title="Change over the last 7 days"
+                    title={
+                      weekDelta.fullWeek
+                        ? "Change over the last 7 days"
+                        : `Change over the ${weekDelta.spanDays < 1 ? "first day" : `last ${Math.max(1, Math.round(weekDelta.spanDays))} day(s)`} of tracked history`
+                    }
                   >
-                    {weekDelta >= 0 ? "▲" : "▼"} {Math.abs(weekDelta).toFixed(2)} pts / 7d
+                    {weekDelta.delta >= 0 ? "▲" : "▼"} {Math.abs(weekDelta.delta).toFixed(2)} pts{" "}
+                    {weekDelta.fullWeek
+                      ? "/ 7d"
+                      : weekDelta.spanDays < 1
+                        ? "· day 1"
+                        : `/ ${Math.max(1, Math.round(weekDelta.spanDays))}d`}
                   </span>
                 )}
               </div>
@@ -648,7 +664,7 @@ export function DashboardTab({
       </Card>
 
       {/* Row 2.5 — today's schedule / weekly timetable */}
-      {subjects.length > 0 && <TimetableCard subjects={subjects} />}
+      {subjects.length > 0 && <TimetableCard subjects={subjects} mode={data.mode} />}
 
       {/* Row 3 — reminders preview + ERP status */}
       <div className="grid gap-4 lg:grid-cols-2">

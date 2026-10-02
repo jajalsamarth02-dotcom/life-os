@@ -33,11 +33,11 @@ export async function GET() {
     const meta = new Map<string, string>();
     for (const s of subjects) meta.set(s.code, s.name);
 
-    // When partitioned, the overall line is rebuilt from the filtered
-    // subjects at each shared capture time (snapshots never store semester).
-    const scopedOverall = semesterFilter
-      ? new Map<string, { present: number; total: number }>()
-      : null;
+    // Per-subject series (filtered codes only). When partitioned, the overall
+    // line is rebuilt from these at every capture time — each subject
+    // contributes its LATEST snapshot at or before that time (carry-forward),
+    // because unchanged subjects are not re-recorded on every sync.
+    const scopedOverall = semesterFilter ? true : false;
 
     for (const snap of snapshots) {
       if (snap.subjectCode === OVERALL_KEY) {
@@ -51,7 +51,7 @@ export async function GET() {
         }
         continue;
       }
-      if (semesterFilter && !allowedCodes.has(snap.subjectCode)) continue;
+      if (scopedOverall && !allowedCodes.has(snap.subjectCode)) continue;
 
       const point = {
         t: snap.capturedAt.toISOString(),
@@ -62,22 +62,37 @@ export async function GET() {
       const arr = subjectMap.get(snap.subjectCode) ?? [];
       arr.push(point);
       subjectMap.set(snap.subjectCode, arr);
-
-      if (scopedOverall) {
-        const acc = scopedOverall.get(point.t) ?? { present: 0, total: 0 };
-        acc.present += snap.present;
-        acc.total += snap.total;
-        scopedOverall.set(point.t, acc);
-      }
     }
 
     if (scopedOverall) {
-      for (const [t, sums] of [...scopedOverall.entries()].sort(([a], [b]) => a.localeCompare(b))) {
+      const times = [...new Set([...subjectMap.values()].flat().map((p) => p.t))].sort((a, b) =>
+        a.localeCompare(b)
+      );
+      const codes = [...subjectMap.keys()];
+      const pointers = new Map<string, number>(codes.map((c) => [c, 0]));
+      const latest = new Map<string, { present: number; total: number }>();
+      for (const t of times) {
+        let present = 0;
+        let total = 0;
+        for (const code of codes) {
+          const arr = subjectMap.get(code)!;
+          let idx = pointers.get(code)!;
+          while (idx < arr.length && arr[idx].t <= t) {
+            latest.set(code, { present: arr[idx].present, total: arr[idx].total });
+            idx++;
+          }
+          pointers.set(code, idx);
+          const cur = latest.get(code);
+          if (cur) {
+            present += cur.present;
+            total += cur.total;
+          }
+        }
         overall.push({
           t,
-          percentage: sums.total > 0 ? (sums.present / sums.total) * 100 : 0,
-          present: sums.present,
-          total: sums.total,
+          percentage: total > 0 ? (present / total) * 100 : 0,
+          present,
+          total,
         });
       }
     }

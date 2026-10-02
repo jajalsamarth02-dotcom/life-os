@@ -35,9 +35,15 @@ function cellColor(pct: number, target: number): string {
 export function HistoryHeatmap({
   overall,
   target,
+  focusKey = null,
+  onSelectDay,
 }: {
   overall: HistoryPoint[];
   target: number;
+  /** Day key (yyyy-MM-dd) highlighted from outside — e.g. a trend-chart click. */
+  focusKey?: string | null;
+  /** Click a day cell to select/deselect it (cross-links with the trend chart). */
+  onSelectDay?: (key: string | null) => void;
 }) {
   const [hover, setHover] = React.useState<DayCell | null>(null);
 
@@ -89,7 +95,8 @@ export function HistoryHeatmap({
 
   const daysWithData = weeks.flat().filter((c) => c.point).length;
   const latest = weeks.flat().filter((c) => c.point).at(-1)?.point ?? null;
-  const caption = hover?.point ?? latest;
+  const focusedCell = weeks.flat().find((c) => c.key === focusKey && c.point) ?? null;
+  const caption = hover?.point ?? focusedCell?.point ?? latest;
 
   return (
     <Card className="rounded-xl border-border/60">
@@ -138,24 +145,36 @@ export function HistoryHeatmap({
                         {col.map((cell) => {
                           const pct = cell.point?.percentage ?? null;
                           const future = cell.date > new Date();
+                          const focused = focusKey != null && cell.key === focusKey;
+                          const clickable =
+                            onSelectDay != null && cell.point != null && !future;
                           return (
                             <div
                               key={cell.key}
                               title={
                                 cell.point
-                                  ? `${format(cell.date, "d MMM yyyy")} — ${pct!.toFixed(2)}% (${cell.point.present}/${cell.point.total} classes)`
+                                  ? `${format(cell.date, "d MMM yyyy")} — ${pct!.toFixed(2)}% (${cell.point.present}/${cell.point.total} classes)${clickable ? " — click to focus" : ""}`
                                   : `${format(cell.date, "d MMM yyyy")} — no data`
                               }
                               onMouseEnter={() => setHover(cell)}
                               onMouseLeave={() => setHover(null)}
+                              onClick={clickable ? () => onSelectDay!(focusKey === cell.key ? null : cell.key) : undefined}
                               style={{ animationDelay: `${wi * 24}ms` }}
+                              aria-label={
+                                cell.point
+                                  ? `${format(cell.date, "d MMM yyyy")} attendance ${pct!.toFixed(2)}%${focused ? " (focused)" : ""}`
+                                  : undefined
+                              }
                               className={cn(
-                                "erp-heat-cell size-3.5 rounded-[3px] transition-colors",
+                                "erp-heat-cell size-3.5 rounded-[3px] transition-all",
                                 future
                                   ? "bg-transparent"
                                   : cell.point
                                     ? cellColor(pct!, target)
-                                    : "bg-muted hover:bg-muted/70"
+                                    : "bg-muted hover:bg-muted/70",
+                                clickable && "cursor-pointer",
+                                focused &&
+                                  "z-10 scale-[1.35] ring-2 ring-primary ring-offset-1 ring-offset-background"
                               )}
                             />
                           );
@@ -169,10 +188,22 @@ export function HistoryHeatmap({
 
             {/* caption + legend */}
             <div className="flex flex-wrap items-center justify-between gap-2">
-              <p className="min-h-4 text-xs text-muted-foreground tabular-nums" aria-live="polite">
+              <p className="min-h-4 flex items-center gap-1.5 text-xs text-muted-foreground tabular-nums" aria-live="polite">
+                {focusedCell && !hover && (
+                  <span className="inline-flex size-1.5 rounded-full bg-primary" aria-hidden="true" />
+                )}
                 {caption
                   ? `${format(new Date(caption.t), "EEE d MMM")} — ${caption.percentage.toFixed(2)}% (${caption.present}/${caption.total} classes)`
                   : "Hover a day for details"}
+                {focusedCell && !hover && (
+                  <button
+                    type="button"
+                    onClick={() => onSelectDay?.(null)}
+                    className="ml-1 rounded px-1 text-[10px] font-medium text-primary underline-offset-2 hover:underline"
+                  >
+                    clear
+                  </button>
+                )}
               </p>
               <div className="flex items-center gap-1.5 text-[10px] text-muted-foreground">
                 <span className="tabular-nums">target {target}%</span>

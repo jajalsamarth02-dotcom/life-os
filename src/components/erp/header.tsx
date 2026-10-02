@@ -337,6 +337,33 @@ export function AppHeader({ onOpenPalette }: { onOpenPalette?: () => void }) {
   const lastSyncAt = sync?.lastSuccessAt ?? sync?.lastSyncAt ?? null;
   const isSyncing = sync?.status === "syncing";
 
+  // Sync freshness: within one cadence (15 min) + a grace window = fresh;
+  // older = stale; the engine retrying after failures = degraded.
+  const failures = sync?.consecutiveFailures ?? 0;
+  const ageMin =
+    lastSyncAt != null ? (now - new Date(lastSyncAt).getTime()) / 60_000 : null;
+  const freshness: "fresh" | "stale" | "degraded" | "none" = isSyncing
+    ? "fresh"
+    : failures > 0
+      ? "degraded"
+      : ageMin == null
+        ? "none"
+        : ageMin <= 22
+          ? "fresh"
+          : "stale";
+  const freshnessDot = {
+    fresh: "bg-emerald-500 erp-pulse-dot",
+    stale: "bg-amber-500",
+    degraded: "bg-red-500 erp-pulse-dot",
+    none: "bg-muted-foreground/40",
+  }[freshness];
+  const freshnessLabel = {
+    fresh: "Data is fresh — synced within the last few minutes.",
+    stale: "Data may be outdated — no successful sync recently.",
+    degraded: "Sync is failing — showing the last data that was still valid.",
+    none: "Never synced yet.",
+  }[freshness];
+
   const syncNow = useMutation({
     mutationFn: postSync,
     onSuccess: (res) => {
@@ -376,11 +403,18 @@ export function AppHeader({ onOpenPalette }: { onOpenPalette?: () => void }) {
           {lastSyncAt ? (
             <Tooltip>
               <TooltipTrigger asChild>
-                <span className="hidden shrink-0 cursor-default whitespace-nowrap text-xs text-muted-foreground md:inline-flex">
+                <span className="hidden shrink-0 cursor-default items-center gap-1.5 whitespace-nowrap text-xs text-muted-foreground md:inline-flex">
+                  <span
+                    className={cn("size-1.5 shrink-0 rounded-full", freshnessDot)}
+                    aria-hidden="true"
+                  />
                   Last ERP sync:&nbsp;<span className="font-medium text-foreground/80">{ago(lastSyncAt, now)}</span>
                 </span>
               </TooltipTrigger>
-              <TooltipContent>{fmtDT(lastSyncAt)}</TooltipContent>
+              <TooltipContent>
+                <p>{fmtDT(lastSyncAt)}</p>
+                <p className="text-muted-foreground">{freshnessLabel}</p>
+              </TooltipContent>
             </Tooltip>
           ) : (
             !data && <Skeleton className="hidden h-4 w-28 md:block" />

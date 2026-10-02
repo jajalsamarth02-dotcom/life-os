@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import { motion, useSpring, useTransform } from "framer-motion";
 import {
   Area,
@@ -15,7 +15,7 @@ import {
   YAxis,
 } from "recharts";
 import { format } from "date-fns";
-import { Activity, Download } from "lucide-react";
+import { Activity, CalendarCheck, Download, X } from "lucide-react";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
@@ -143,10 +143,16 @@ export function TrendSection({
   history,
   subjects,
   target,
+  focusDay = null,
+  onFocusDay,
 }: {
   history: HistoryResponse | undefined;
   subjects: SubjectView[];
   target: number;
+  /** Day key (yyyy-MM-dd) focused from outside — e.g. a heatmap cell click. */
+  focusDay?: string | null;
+  /** Click a chart point to focus that day (cross-links with the heatmap). */
+  onFocusDay?: (key: string | null) => void;
 }) {
   const [selected, setSelected] = useState<string[]>([]);
   const [rangeDays, setRangeDays] = useState(14);
@@ -188,6 +194,7 @@ export function TrendSection({
       const row: Record<string, number | string | null> = {
         t,
         label,
+        dayKey,
         overall: overallByT.get(t)?.percentage ?? null,
       };
       selected.forEach((code) => {
@@ -226,6 +233,38 @@ export function TrendSection({
   const targetLabel = singleSubject ? `${singleSubject.code} target ${singleSubject.targetPct}%` : `target ${target}%`;
   const targetIsCustom = singleSubject ? singleSubject.hasCustomTarget : false;
 
+  // Cross-link: clicking a chart point focuses that DAY in the heatmap and
+  // vice versa. Dots appear only for the focused day's points.
+  const chartClick = (state: unknown) => {
+    if (!onFocusDay) return;
+    const payload = (state as { activePayload?: Array<{ payload?: { dayKey?: string } }> })
+      ?.activePayload?.[0]?.payload;
+    if (payload?.dayKey) onFocusDay(focusDay === payload.dayKey ? null : payload.dayKey);
+  };
+  const focusDot = (p: {
+    cx?: number;
+    cy?: number;
+    payload?: { dayKey?: string };
+    key?: React.Key;
+  }) => {
+    if (p.cx == null || p.cy == null) return <g key={p.key} />;
+    const focused = focusDay != null && p.payload?.dayKey === focusDay;
+    if (!focused) return <g key={p.key} />;
+    return (
+      <g key={p.key}>
+        <circle cx={p.cx} cy={p.cy} r={6.5} fill="#10b981" fillOpacity={0.22} />
+        <circle
+          cx={p.cx}
+          cy={p.cy}
+          r={3.4}
+          fill="#10b981"
+          stroke="var(--background)"
+          strokeWidth={1.5}
+        />
+      </g>
+    );
+  };
+
   return (
     <Card className="overflow-hidden rounded-xl border-border/60">
       <CardHeader className="flex flex-col gap-3 pb-2 sm:flex-row sm:items-start sm:justify-between">
@@ -263,6 +302,22 @@ export function TrendSection({
               {d}d
             </button>
           ))}
+          {focusDay != null && (
+            <span className="inline-flex items-center gap-1 rounded-md border border-primary/40 bg-primary/10 px-2 py-1 text-[11px] font-medium text-primary">
+              <CalendarCheck className="size-3" aria-hidden="true" />
+              {format(new Date(`${focusDay}T00:00:00`), "d MMM")}
+              {onFocusDay && (
+                <button
+                  type="button"
+                  onClick={() => onFocusDay(null)}
+                  className="ml-0.5 rounded-sm text-primary/70 transition-colors hover:text-primary"
+                  aria-label="Clear focused day"
+                >
+                  <X className="size-3" aria-hidden="true" />
+                </button>
+              )}
+            </span>
+          )}
         </div>
       </CardHeader>
       <CardContent className="space-y-3">
@@ -305,10 +360,10 @@ export function TrendSection({
           })}
         </div>
 
-        <div className="h-56 w-full sm:h-64">
+        <div className="h-56 w-full sm:h-64" style={{ cursor: onFocusDay ? "pointer" : undefined }}>
           <ResponsiveContainer width="100%" height="100%">
             {selected.length === 0 ? (
-              <AreaChart data={chartRows} margin={{ top: 6, right: 8, left: -18, bottom: 0 }}>
+              <AreaChart data={chartRows} margin={{ top: 6, right: 8, left: -18, bottom: 0 }} onClick={chartClick}>
                 <defs>
                   <linearGradient id="overallFill" x1="0" y1="0" x2="0" y2="1">
                     <stop offset="0%" stopColor="#10b981" stopOpacity={0.35} />
@@ -341,13 +396,13 @@ export function TrendSection({
                   stroke="#10b981"
                   strokeWidth={2.5}
                   fill="url(#overallFill)"
-                  dot={false}
+                  dot={onFocusDay ? focusDot : false}
                   activeDot={{ r: 4 }}
                   connectNulls
                 />
               </AreaChart>
             ) : (
-              <LineChart data={chartRows} margin={{ top: 6, right: 8, left: -18, bottom: 0 }}>
+              <LineChart data={chartRows} margin={{ top: 6, right: 8, left: -18, bottom: 0 }} onClick={chartClick}>
                 <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" vertical={false} />
                 <ReferenceLine
                   y={targetLine}
@@ -368,7 +423,7 @@ export function TrendSection({
                   labelStyle={{ fontSize: 12 }}
                   contentStyle={{ borderRadius: 10, border: "1px solid var(--border)", background: "var(--card)", fontSize: 12 }}
                 />
-                <Line type="monotone" dataKey="overall" stroke="#10b981" strokeWidth={3} dot={false} activeDot={{ r: 4 }} connectNulls />
+                <Line type="monotone" dataKey="overall" stroke="#10b981" strokeWidth={3} dot={onFocusDay ? focusDot : false} activeDot={{ r: 4 }} connectNulls />
                 {selected.map((code) => (
                   <Line
                     key={code}

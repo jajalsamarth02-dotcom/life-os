@@ -191,6 +191,8 @@ function SubjectCard({
 
 export function AttendanceTab({ onOpenSettings }: { onOpenSettings: () => void }) {
   const [selectedCode, setSelectedCode] = useState<string | null>(null);
+  // Day focused jointly by the trend chart and the history heatmap.
+  const [focusDay, setFocusDay] = useState<string | null>(null);
   const { data, isPending, isError, error } = useQuery({
     queryKey: qk.attendance,
     queryFn: fetchAttendance,
@@ -331,11 +333,22 @@ export function AttendanceTab({ onOpenSettings }: { onOpenSettings: () => void }
       </Card>
 
       {/* Trend chart (from sync snapshots) */}
-      <TrendSection history={history.data} subjects={subjects} target={target} />
+      <TrendSection
+        history={history.data}
+        subjects={subjects}
+        target={target}
+        focusDay={focusDay}
+        onFocusDay={setFocusDay}
+      />
 
       {/* Daily history heatmap (from sync snapshots) */}
       {history.data && history.data.overall.length > 0 && (
-        <HistoryHeatmap overall={history.data.overall} target={target} />
+        <HistoryHeatmap
+          overall={history.data.overall}
+          target={target}
+          focusKey={focusDay}
+          onSelectDay={setFocusDay}
+        />
       )}
 
       {/* Subject grid */}

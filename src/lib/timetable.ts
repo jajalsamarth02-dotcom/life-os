@@ -74,11 +74,36 @@ export async function ensureDemoTimetable(): Promise<void> {
   await setRawSetting(SEED_FLAG, "1");
 }
 
+/**
+ * All timetable slots, ordered Mon-first within each day.
+ *
+ * LIVE-mode integrity: the demo simulator seeds a synthetic Mon–Sat schedule
+ * once. When demo mode is OFF those rows reference deactivated demo subjects,
+ * so they are hidden — the schedule must never advertise classes the ERP does
+ * not know about (specs #6 "only real ERP data" and #13 "no fake data").
+ * Personal slots whose subject later disappears from the ERP are hidden too.
+ * Rows stay in the DB so switching back to demo mode restores the sample week.
+ */
 export async function listSlots(): Promise<SlotRow[]> {
-  const slots = await db.timetableSlot.findMany({
-    orderBy: [{ dayOfWeek: "asc" }, { startMin: "asc" }],
-  });
-  return slots.map((s) => ({
+  const [slots, settings] = await Promise.all([
+    db.timetableSlot.findMany({
+      orderBy: [{ dayOfWeek: "asc" }, { startMin: "asc" }],
+    }),
+    getSettings(),
+  ]);
+  let visible = slots;
+  if (!settings.demoMode) {
+    const activeCodes = new Set(
+      (
+        await db.subject.findMany({
+          where: { active: true },
+          select: { code: true },
+        })
+      ).map((s) => s.code)
+    );
+    visible = slots.filter((s) => activeCodes.has(s.subjectCode));
+  }
+  return visible.map((s) => ({
     id: s.id,
     dayOfWeek: s.dayOfWeek,
     startMin: s.startMin,

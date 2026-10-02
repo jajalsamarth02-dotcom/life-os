@@ -41,7 +41,7 @@ import { cn } from "@/lib/utils";
 import { downloadTimetableIcs } from "@/lib/ics";
 import { createSlot, deleteSlot, fetchTimetable, qk, ApiError, type SlotConflict } from "./api";
 import { useNow } from "./shared";
-import type { SubjectView, TimetableSlotRow } from "./types";
+import type { AppMode, SubjectView, TimetableSlotRow } from "./types";
 
 const DAY_NAMES = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
 const WEEK_ORDER = [1, 2, 3, 4, 5, 6, 0]; // Mon → Sun
@@ -120,7 +120,13 @@ function SlotChip({
 
 /* ------------------------------------------------------------------ */
 
-function ManageTimetableDialog({ subjects }: { subjects: SubjectView[] }) {
+function ManageTimetableDialog({
+  subjects,
+  mode = "demo",
+}: {
+  subjects: SubjectView[];
+  mode?: AppMode;
+}) {
   const qc = useQueryClient();
   const [open, setOpen] = useState(false);
   const [day, setDay] = useState("1");
@@ -199,8 +205,9 @@ function ManageTimetableDialog({ subjects }: { subjects: SubjectView[] }) {
             </Button>
           </DialogTitle>
           <DialogDescription className="text-xs">
-            The demo ERP seeded a sample schedule — adjust it to match your real classes. Personal slots persist
-            independently of synchronization.
+            {mode === "live"
+              ? "The ERP does not publish a timetable page, so add your real weekly classes here yourself. Personal slots persist independently of synchronization."
+              : "The demo ERP seeded a sample schedule — adjust it to match your real classes. Personal slots persist independently of synchronization."}
           </DialogDescription>
         </DialogHeader>
 
@@ -336,7 +343,13 @@ function ManageTimetableDialog({ subjects }: { subjects: SubjectView[] }) {
 
 /* ------------------------------------------------------------------ */
 
-export function TimetableCard({ subjects }: { subjects: SubjectView[] }) {
+export function TimetableCard({
+  subjects,
+  mode = "demo",
+}: {
+  subjects: SubjectView[];
+  mode?: AppMode;
+}) {
   const now = useNow(30_000);
   const nowDay = new Date(now).getDay();
   const nowMin = new Date(now).getHours() * 60 + new Date(now).getMinutes();
@@ -370,7 +383,7 @@ export function TimetableCard({ subjects }: { subjects: SubjectView[] }) {
             {todaySlots.length === 0 ? "Nothing planned" : `${todaySlots.length} class${todaySlots.length === 1 ? "" : "es"} today`}
           </p>
         </div>
-        <ManageTimetableDialog subjects={subjects} />
+        <ManageTimetableDialog subjects={subjects} mode={mode} />
         <Button
           variant="ghost"
           size="icon"
@@ -404,7 +417,11 @@ export function TimetableCard({ subjects }: { subjects: SubjectView[] }) {
           <div className="flex flex-col items-center gap-1.5 rounded-xl border border-dashed border-border/70 py-8 text-center">
             <CalendarDays className="size-6 text-muted-foreground/60" aria-hidden="true" />
             <p className="text-sm font-medium">No classes today</p>
-            <p className="text-xs text-muted-foreground">Enjoy the free day — or add your classes via Manage.</p>
+            <p className="max-w-xs text-xs text-muted-foreground">
+              {mode === "live" && slots.length === 0
+                ? "Your weekly schedule is empty — the ERP doesn’t publish one, so add your real classes via Manage."
+                : "Enjoy the free day — or add your classes via Manage."}
+            </p>
           </div>
         ) : (
           <div className="space-y-2">

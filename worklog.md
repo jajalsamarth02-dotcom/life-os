@@ -593,3 +593,71 @@ Stage Summary:
 - Semester partition (Task 7) independently re-verified end-to-end on REAL ERP live data: API filter, Settings card, badges, palette, honest empty states — all correct; feature request fully satisfied.
 - Mobile overflow eliminated (390px: no horizontal pan on any tab); desktop + dark mode regression-free; lint clean.
 - Note for future rounds: a concurrent session may share the agent-browser daemon — viewport/refs can flip mid-QA; do viewport-sensitive checks in a single call. Backlog from Task 7 stands (timetable semester-scoping, L/H/E totals, digest email).
+
+---
+Task ID: 9 (webDevReview round 6, trace 1a0fc2dd5ff09b15-cron-agent-loop-202610021915)
+Agent: Z.ai Code (main orchestrator)
+Task: Status assessment + agent-browser QA of the LIVE app + data-integrity fixes (fake demo classes, history rebuild) + trend↔heatmap cross-link + sync-freshness styling
+
+Current project status / assessment:
+- App is LIVE (real account jajaldharmendra02@gmail.com, demo OFF, semester 5, 8 real subjects,
+  overall 66.67% = 2 present / 3 classes). QA sweep immediately surfaced a user-visible integrity
+  violation: the header next-class chip advertised "MA-305 ends in 32 min" — a FAKE demo-era
+  timetable slot — and 26 demo slots (DBMS-301, CS-302, …) were still being served by
+  GET /api/timetable in live mode. Violates specs #6/#13, so fixing this took priority.
+
+Completed modifications / verified:
+1. BUG — DEMO TIMETABLE SLOTS LEAKED INTO LIVE MODE (spec #6/#13):
+   - lib/timetable.ts listSlots() now filters slots to subjectCodes that belong to an ACTIVE
+     subject when demoMode is off (demo rows stay in the DB, so switching back to demo restores
+     the sample week; personal slots whose subject later disappears are hidden too).
+   - Verified: /api/timetable went 26 → 0 visible slots; fake header chip gone; dashboard
+     Today's schedule shows the honest live empty state ("Your weekly schedule is empty — the ERP
+     doesn't publish one, so add your real classes via Manage." — new mode-aware copy); .ics
+     export disabled while empty.
+   - E2E: added a personal slot for the REAL subject ADVANCED-MOBILE-APPLICAT (Mon 20:00–20:50)
+     via the Manage dialog on mobile — it renders correctly in live mode (filter doesn't
+     over-block real data), then deleted it to restore the clean state.
+2. FEATURE — MODE-AWARE TIMETABLE UI: ManageTimetableDialog/TimetableCard now take the app mode
+   (wired from dashboard data.mode). Live description explains the ERP has no timetable page and
+   invites manual entry; demo keeps the old copy. Live empty state gained the same guidance.
+3. BUG — HISTORY OVERALL REBUILT WRONG UNDER SEMESTER PARTITION: /api/history summed snapshots
+   sharing an exact timestamp, so subjects whose last snapshot was older (unchanged subjects are
+   not re-recorded by design) were dropped — the 11:04 point showed 2/2 = 100% instead of the
+   real 2/3 = 66.67%, mismatching the dashboard and painting a fake spike. Rewrote the rebuild as
+   a two-pointer carry-forward (each subject contributes its LATEST snapshot ≤ t; a subject
+   counts only after its first snapshot). Verified: overall series now 0% → 66.67%, matching
+   /api/dashboard; heatmap caption + trend description + ring all agree.
+4. FEATURE — TREND ↔ HEATMAP CROSS-LINK (backlog item): shared focusDay state in the attendance
+   tab. Clicking a heatmap day cell rings that cell (ring-2 ring-primary + scale), pins the
+   caption ("Fri 2 Oct — 66.67% (2/3 classes)" + clear link), and shows a "2 Oct ✕" chip in the
+   trend header; clicking a trend chart point (Area or Line branch) highlights all of that day's
+   points on the line (custom dot renderer) and rings the heatmap cell. Toggle to clear; both
+   directions verified in-browser.
+5. FEATURE — HONEST WEEK-DELTA LABEL: dashboard delta chip now reports the actual span of tracked
+   history instead of always "/ 7d" — "▲ 66.67 pts · day 1" today (history began today after demo
+   reset); becomes "/ Nd" / "/ 7d" as history accrues. Title tooltip explains the window.
+6. STYLING (mandatory) — SYNC-FRESHNESS DOT: the "Last ERP sync" chip in the header gained a
+   status dot — emerald + pulse when data is fresh (≤22 min, or syncing), amber when stale, red +
+   pulse when the engine is retrying after failures, muted when never synced; tooltip explains
+   each state in plain words ("Data is fresh…", "Sync is failing — showing the last data that was
+   still valid" — spec #11 language). Verified pulsing green on desktop dark + light.
+
+Verification results:
+- bun run lint: clean. agent-browser: 0 console/page errors across all four tabs (desktop 1280
+  light+dark, mobile 390 — scrollWidth 390/390 everywhere, no overflow). API-verified: timetable
+  filter (26→0), history rebuild (0%→66.67%), personal-slot visibility, slot deletion.
+  Browser-verified: fake chip gone, live empty state + copy, cross-link both directions, day-1
+  delta chip, freshness dot. No dev-server restart, no production build (keeper cron job 430680
+  keeps the server up; not touched).
+
+Unresolved issues / risks & next-phase priorities:
+1. Real history is ~1 day old, so trend/heatmap are sparse by design — they fill honestly as the
+   15-min cadence accrues snapshots (only changed values are recorded; 6h stale point keeps
+   continuity).
+2. "All semesters" view still uses the stored __overall__ snapshot rows for older points, which
+   briefly included demo-era subjects during today's demo→live transition (documented; partitioned
+   views are rebuilt clean). Will age out with the 90-day prune.
+3. Backlog: L/H/E columns not folded into totals (pending real rows of that shape); digest email
+   delivery (needs SMTP); TZ-aware calendar events; per-semester scoping stored on slots themselves.
+4. dev-server-keeper cron must stay alive; preview Caddy 502 self-heals within ≤5 min.
