@@ -39,6 +39,7 @@ import { cn } from "@/lib/utils";
 import { compactErrorText } from "@/lib/compact-error";
 import { fetchAssignments, fetchDashboard, fetchHistory, fetchSyncLogs, fetchAlaNotes, qk } from "./api";
 import { WeeklyDigestDialog } from "./digest-dialog";
+import { TodayCard } from "./today-card";
 import { MilestoneCelebration, MilestonesStrip } from "./milestones";
 import { SubjectDrawer } from "./subject-drawer";
 import { TimetableCard } from "./timetable-card";
@@ -1061,6 +1062,29 @@ export function DashboardTab({
     [alaQ.data, now]
   );
 
+  /* Global ALA deadline counters for the today card (SMS-style brief). */
+  const alaOverdue = useMemo(
+    () =>
+      (alaQ.data?.assignments ?? []).reduce(
+        (n, a) => n + (a.status === "ACTIVE" && new Date(a.dueAt).getTime() < now ? 1 : 0),
+        0
+      ),
+    [alaQ.data, now]
+  );
+  const alaDueWeek = useMemo(() => {
+    const cut = now + 7 * 86_400_000;
+    return (alaQ.data?.assignments ?? []).reduce((n, a) => {
+      const t = new Date(a.dueAt).getTime();
+      return n + (a.status === "ACTIVE" && t >= now && t < cut ? 1 : 0);
+    }, 0);
+  }, [alaQ.data, now]);
+  /* Soonest ALA deadline that is NOT overdue — the actionable "next". */
+  const nextDue = useMemo(
+    () =>
+      (data?.reminders.alaUpcoming ?? []).find((u) => new Date(u.dueAt).getTime() >= now) ?? null,
+    [data, now]
+  );
+
   const weekDelta = useMemo(() => {
     const pts = history.data?.overall ?? [];
     if (pts.length < 2) return null;
@@ -1235,6 +1259,25 @@ export function DashboardTab({
           <FlaggedAlasCard rows={flaggedRows} onOpenFlagged={onOpenFlaggedAlas} />
         </div>
       )}
+
+      {/* Row 0.6 — pocket "today card" (SMS-style brief). The card owns its own
+         isolated print path, so only its wrapper is hidden from the full report. */}
+      <div className="print:hidden">
+        <TodayCard
+          now={now}
+          overall={data.overall}
+          target={data.target}
+          subjects={data.subjects}
+          warningSubjects={data.warningSubjects}
+          alaPending={data.reminders.alaPending}
+          alaTotal={data.reminders.alaTotal}
+          alaOverdue={alaOverdue}
+          alaDueWeek={alaDueWeek}
+          nextDue={nextDue}
+          notedCount={alaNotesQ.data?.length ?? 0}
+          lastSyncAt={data.erp?.sync?.lastSuccessAt ?? null}
+        />
+      </div>
 
       {/* Row 1 — overall + stats */}
       <motion.div

@@ -352,3 +352,19 @@
     color: black !important;
   }
 }
+
+/* ---------------------------------------------------------------------------
+   "Today card" print isolation. While the today card's "Print card" button is
+   armed, <body> carries .print-today and the card mounts a portal clone
+   (#today-card-print) as a DIRECT child of <body> — these rules reduce the
+   paper output to exactly that clone (the dashboard's full report is a
+   different print path and stays untouched).
+--------------------------------------------------------------------------- */
+@media print {
+  body.print-today > :not(#today-card-print) {
+    display: none !important;
+  }
+  body.print-today #today-card-print {
+    display: block !important;
+  }
+}
