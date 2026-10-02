@@ -19,9 +19,12 @@ const nextConfig: NextConfig = {
    * (~1.35–1.6 GB observed). Turbopack's native heap is NOT capped by
    * NODE_OPTIONS --max-old-space-size, so it is capped here instead to keep
    * the dev server well under the kill line. This does not affect app code.
+   * (Fixed 2026-10-03: in Next 16 the option lives at experimental.
+   * turbopackMemoryLimit — the old turbopack.memoryLimit was silently
+   * ignored, so the cap was never actually applied.)
    */
-  turbopack: {
-    memoryLimit: 768,
+  experimental: {
+    turbopackMemoryLimit: 768,
   },
 };
 

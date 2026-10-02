@@ -649,8 +649,10 @@ const ALA_FILE_ACCEPT = ".pdf,.docx,.zip,.xlsx,.ppt,.csv,.mp4,.png,.jpg,.jpeg,.p
 
 const ALA_NOTE_MAX = 2000;
 
-/** Priority levels 1–3 with their visual identity (0 = "None" = no visuals). */
-const ALA_PRIORITY_META: Record<
+/** Priority levels 1–3 with their visual identity (0 = "None" = no visuals).
+ *  Exported so the dashboard's flagged-ALA glance card reuses the exact same
+ *  color language instead of growing a divergent copy. */
+export const ALA_PRIORITY_META: Record<
   number,
   { label: string; chip: string; border: string; topAccent: string; activeBtn: string }
 > = {
@@ -677,7 +679,7 @@ const ALA_PRIORITY_META: Record<
   },
 };
 
-function alaPriorityOf(p: number | undefined) {
+export function alaPriorityOf(p: number | undefined) {
   return (p != null && ALA_PRIORITY_META[p]) || null;
 }
 
@@ -1290,7 +1292,7 @@ function AlaSubjectGroup({
  * palette quick-filter events (erp:filter-ala), scope-aware .ics export and a
  * one-click .ics export of every not-yet-submitted deadline.
  */
-type AlaStatusFilter = "all" | "overdue" | "soon" | "pending" | "submitted" | "noted";
+export type AlaStatusFilter = "all" | "overdue" | "soon" | "pending" | "submitted" | "noted";
 type AlaSort = "deadline" | "priority" | "course" | "overdue";
 
 const ALA_STATUS_META: { key: AlaStatusFilter; label: string; activeClass: string }[] = [
@@ -2099,7 +2101,30 @@ function AlaDeadlineViews({
   );
 }
 
-function AlaSection() {
+/** Remembered ALA sort — a device-local view preference, same pattern as the
+ *  reminders filter and the dashboard subject sort (erp:alaSort). */
+const ALA_SORT_KEY = "erp:alaSort";
+const ALA_SORT_VALUES: AlaSort[] = ["deadline", "priority", "overdue", "course"];
+
+function loadAlaSort(): AlaSort {
+  if (typeof window === "undefined") return "deadline";
+  try {
+    const saved = window.localStorage.getItem(ALA_SORT_KEY);
+    return ALA_SORT_VALUES.includes(saved as AlaSort) ? (saved as AlaSort) : "deadline";
+  } catch {
+    return "deadline";
+  }
+}
+
+function AlaSection({
+  pendingFilter = null,
+  onPendingFilterConsumed,
+}: {
+  /** Cross-tab jump (dashboard flagged-ALA card): applied once on mount, then
+   *  reported consumed so later remounts don't re-apply a stale filter. */
+  pendingFilter?: AlaStatusFilter | null;
+  onPendingFilterConsumed?: () => void;
+}) {
   const { data, isPending, isError, error } = useQuery({
     queryKey: qk.assignments,
     queryFn: fetchAssignments,
@@ -2156,7 +2181,24 @@ function AlaSection() {
   const [status, setStatus] = useState<AlaStatusFilter>("all");
   /** Subject filter (group code) — the third axis alongside status and the radar day drill-down. */
   const [subject, setSubject] = useState<string | null>(null);
-  const [sort, setSort] = useState<AlaSort>("deadline");
+  /* Sort starts at the default and hydrates from localStorage after mount
+     (SSR renders "deadline", so a saved choice swaps in post-paint — no
+     hydration mismatch). */
+  const [sort, setSortState] = useState<AlaSort>("deadline");
+  useEffect(() => {
+    setSortState(loadAlaSort());
+  }, []);
+  /* UI-driven changes persist; programmatic resets (palette deep-focus, the
+     cross-tab jump) call setSortState directly so a transient action never
+     overwrites the saved preference. */
+  const setSort = useCallback((s: AlaSort) => {
+    setSortState(s);
+    try {
+      window.localStorage.setItem(ALA_SORT_KEY, s);
+    } catch {
+      /* storage unavailable — preference applies for this session only */
+    }
+  }, []);
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
   /** Radar drill-down: calendar-day offset (0 = today) the list is filtered to. */
   const [dayOffset, setDayOffset] = useState<number | null>(null);
@@ -2170,13 +2212,25 @@ function AlaSection() {
         setQuery(q);
         setStatus("all");
         setSubject(null);
-        setSort("deadline");
+        setSortState("deadline"); // transient deep-focus — does NOT clobber the saved sort
         setDayOffset(null);
       }
     };
     window.addEventListener("erp:focus-ala", handler);
     return () => window.removeEventListener("erp:focus-ala", handler);
   }, []);
+
+  /* Consume the cross-tab pending filter once mounted (dashboard "flagged
+     ALAs" card → Reminders tab with the Noted filter pre-applied). */
+  useEffect(() => {
+    if (pendingFilter) {
+      setQuery("");
+      setStatus(pendingFilter);
+      setSubject(null);
+      setDayOffset(null);
+      onPendingFilterConsumed?.();
+    }
+  }, [pendingFilter, onPendingFilterConsumed]);
 
   /* Quick-filter from the command palette (erp:filter-ala, detail = status key):
      a fresh triage entry — clears every other axis (search/subject/day) and
@@ -3144,7 +3198,15 @@ function loadReminderPrefs(): { filter: RemindersFilter; view: "timeline" | "sub
   }
 }
 
-export function RemindersTab() {
+export function RemindersTab({
+  pendingAlaFilter = null,
+  onConsumePendingAlaFilter,
+}: {
+  /** Set by the page right before switching to this tab (see page.tsx);
+   *  AlaSection applies it once on mount. */
+  pendingAlaFilter?: AlaStatusFilter | null;
+  onConsumePendingAlaFilter?: () => void;
+}) {
   /* Filter + layout hydrate from localStorage after mount (SSR renders the
      defaults; a saved choice swaps in post-paint — no hydration mismatch). */
   const [filter, setFilterState] = useState<RemindersFilter>("all");
@@ -3187,7 +3249,10 @@ export function RemindersTab() {
   return (
     <div className="space-y-4">
       <BrowserRemindersBanner />
-      <AlaSection />
+      <AlaSection
+        pendingFilter={pendingAlaFilter}
+        onPendingFilterConsumed={onConsumePendingAlaFilter}
+      />
       <Card className="rounded-xl border-border/60">
         <CardContent className="flex flex-wrap items-center gap-3 p-4">
           <div

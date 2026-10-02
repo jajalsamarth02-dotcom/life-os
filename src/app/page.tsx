@@ -32,7 +32,7 @@ import { cn } from "@/lib/utils";
 import { AppHeader } from "@/components/erp/header";
 import { DashboardTab } from "@/components/erp/dashboard-tab";
 import { AttendanceTab } from "@/components/erp/attendance-tab";
-import { RemindersTab } from "@/components/erp/reminders-tab";
+import { RemindersTab, type AlaStatusFilter } from "@/components/erp/reminders-tab";
 import { SettingsTab } from "@/components/erp/settings-tab";
 import { CommandPalette } from "@/components/erp/command-palette";
 import { useDueNotifications } from "@/components/erp/use-due-notifications";
@@ -167,6 +167,20 @@ function DemoStrip({ onOpenSettings }: { onOpenSettings: () => void }) {
 
 export default function Home() {
   const [tab, setTabState] = useState<TabKey>("dashboard");
+
+  /* Cross-tab triage jump: the dashboard's flagged-ALA card sets a pending
+     "Noted" filter, switches to Reminders, and AlaSection consumes it once
+     mounted (Radix unmounts inactive tabs, so a plain event would be missed). */
+  const [pendingAlaFilter, setPendingAlaFilter] = useState<AlaStatusFilter | null>(null);
+  const openFlaggedAlas = useCallback(() => {
+    setPendingAlaFilter("noted");
+    setTabState("reminders");
+    if (window.location.hash !== "#reminders") {
+      window.history.replaceState(null, "", "#reminders");
+    }
+    window.scrollTo({ top: 0, behavior: "smooth" });
+  }, []);
+  const consumePendingAlaFilter = useCallback(() => setPendingAlaFilter(null), []);
 
   /* Tab → URL hash: every navigation leaves a shareable deep link
      (/#attendance …). replaceState keeps the browser history clean. */
@@ -369,10 +383,16 @@ export default function Home() {
                       onOpenAttendance={() => setTab("attendance")}
                       onOpenSettings={() => setTab("settings")}
                       onOpenReminders={() => setTab("reminders")}
+                      onOpenFlaggedAlas={openFlaggedAlas}
                     />
                   )}
                   {key === "attendance" && <AttendanceTab onOpenSettings={() => setTab("settings")} />}
-                  {key === "reminders" && <RemindersTab />}
+                  {key === "reminders" && (
+                    <RemindersTab
+                      pendingAlaFilter={pendingAlaFilter}
+                      onConsumePendingAlaFilter={consumePendingAlaFilter}
+                    />
+                  )}
                   {key === "settings" && <SettingsTab />}
                 </motion.div>
               </TabsContent>

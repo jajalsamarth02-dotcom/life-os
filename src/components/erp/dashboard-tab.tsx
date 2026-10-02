@@ -12,6 +12,7 @@ import {
   CheckCircle2,
   ChevronRight,
   ExternalLink,
+  Flag,
   FlaskConical,
   CalendarRange,
   GraduationCap,
@@ -23,6 +24,7 @@ import {
   Printer,
   RefreshCw,
   Share2,
+  StickyNote,
   WifiOff,
   XCircle,
   Footprints,
@@ -35,7 +37,7 @@ import { Separator } from "@/components/ui/separator";
 import { motion } from "framer-motion";
 import { cn } from "@/lib/utils";
 import { compactErrorText } from "@/lib/compact-error";
-import { fetchAssignments, fetchDashboard, fetchHistory, fetchSyncLogs, qk } from "./api";
+import { fetchAssignments, fetchDashboard, fetchHistory, fetchSyncLogs, fetchAlaNotes, qk } from "./api";
 import { WeeklyDigestDialog } from "./digest-dialog";
 import { MilestoneCelebration, MilestonesStrip } from "./milestones";
 import { SubjectDrawer } from "./subject-drawer";
@@ -63,7 +65,8 @@ import {
   SkipPips,
   type SubjectAlaStat,
 } from "./shared";
-import type { AlaUpcomingRow, ChangeEvent, HistoryPoint, Reminder, SubjectView } from "./types";
+import type { AlaNoteRow, AlaUpcomingRow, ChangeEvent, HistoryPoint, Reminder, SubjectView } from "./types";
+import { ALA_PRIORITY_META, alaPriorityOf } from "./reminders-tab";
 import { Sparkline } from "./trend-chart";
 
 /* ------------------------------------------------------------------ */
@@ -254,6 +257,154 @@ function AlaDeadlinePanel({
           );
         })}
       </ul>
+    </div>
+  );
+}
+
+/**
+ * Dashboard glance at the student's OWN triage layer: ALA rows carrying a
+ * local note and/or priority flag (table AlaNote — device-local, never shown
+ * on the ERP). Rows reuse the exact priority color language of the Reminders
+ * list (ALA_PRIORITY_META). Clicking a row or the footer jumps to the
+ * Reminders tab with the "Noted" filter pre-applied. Hidden entirely when
+ * nothing is flagged — the dashboard stays clean until the student uses it.
+ */
+function FlaggedAlasCard({
+  rows,
+  onOpenFlagged,
+}: {
+  rows: { row: Reminder; note: AlaNoteRow }[];
+  onOpenFlagged: () => void;
+}) {
+  const now = useNow();
+  const SHOWN = 4;
+  const visible = rows.slice(0, SHOWN);
+  const extra = rows.length - visible.length;
+  /* Priority mix in the header — urgency at a glance without reading rows. */
+  const prioMix = ([3, 2, 1] as const)
+    .map((level) => ({ level, n: rows.filter((r) => r.note.priority === level).length }))
+    .filter((x) => x.n > 0);
+
+  if (rows.length === 0) return null;
+  return (
+    <div
+      data-testid="flagged-ala-card"
+      className="overflow-hidden rounded-xl border border-primary/25 bg-primary/[0.03]"
+    >
+      <div className="flex flex-wrap items-center gap-2 border-b border-border/60 px-3 py-2">
+        <p className="flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+          <StickyNote className="size-3.5 text-primary/80" aria-hidden="true" />
+          Your flagged ALAs
+        </p>
+        <span className="flex-1" />
+        {prioMix.map(({ level, n }) => {
+          const meta = ALA_PRIORITY_META[level];
+          return (
+            <span
+              key={level}
+              className={cn(
+                "inline-flex items-center gap-0.5 rounded-full px-1.5 py-0 text-[9px] font-bold uppercase tracking-wider",
+                meta.chip
+              )}
+            >
+              <Flag className="size-2.5" aria-hidden="true" />
+              {n} {meta.label}
+            </span>
+          );
+        })}
+        <Badge variant="secondary" className="text-[10px] tabular-nums">
+          {rows.length} noted
+        </Badge>
+      </div>
+      <ul>
+        {visible.map(({ row, note }) => {
+          const hue = row.subjectCode ? hueColors(row.subjectCode) : null;
+          const pill = deadlinePill(row.dueAt, now);
+          const prio = alaPriorityOf(note.priority);
+          return (
+            <li key={row.id} className="list-none border-b border-border/40 last:border-b-0">
+              <button
+                type="button"
+                onClick={onOpenFlagged}
+                aria-label={`Open your flagged ALAs in the Reminders tab — ${row.title}${note.note ? `, note: ${note.note}` : ""}`}
+                title="Open the flagged list in the Reminders tab (Noted filter)"
+                className={cn(
+                  "group/flag flex w-full min-w-0 items-center gap-2.5 border-l-[3px] px-3 py-2.5 text-left transition-colors hover:bg-muted/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring",
+                  prio?.border ?? "border-l-transparent"
+                )}
+              >
+                {hue ? (
+                  <span
+                    className="shrink-0 rounded-md px-1.5 py-0.5 font-mono text-[10px] font-semibold"
+                    style={{ backgroundColor: hue.bg, color: hue.fg }}
+                  >
+                    {row.subjectCode}
+                  </span>
+                ) : (
+                  <StickyNote className="size-3.5 shrink-0 text-primary/70" aria-hidden="true" />
+                )}
+                <span className="min-w-0 flex-1">
+                  <span className="flex min-w-0 items-center gap-2">
+                    <span className="min-w-0 truncate text-sm font-medium leading-snug">{row.title}</span>
+                    {prio && (
+                      <span
+                        className={cn(
+                          "inline-flex shrink-0 items-center gap-0.5 rounded-full px-1.5 py-0 text-[9px] font-bold uppercase tracking-wider",
+                          prio.chip
+                        )}
+                      >
+                        <Flag className="size-2.5" aria-hidden="true" />
+                        {prio.label}
+                      </span>
+                    )}
+                    {row.status !== "ACTIVE" && (
+                      <span className="shrink-0 text-[10px] font-semibold text-emerald-600 dark:text-emerald-400">
+                        done
+                      </span>
+                    )}
+                  </span>
+                  {note.note && (
+                    <span
+                      className="mt-0.5 flex items-start gap-1 text-[11px] italic leading-snug text-foreground/70"
+                      title={note.note}
+                    >
+                      <StickyNote className="mt-0.5 size-3 shrink-0 text-primary/70" aria-hidden="true" />
+                      <span className="min-w-0 truncate">{note.note}</span>
+                    </span>
+                  )}
+                </span>
+                <span className="shrink-0 text-right">
+                  <span
+                    className={cn(
+                      "block rounded-full px-2 py-0.5 text-[10px] font-semibold tabular-nums",
+                      pill.className
+                    )}
+                  >
+                    {pill.label}
+                  </span>
+                  <span className="mt-0.5 block text-[10px] text-muted-foreground">{fmtDT(row.dueAt)}</span>
+                </span>
+                <ChevronRight
+                  className="size-3.5 shrink-0 text-muted-foreground/40 transition-transform group-hover/flag:translate-x-0.5 group-hover/flag:text-foreground"
+                  aria-hidden="true"
+                />
+              </button>
+            </li>
+          );
+        })}
+      </ul>
+      <button
+        type="button"
+        onClick={onOpenFlagged}
+        aria-label={`Open the Reminders tab — ${rows.length} flagged ALA${rows.length === 1 ? "" : "s"} with the Noted filter applied`}
+        className="flex w-full items-center gap-2 px-3 py-2 text-left text-xs text-primary transition-colors hover:bg-primary/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring"
+      >
+        <ArrowRight className="size-3.5 shrink-0" aria-hidden="true" />
+        <span className="min-w-0 flex-1 truncate font-medium">
+          {extra > 0 ? `${extra} more flagged — open the noted list` : "Open the noted list"}
+        </span>
+        <span className="shrink-0 text-[10px] text-muted-foreground">private · never shown on the ERP</span>
+      </button>
     </div>
   );
 }
@@ -796,10 +947,14 @@ export function DashboardTab({
   onOpenAttendance,
   onOpenSettings,
   onOpenReminders,
+  onOpenFlaggedAlas,
 }: {
   onOpenAttendance: () => void;
   onOpenSettings: () => void;
   onOpenReminders: () => void;
+  /** Jump to the Reminders tab with the "Noted" filter pre-applied
+   *  (wired by page.tsx — sets a pending filter, then switches tabs). */
+  onOpenFlaggedAlas: () => void;
 }) {
   /* Sort starts at the default and hydrates from localStorage after mount
      (SSR renders "lowest", so a saved preference swaps in post-paint — same
@@ -841,6 +996,26 @@ export function DashboardTab({
     queryFn: fetchAssignments,
     refetchInterval: 60_000,
   });
+  /* Local note/priority overlay — same shared cache the Reminders tab uses,
+     so a flag added there shows up here with zero extra fetches. */
+  const alaNotesQ = useQuery({
+    queryKey: qk.alaNotes,
+    queryFn: fetchAlaNotes,
+    staleTime: 30_000,
+  });
+  const flaggedRows = useMemo(() => {
+    const notes = alaNotesQ.data;
+    if (!notes || notes.length === 0) return [];
+    const map = new Map(notes.map((n) => [n.externalId, n]));
+    return (alaQ.data?.assignments ?? [])
+      .filter((a) => !!a.externalId && map.has(a.externalId))
+      .map((row) => ({ row, note: map.get(row.externalId as string) as AlaNoteRow }))
+      .sort(
+        (x, y) =>
+          y.note.priority - x.note.priority ||
+          new Date(x.row.dueAt).getTime() - new Date(y.row.dueAt).getTime()
+      );
+  }, [alaNotesQ.data, alaQ.data]);
   const now = useNow(60_000);
   const alaStats = useMemo(
     () => collectAlaStats(alaQ.data?.assignments, alaQ.data?.courseNames, now),
@@ -1013,6 +1188,14 @@ export function DashboardTab({
 
       {/* Row 0 — next deadline countdown */}
       <div className="print:hidden"><NextUpStrip items={data.reminders.items} /></div>
+
+      {/* Row 0.5 — the student's private triage layer (notes/priority flags).
+         Renders nothing until at least one ALA is flagged. */}
+      {flaggedRows.length > 0 && (
+        <div className="print:hidden">
+          <FlaggedAlasCard rows={flaggedRows} onOpenFlagged={onOpenFlaggedAlas} />
+        </div>
+      )}
 
       {/* Row 1 — overall + stats */}
       <motion.div
