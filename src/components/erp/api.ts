@@ -82,6 +82,7 @@ export const qk = {
   sync: ["sync"] as const,
   erpStatus: ["erp-status"] as const,
   waStatus: ["wa-status"] as const,
+  ntfyStatus: ["ntfy-status"] as const,
 };
 
 /* ---------- GET ---------- */
@@ -309,6 +310,32 @@ export const postWaAction = (
 ) =>
   api<{ ok?: boolean; status?: WaStatusResponse; snippet?: string; text?: string; message?: string }>(
     "/api/notify/whatsapp",
+    { method: "POST", body: JSON.stringify({ action, ...payload }) }
+  );
+
+/* ---------- Push notifications (ntfy) ---------- */
+
+export interface NtfyStatusResponse {
+  enabled: boolean;
+  configured: boolean;
+  topicMasked: string | null;
+  serverHost: string | null;
+  isDefaultServer: boolean;
+  lastAutoAt: string | null;
+  lastPendingCount: number | null;
+  lastResult: string | null;
+  /** "HH:MM" IST when a fixed daily digest is scheduled; null = sync-triggered only. */
+  digestTime: string | null;
+}
+
+export const fetchNtfyStatus = () => api<NtfyStatusResponse>("/api/notify/ntfy");
+
+export const postNtfyAction = (
+  action: "save" | "enable" | "setDigestTime" | "test" | "digest",
+  payload?: { topic?: string; server?: string; enabled?: boolean; time?: string | null }
+) =>
+  api<{ ok?: boolean; status?: NtfyStatusResponse; snippet?: string; text?: string; message?: string }>(
+    "/api/notify/ntfy",
     { method: "POST", body: JSON.stringify({ action, ...payload }) }
   );
 

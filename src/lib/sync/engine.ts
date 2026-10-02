@@ -15,6 +15,7 @@ import { ERROR_COPY, ErpSnapshot, SyncError, SyncErrorCode } from "@/lib/erp/typ
 import { decryptSecret, encryptSecret } from "@/lib/crypto";
 import { pruneSnapshots, recordSnapshots } from "@/lib/sync/history";
 import { maybeAutoNotify } from "@/lib/notify/whatsapp";
+import { maybeNtfyAutoNotify } from "@/lib/notify/ntfy";
 
 /**
  * SYNC ENGINE
@@ -229,9 +230,11 @@ export async function runSync(
     });
 
     // refresh notifications badge etc. — nothing else to do
-    // (WhatsApp auto-digest: only after scheduled syncs, throttled inside.)
+    // (Auto-digests on both channels: only after scheduled syncs, each
+    // independently throttled inside its own module.)
     if (trigger === "scheduled") {
       void maybeAutoNotify();
+      void maybeNtfyAutoNotify();
     }
     return { ok: true, mode, changes, message: `Sync complete — ${changes} change${changes === 1 ? "" : "s"}.` };
   } catch (err) {

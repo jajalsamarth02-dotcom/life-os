@@ -1,6 +1,7 @@
 import { db } from "@/lib/db";
 import { getSettings } from "@/lib/settings";
 import { maybeDailyDigest } from "@/lib/notify/whatsapp";
+import { maybeNtfyDailyDigest } from "@/lib/notify/ntfy";
 import { runSync } from "./engine";
 
 /**
@@ -61,11 +62,17 @@ export async function kickSyncIfStalled(): Promise<void> {
     console.warn("[erp-sync] watchdog error:", e instanceof Error ? e.message : e);
   }
 
-  // The dead-tick scenario also silences the fixed-time daily WhatsApp
-  // digest (same scheduler). maybeDailyDigest is internally throttled and
-  // never throws — piggyback it here so digests survive tick outages too.
+  // The dead-tick scenario also silences the fixed-time daily digests for
+  // BOTH channels (same scheduler). The maybe*DailyDigest functions are
+  // internally throttled and never throw — piggyback them here so digest
+  // delivery survives tick outages too, per channel, independently.
   try {
     await maybeDailyDigest();
+  } catch {
+    /* unreachable by contract; extra guard for the host read path */
+  }
+  try {
+    await maybeNtfyDailyDigest();
   } catch {
     /* unreachable by contract; extra guard for the host read path */
   }

@@ -10,6 +10,8 @@ import {
   BellRing,
   CalendarClock,
   CheckCircle2,
+  Copy,
+  Dices,
   Database,
   Download,
   FileJson,
@@ -23,6 +25,7 @@ import {
   LogOut,
   MessageCircle,
   MonitorSmartphone,
+  Radio,
   RefreshCw,
   RotateCcw,
   Save,
@@ -98,6 +101,7 @@ import {
   fetchReminders,
   fetchSemesters,
   fetchSettings,
+  fetchNtfyStatus,
   fetchSyncLogs,
   fetchWaStatus,
   postDemoEvolve,
@@ -105,6 +109,7 @@ import {
   putSelectedSemester,
   putSettings,
   putSubjectTarget,
+  postNtfyAction,
   postWaAction,
   restoreAlaNotes,
   ApiError,
@@ -2166,6 +2171,307 @@ function WhatsAppCard() {
 
 /* ------------------------------------------------------------------ */
 
+/**
+ * Push notifications via ntfy.sh — the free second channel. Same honest
+ * gating as WhatsApp: nothing is sent while unconfigured or disabled, and
+ * the test/digest buttons are the ONLY things that can trigger a send.
+ */
+function NtfyCard() {
+  const qc = useQueryClient();
+  const { data: status } = useQuery({ queryKey: qk.ntfyStatus, queryFn: fetchNtfyStatus });
+  const [topic, setTopic] = useState("");
+  const [server, setServer] = useState("");
+  const [digestTime, setDigestTime] = useState("");
+  const [copied, setCopied] = useState(false);
+  const [busy, setBusy] = useState<null | "save" | "test" | "digest" | "time" | "clearTime">(null);
+
+  const refresh = () => qc.invalidateQueries({ queryKey: qk.ntfyStatus });
+
+  const suggestTopic = () => {
+    // erp-sync- + 8 random base36 chars — long enough to be unguessable in practice.
+    const rand = Array.from({ length: 8 }, () => "abcdefghijklmnopqrstuvwxyz0123456789"[Math.floor(Math.random() * 36)]).join("");
+    setTopic(`erp-sync-${rand}`);
+    setCopied(false);
+  };
+
+  const copyTopic = async () => {
+    if (!topic.trim()) return;
+    try {
+      await navigator.clipboard.writeText(topic.trim());
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    } catch {
+      // clipboard may be unavailable over plain http — the input is selectable anyway
+    }
+  };
+
+  const run = async (action: "save" | "test" | "digest") => {
+    setBusy(action);
+    try {
+      if (action === "save") {
+        if (!topic.trim()) {
+          toast.error("A topic name is required.", { description: "Tap the dice for a random private topic." });
+          return;
+        }
+        await postNtfyAction("save", { topic: topic.trim(), server: server.trim() || undefined });
+        toast.success("ntfy topic saved", {
+          description: "Stored AES-256-GCM encrypted. Subscribe to the same topic in the ntfy app to receive pushes.",
+        });
+        setTopic("");
+        refresh();
+      } else if (action === "test") {
+        const res = await postNtfyAction("test");
+        (res.ok ? toast.success : toast.error)(
+          res.ok ? "Test push sent — check your ntfy app" : "The ntfy server did not accept the test",
+          { description: res.snippet }
+        );
+        refresh();
+      } else {
+        const res = await postNtfyAction("digest");
+        (res.ok ? toast.success : toast.error)(
+          res.ok ? "Digest pushed — check your ntfy app" : "The ntfy server did not accept the digest",
+          { description: res.snippet }
+        );
+        refresh();
+      }
+    } catch (e) {
+      toast.error("ntfy action failed", { description: e instanceof ApiError ? e.message : "Try again." });
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  const toggle = async (enabled: boolean) => {
+    try {
+      await postNtfyAction("enable", { enabled });
+      toast[enabled ? "success" : "info"](enabled ? "ntfy pushes enabled" : "ntfy pushes disabled", {
+        description: enabled
+          ? status?.digestTime
+            ? `A pending-work digest arrives daily at ${status.digestTime} IST, plus sync-triggered alerts when something changed.`
+            : "A short pending-work digest is sent at most once a day, right after a scheduled sync, when something changed."
+          : undefined,
+      });
+      refresh();
+    } catch (e) {
+      toast.error("Could not update the setting", { description: e instanceof ApiError ? e.message : "Try again." });
+    }
+  };
+
+  const saveDigestTime = async (time: string | null) => {
+    setBusy(time ? "time" : "clearTime");
+    try {
+      await postNtfyAction("setDigestTime", { time });
+      toast.success(
+        time ? `Daily digest scheduled for ${time} IST` : "Fixed daily digest removed",
+        {
+          description: time
+            ? "Pushed every day at that IST time, even if nothing changed since the last sync."
+            : "Auto pushes now fire only after scheduled syncs when something changed.",
+        }
+      );
+      refresh();
+    } catch (e) {
+      toast.error("Could not save the digest time", { description: e instanceof ApiError ? e.message : "Try again." });
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  const enabled = status?.enabled ?? false;
+  const configured = status?.configured ?? false;
+  const savedTime = status?.digestTime ?? null;
+
+  return (
+    <Card className="rounded-xl border-border/60">
+      <CardHeader className="flex flex-row items-start justify-between space-y-0 pb-3">
+        <div>
+          <CardTitle className="flex items-center gap-2 text-base tracking-tight">
+            <Radio className="size-4 text-sky-500" aria-hidden="true" />
+            Push via ntfy
+            <Badge variant="outline" className="text-[9px] font-bold uppercase tracking-wider text-sky-700 dark:text-sky-400">
+              Beta
+            </Badge>
+          </CardTitle>
+          <CardDescription>Same digests over free push — no phone number or apikey needed</CardDescription>
+        </div>
+        <Switch
+          checked={enabled}
+          disabled={!configured}
+          onCheckedChange={toggle}
+          aria-label="Enable ntfy pushes"
+        />
+      </CardHeader>
+      <CardContent className="space-y-3">
+        {!configured ? (
+          <ol className="list-inside list-decimal space-y-1 text-sm text-muted-foreground">
+            <li>
+              Install the free{" "}
+              <a
+                href="https://ntfy.sh"
+                target="_blank"
+                rel="noopener noreferrer"
+                className="font-medium text-primary underline-offset-2 hover:underline"
+              >
+                ntfy app
+              </a>{" "}
+              (Android/iOS) or use the web app
+            </li>
+            <li>Subscribe to a private topic — tap the dice below for an unguessable one, and copy it into the app</li>
+            <li>Paste the topic here, send a test, then flip the switch on</li>
+          </ol>
+        ) : (
+          <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
+            <Badge variant="secondary" className="font-mono text-[10px]">{status?.topicMasked}</Badge>
+            <span className="text-muted-foreground/70">
+              via {status?.isDefaultServer ? "ntfy.sh" : status?.serverHost}
+            </span>
+            {enabled ? (
+              <span className="flex items-center gap-1 text-sky-600 dark:text-sky-400">
+                <BellRing className="size-3" aria-hidden="true" />
+                {savedTime
+                  ? `auto-push on — daily at ${savedTime} IST, plus after syncs when something changed`
+                  : "auto-push on (max 1/day, after scheduled syncs when something changed)"}
+              </span>
+            ) : (
+              <span>Sending is off — flip the switch to enable auto pushes.</span>
+            )}
+          </div>
+        )}
+
+        <div className="grid gap-2 sm:grid-cols-[1fr_1fr_auto]">
+          <div className="relative">
+            <Input
+              placeholder={configured ? status?.topicMasked ?? "Topic" : "Topic (tap the dice)"}
+              value={topic}
+              onChange={(e) => setTopic(e.target.value)}
+              aria-label="ntfy topic name"
+              className="pr-16 font-mono text-xs"
+            />
+            {topic.trim() && (
+              <button
+                type="button"
+                onClick={copyTopic}
+                aria-label={copied ? "Topic copied" : "Copy topic to clipboard"}
+                className="absolute right-1.5 top-1/2 -translate-y-1/2 rounded-md p-1.5 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground motion-safe:active:scale-90"
+              >
+                {copied ? (
+                  <CheckCircle2 className="size-3.5 text-emerald-500" aria-hidden="true" />
+                ) : (
+                  <Copy className="size-3.5" aria-hidden="true" />
+                )}
+              </button>
+            )}
+          </div>
+          <Input
+            placeholder={configured ? (status?.isDefaultServer ? "server saved: ntfy.sh" : "server saved") : "Self-host server (optional)"}
+            value={server}
+            onChange={(e) => setServer(e.target.value)}
+            aria-label="ntfy server URL, optional"
+            className="font-mono text-xs"
+          />
+          <Button size="sm" variant="outline" className="h-9 gap-1.5" disabled={busy !== null} onClick={() => run("save")}>
+            {busy === "save" ? <Loader2 className="size-3.5 animate-spin" aria-hidden="true" /> : <Save className="size-3.5" aria-hidden="true" />}
+            Save
+          </Button>
+        </div>
+
+        <div className="flex flex-wrap gap-2">
+          <Button
+            size="sm"
+            variant="ghost"
+            className="h-8 gap-1.5 border border-dashed border-border"
+            disabled={busy !== null}
+            onClick={suggestTopic}
+            aria-label="Suggest a random private topic"
+          >
+            <Dices className="size-3.5" aria-hidden="true" />
+            Random topic
+          </Button>
+          <Button size="sm" variant="secondary" className="h-8 gap-1.5" disabled={!configured || busy !== null} onClick={() => run("test")}>
+            {busy === "test" ? <Loader2 className="size-3.5 animate-spin" aria-hidden="true" /> : <Radio className="size-3.5" aria-hidden="true" />}
+            Send test
+          </Button>
+          <Button size="sm" variant="secondary" className="h-8 gap-1.5" disabled={!configured || busy !== null} onClick={() => run("digest")}>
+            {busy === "digest" ? <Loader2 className="size-3.5 animate-spin" aria-hidden="true" /> : <CalendarClock className="size-3.5" aria-hidden="true" />}
+            Send pending-work digest now
+          </Button>
+        </div>
+
+        <div className="rounded-lg border border-border/60 bg-muted/40 p-3">
+          <div className="flex items-center justify-between gap-2">
+            <span className="flex items-center gap-1.5 text-xs font-medium">
+              <Timer className="size-3.5 text-sky-500" aria-hidden="true" />
+              Daily digest time (IST)
+              {savedTime && (
+                <Badge variant="outline" className="border-sky-500/40 font-mono text-[10px] text-sky-600 dark:text-sky-400">
+                  {savedTime}
+                </Badge>
+              )}
+            </span>
+            <span className="text-[10px] text-muted-foreground">optional</span>
+          </div>
+          <p className="mt-1 text-[11px] leading-snug text-muted-foreground">
+            One guaranteed push per day at a fixed IST time — sent even when nothing changed since the last
+            sync. Leave empty to only push after scheduled syncs. Independent of the WhatsApp schedule.
+          </p>
+          <div className="mt-2 flex flex-wrap items-center gap-2">
+            <Input
+              type="time"
+              step={60}
+              className="h-9 w-32 font-mono text-xs"
+              value={digestTime}
+              onChange={(e) => setDigestTime(e.target.value)}
+              placeholder={savedTime ?? "20:30"}
+              aria-label="ntfy daily digest time in IST, 24-hour"
+            />
+            <Button
+              size="sm"
+              variant="outline"
+              className="h-9 gap-1.5"
+              disabled={!configured || busy !== null || !digestTime}
+              onClick={() => saveDigestTime(digestTime)}
+              aria-label="Save ntfy daily digest time"
+            >
+              {busy === "time" ? <Loader2 className="size-3.5 animate-spin" aria-hidden="true" /> : <Timer className="size-3.5" aria-hidden="true" />}
+              Schedule
+            </Button>
+            {savedTime && (
+              <Button
+                size="sm"
+                variant="ghost"
+                className="h-9 gap-1.5 text-muted-foreground hover:text-destructive"
+                disabled={busy !== null}
+                onClick={() => {
+                  setDigestTime("");
+                  void saveDigestTime(null);
+                }}
+                aria-label="Remove ntfy daily digest schedule"
+              >
+                {busy === "clearTime" ? <Loader2 className="size-3.5 animate-spin" aria-hidden="true" /> : <X className="size-3.5" aria-hidden="true" />}
+                Remove
+              </Button>
+            )}
+          </div>
+        </div>
+
+        {status?.lastResult && (
+          <p className="truncate rounded-lg bg-muted/60 px-2.5 py-1.5 font-mono text-[10px] text-muted-foreground" title={status.lastResult}>
+            last: {status.lastResult}
+          </p>
+        )}
+
+        <p className="flex items-start gap-1.5 text-[11px] leading-snug text-muted-foreground">
+          <ShieldCheck className="mt-0.5 size-3.5 shrink-0" aria-hidden="true" />
+          Anyone who knows the topic name can push to your device — the dice suggests an unguessable one.
+          Nothing is sent while disabled or unconfigured; pushes are generated only from real synced ERP data.
+        </p>
+      </CardContent>
+    </Card>
+  );
+}
+
+/* ------------------------------------------------------------------ */
+
 export function SettingsTab() {
   const { data: erp } = useQuery({ queryKey: qk.erpStatus, queryFn: fetchErpStatus });
   const liveConnected = erp?.connected === true;
@@ -2179,7 +2485,10 @@ export function SettingsTab() {
       <SemesterCard />
       <SubjectTargetsCard />
       <NotificationPrefsCard />
-      <WhatsAppCard />
+      <div className="grid gap-4 lg:grid-cols-2">
+        <WhatsAppCard />
+        <NtfyCard />
+      </div>
       <div className="grid gap-4 lg:grid-cols-2">
         <BrowserRemindersCard />
         <InstallAppCard />

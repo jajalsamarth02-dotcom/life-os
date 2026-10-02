@@ -1,12 +1,13 @@
 import { syncIfDue } from "./engine";
 import { maybeDailyDigest } from "@/lib/notify/whatsapp";
+import { maybeNtfyDailyDigest } from "@/lib/notify/ntfy";
 
 /**
  * In-process background scheduler.
  * Ticks once a minute and lets the sync engine decide whether a scheduled
  * synchronization is due (respects configured interval, failure backoff,
  * rate limits and whether any data source is configured at all).
- * The same tick also drives the fixed-time daily WhatsApp digest.
+ * The same tick also drives the fixed-time daily WhatsApp + ntfy digests.
  */
 
 export function startScheduler(): void {
@@ -29,9 +30,12 @@ export function startScheduler(): void {
     } catch (e) {
       console.error("[erp-sync] scheduler tick error:", e);
     }
-    // Fixed-time daily digest (no-ops within milliseconds unless configured
-    // and due — and it never throws, so it can't destabilize the tick).
+    // Fixed-time daily digests for BOTH channels (no-ops within milliseconds
+    // unless configured and due — and neither ever throws, so they can't
+    // destabilize the tick). Channels are independent: one disabled never
+    // silences the other.
     await maybeDailyDigest();
+    await maybeNtfyDailyDigest();
   };
 
   setInterval(tick, 60_000);
