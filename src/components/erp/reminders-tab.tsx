@@ -7,6 +7,7 @@ import {
   AlertTriangle,
   BellRing,
   CalendarClock,
+  CalendarPlus,
   CheckCircle2,
   ChevronDown,
   Clock,
@@ -14,11 +15,13 @@ import {
   Lock,
   Plus,
   Trash2,
+  TriangleAlert,
   Undo2,
   XCircle,
 } from "lucide-react";
 import { toast } from "sonner";
 import { Download } from "lucide-react";
+import { downloadRemindersIcs } from "@/lib/ics";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -117,7 +120,10 @@ function ReminderRow({ r, onDeleted }: { r: Reminder; onDeleted: (r: Reminder) =
   const [confirmDelete, setConfirmDelete] = useState(false);
   const isWarn = r.type === "ATTENDANCE_WARNING";
   const done = r.status !== "ACTIVE";
-  const overdue = r.status === "ACTIVE" && new Date(r.dueAt).getTime() < now;
+  const dueMs = new Date(r.dueAt).getTime() - now;
+  const overdue = r.status === "ACTIVE" && dueMs < 0;
+  const dueSoon = r.status === "ACTIVE" && dueMs >= 0 && dueMs <= 24 * 3600 * 1000;
+  const canExport = !done && !isWarn;
 
   const setStatus = useMutation({
     mutationFn: (status: string) => updateReminderStatus(r.id, status),
@@ -170,7 +176,11 @@ function ReminderRow({ r, onDeleted }: { r: Reminder; onDeleted: (r: Reminder) =
         "flex items-start gap-3 rounded-xl border p-3 transition-colors",
         isWarn
           ? "border-amber-500/40 bg-amber-500/[0.06] hover:bg-amber-500/10"
-          : "border-border/50 hover:bg-muted/40",
+          : dueSoon
+            ? "border-amber-500/35 bg-amber-500/[0.035] hover:bg-amber-500/[0.07]"
+            : overdue
+              ? "border-red-500/30 bg-red-500/[0.03] hover:bg-red-500/[0.06]"
+              : "border-border/50 hover:bg-muted/40",
         done && "opacity-60"
       )}
     >
@@ -201,10 +211,16 @@ function ReminderRow({ r, onDeleted }: { r: Reminder; onDeleted: (r: Reminder) =
         </div>
         {r.description && <p className="mt-0.5 line-clamp-2 text-xs text-muted-foreground">{r.description}</p>}
         <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-0.5">
-          <span className={cn("text-xs", overdue ? "font-medium text-red-600 dark:text-red-400" : "text-muted-foreground")}>
+          <span className={cn("text-xs", overdue ? "font-medium text-red-600 dark:text-red-400" : dueSoon ? "font-medium text-amber-600 dark:text-amber-400" : "text-muted-foreground")}>
             {overdue ? "Overdue · " : ""}
             {fmtDT(r.dueAt)}
           </span>
+          {dueSoon && (
+            <span className="inline-flex items-center gap-1 rounded-full border border-amber-500/40 bg-amber-500/10 px-2 py-0.5 text-[10px] font-semibold text-amber-700 dark:text-amber-400">
+              <Clock className="size-3" aria-hidden="true" />
+              due in {Math.max(1, Math.round(dueMs / 3600_000))}h
+            </span>
+          )}
           {isWarn && (
             <span className="inline-flex items-center gap-1 text-[11px] font-medium text-amber-600 dark:text-amber-400">
               <Lock className="size-3" aria-hidden="true" />
@@ -227,6 +243,31 @@ function ReminderRow({ r, onDeleted }: { r: Reminder; onDeleted: (r: Reminder) =
             <Undo2 className="size-4" aria-hidden="true" />
           </Button>
         ) : null}
+        {canExport && (
+          <Button
+            variant="ghost"
+            size="icon"
+            className="size-8 text-muted-foreground hover:bg-emerald-500/10 hover:text-emerald-600 dark:hover:text-emerald-400"
+            aria-label={`Add ${r.title} to your calendar (.ics)`}
+            onClick={() => {
+              const filename = downloadRemindersIcs([
+                {
+                  id: r.id,
+                  title: r.title,
+                  description: r.description,
+                  dueAt: r.dueAt,
+                  type: r.type,
+                  source: r.source,
+                },
+              ]);
+              toast.success(`${filename} downloaded`, {
+                description: `“${r.title}” added as a calendar event.`,
+              });
+            }}
+          >
+            <CalendarPlus className="size-4" aria-hidden="true" />
+          </Button>
+        )}
         {canSnooze && (
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
@@ -631,6 +672,35 @@ export function RemindersTab() {
           </label>
 
           <div className="ml-auto flex items-center gap-2">
+            {data && data.some((r) => r.status === "ACTIVE" && r.type !== "ATTENDANCE_WARNING") && (
+              <Button
+                variant="outline"
+                size="sm"
+                className="h-8 gap-1.5 text-xs"
+                onClick={() => {
+                  const active = data.filter(
+                    (r) => r.status === "ACTIVE" && r.type !== "ATTENDANCE_WARNING"
+                  );
+                  const filename = downloadRemindersIcs(
+                    active.map((r) => ({
+                      id: r.id,
+                      title: r.title,
+                      description: r.description,
+                      dueAt: r.dueAt,
+                      type: r.type,
+                      source: r.source,
+                    }))
+                  );
+                  toast.success(`${filename} downloaded`, {
+                    description: `${active.length} deadline${active.length === 1 ? "" : "s"} exported as calendar events.`,
+                  });
+                }}
+                aria-label="Export active deadlines as a calendar (.ics) file"
+              >
+                <CalendarPlus className="size-3.5" aria-hidden="true" />
+                .ics
+              </Button>
+            )}
             {data && data.length > 0 && (
               <Button
                 variant="outline"

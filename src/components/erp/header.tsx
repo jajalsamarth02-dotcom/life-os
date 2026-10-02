@@ -163,6 +163,23 @@ function NotificationsBell({ notifications, unreadCount }: { notifications: AppN
   const alertCount = notifications.filter(
     (n) => n.severity === "warning" || n.severity === "critical"
   ).length;
+  // The unread badge escalates with the WORST unread severity: red for
+  // critical, amber when only warnings remain, primary (calm) otherwise.
+  const worstUnread: NotificationSeverity | null = notifications.some(
+    (n) => !n.read && n.severity === "critical"
+  )
+    ? "critical"
+    : notifications.some((n) => !n.read && n.severity === "warning")
+      ? "warning"
+      : unreadCount > 0
+        ? "info"
+        : null;
+  const badgeClass =
+    worstUnread === "critical"
+      ? "bg-red-500"
+      : worstUnread === "warning"
+        ? "bg-amber-500"
+        : "bg-primary";
   const visible = notifications.filter((n) => {
     if (filter === "unread") return !n.read;
     if (filter === "alerts") return n.severity === "warning" || n.severity === "critical";
@@ -179,9 +196,9 @@ function NotificationsBell({ notifications, unreadCount }: { notifications: AppN
     <Popover>
       <PopoverTrigger asChild>
         <Button variant="ghost" size="icon" className="relative" aria-label={`Notifications (${unreadCount} unread)`}>
-          <Bell className="size-4.5" />
+          <Bell className={cn("size-4.5", worstUnread === "critical" && "text-red-500 dark:text-red-400")} />
           {unreadCount > 0 && (
-            <span className="absolute -top-0.5 -right-0.5 flex h-4.5 min-w-4.5 items-center justify-center rounded-full bg-red-500 px-1 text-[10px] font-semibold text-white tabular-nums">
+            <span className={cn("absolute -top-0.5 -right-0.5 flex h-4.5 min-w-4.5 items-center justify-center rounded-full px-1 text-[10px] font-semibold text-white tabular-nums", badgeClass)}>
               {unreadCount > 99 ? "99+" : unreadCount}
             </span>
           )}
@@ -213,7 +230,8 @@ function NotificationsBell({ notifications, unreadCount }: { notifications: AppN
                 "flex items-center gap-1 rounded-full border px-2.5 py-1 text-[11px] font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
                 filter === f.key
                   ? "border-primary/40 bg-primary/10 text-primary"
-                  : "border-border/60 text-muted-foreground hover:bg-muted/60"
+                  : "border-border/60 text-muted-foreground hover:bg-muted/60",
+                f.key === "alerts" && f.count > 0 && filter !== f.key && "border-amber-500/40 bg-amber-500/[0.07] text-amber-700 dark:text-amber-400"
               )}
             >
               {f.label}

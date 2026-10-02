@@ -130,3 +130,89 @@ export function downloadTimetableIcs(slots: IcsSlot[], subjects: IcsSubject[]): 
   URL.revokeObjectURL(url);
   return filename;
 }
+
+/* ------------------------------------------------------------------ */
+/* Reminder events (exams, deadlines) — one timed VEVENT each          */
+/* ------------------------------------------------------------------ */
+
+export interface IcsReminder {
+  id: string;
+  title: string;
+  description: string | null;
+  /** ISO timestamp of the deadline. */
+  dueAt: string;
+  /** Free-form category, e.g. EXAM / ASSIGNMENT / SUBMISSION. */
+  type: string;
+  source: string;
+}
+
+/** Calendar block a deadline deserves, by reminder type. */
+function durationMinutesFor(type: string): number {
+  if (type === "EXAM" || type === "PRACTICAL_EXAM") return 120;
+  if (type === "VIVA") return 60;
+  return 30;
+}
+
+/** Build a VCALENDAR of timed events from active reminders. */
+export function buildRemindersIcs(
+  reminders: IcsReminder[],
+  calendarName = "Deadlines & exams (ERP Sync)"
+): string {
+  const nowStamp = icsLocal(new Date(), new Date().getHours() * 60 + new Date().getMinutes());
+
+  const events = [...reminders]
+    .sort((a, b) => a.dueAt.localeCompare(b.dueAt))
+    .map((r) => {
+      const start = new Date(r.dueAt);
+      const end = new Date(start.getTime() + durationMinutesFor(r.type) * 60_000);
+      const description = [
+        r.description ?? "",
+        r.source === "ERP" ? "Imported from the ERP." : "Personal reminder from ERP Sync.",
+      ]
+        .filter(Boolean)
+        .join(" ");
+      return [
+        "BEGIN:VEVENT",
+        `UID:erp-sync-rem-${r.id}@erp-sync.local`,
+        `DTSTAMP:${nowStamp}`,
+        `DTSTART:${icsLocal(start, start.getHours() * 60 + start.getMinutes())}`,
+        `DTEND:${icsLocal(end, end.getHours() * 60 + end.getMinutes())}`,
+        `SUMMARY:${escapeText(r.title)}`,
+        `DESCRIPTION:${escapeText(description)}`,
+        `CATEGORIES:${escapeText(r.type)}`,
+        r.source === "ERP" ? "STATUS:CONFIRMED" : "STATUS:TENTATIVE",
+        "TRANSP:OPAQUE",
+        "END:VEVENT",
+      ].map(fold).join("\r\n");
+    });
+
+  return [
+    "BEGIN:VCALENDAR",
+    "VERSION:2.0",
+    "PRODID:-//ERP Sync//Deadlines & Exams//EN",
+    "CALSCALE:GREGORIAN",
+    "METHOD:PUBLISH",
+    `X-WR-CALNAME:${escapeText(calendarName)}`,
+    ...events,
+    "END:VCALENDAR",
+    "",
+  ].join("\r\n");
+}
+
+/** Download active reminders as a .ics calendar file. Returns the filename. */
+export function downloadRemindersIcs(reminders: IcsReminder[]): string {
+  const d = new Date();
+  const filename = `deadlines-${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}.ics`;
+  const blob = new Blob([buildRemindersIcs(reminders)], {
+    type: "text/calendar;charset=utf-8",
+  });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  URL.revokeObjectURL(url);
+  return filename;
+}

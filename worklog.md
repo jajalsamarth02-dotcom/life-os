@@ -477,3 +477,55 @@ Unresolved issues / risks & next-phase priorities:
    cross-links, per-subject "what-if" from palette rows, notification severity accents in the bell.
 4. The .ics export uses floating local times (correct for a weekly class pattern); if the college
    publishes exam dates they may deserve TZ-aware events later.
+
+---
+Task ID: 6 (webDevReview round 5, trace 1a0fb448552e0aed-web-cron-review-202610021800)
+Agent: Z.ai Code (main orchestrator)
+Task: Status assessment + agent-browser QA + reminder calendar export + severity/urgency styling
+
+Current project status / assessment:
+- Round 5 of the 15-min webDevReview cron. Round 4 left the app stable with reproducible demo resets
+  and timetable .ics export. QA sweep (desktop 1280 + mobile 390, 0 console errors) found no bugs, so
+  this round advanced the backlog: calendar export for DEADLINES (synergy with the round-4 ics lib)
+  and severity/urgency affordances.
+
+Completed modifications / verified:
+1. FEATURE — REMINDERS → CALENDAR (.ics): src/lib/ics.ts gained buildRemindersIcs/downloadRemindersIcs:
+   one timed VEVENT per active reminder, DTSTART/DTEND floating-local from dueAt, block length by type
+   (EXAM & PRACTICAL_EXAM 2h, VIVA 1h, deadlines 30m), CATEGORIES from the reminder type, STATUS
+   CONFIRMED for ERP-sourced vs TENTATIVE for personal, source note in DESCRIPTION, UID
+   erp-sync-rem-{id}@erp-sync.local, sorted by due date, 74-octet folding.
+   - Toolbar: ".ics" button in the Reminders tab (next to Export CSV; visible when ≥1 active
+     non-warning reminder exists) → downloads deadlines-YYYY-MM-DD with ALL active deadlines.
+   - Per-row: CalendarPlus icon-button on every active, non-ATTENDANCE_WARNING row (ERP and personal
+     alike) to export a single event; warning rows stay lock-only (auto-managed, not calendar material).
+   - Unit-tested with bun -e (durations/statuses/sort verified); browser-verified: toolbar toast
+     "5 deadlines exported as calendar events", per-row buttons present.
+2. STYLING/UX — SEVERITY + URGENCY affordances (mandatory):
+   a) Bell badge now escalates with the WORST unread severity — red for critical, amber when only
+      warnings remain, primary (calm) for neutral unread; the bell icon itself tints red on critical.
+      The "Alerts" filter chip in the popover gets an amber accent whenever it has unread alert items.
+   b) Reminder rows communicate time pressure: due within 24h → amber border/tint + a "due in Nh"
+      chip (amber); overdue → red border/tint (red date text already existed). Verified visually:
+      two attendance warnings show "due in 14h" chips; the tomorrow-evening personal row correctly
+      shows no chip (>24h away).
+3. QA re-check: reminders toolbar wraps cleanly on 390px (filters row + actions row), no clipping;
+   desktop light + mobile verified; 0 console/page errors; bun run lint clean.
+
+Verification results:
+- bun run lint: clean. agent-browser: 0 console errors after all changes (fresh reloads desktop+mobile).
+- Unit test: buildRemindersIcs output (2 events) — EXAM 10:00→12:00 CONFIRMED, SUBMISSION 18:00→18:30
+  TENTATIVE, correct ordering/categories. Browser: toolbar + per-row exports produce toasts; bell
+  badge amber with warnings-only unread; urgency chips render on warning rows.
+- No dev-server restart, no production build (round constraints).
+
+Unresolved issues / risks & next-phase priorities:
+1. Live ERP scrape parser still generic — TOP priority if real credentials arrive (demo mode keeps
+   every feature exercisable meanwhile).
+2. Calendar events use floating local times; fine for a single-student local workflow, TZ-aware
+   events would matter only for multi-timezone use.
+3. Remaining backlog: trend-point ↔ heatmap cross-links, per-subject what-if from palette rows,
+   weekly digest delivery beyond copy/CSV (email needs an SMTP account), offline fallback page for
+   the PWA.
+4. Demo note: warnings are recreated on every sync while a subject is below target — their
+   "due in 14h" chips will persist by design (dueAt is end-of-day).
