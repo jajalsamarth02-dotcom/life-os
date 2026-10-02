@@ -41,6 +41,7 @@ import { fetchAssignments, fetchDashboard, fetchHistory, fetchSyncLogs, fetchAla
 import { WeeklyDigestDialog } from "./digest-dialog";
 import { TodayCard } from "./today-card";
 import { SkipBudgetCard } from "./skip-budget-card";
+import { SetupChecklist } from "./setup-checklist";
 import { MilestoneCelebration, MilestonesStrip } from "./milestones";
 import { SubjectDrawer } from "./subject-drawer";
 import { TimetableCard } from "./timetable-card";
@@ -69,6 +70,7 @@ import {
 } from "./shared";
 import type { AlaNoteRow, AlaUpcomingRow, ChangeEvent, HistoryPoint, Reminder, SubjectView } from "./types";
 import { ALA_PRIORITY_META, alaPriorityOf } from "./reminders-tab";
+import type { SettingsFocus } from "./settings-tab";
 import { Sparkline } from "./trend-chart";
 
 /* ------------------------------------------------------------------ */
@@ -982,6 +984,7 @@ export function DashboardTab({
   onOpenSettings,
   onOpenReminders,
   onOpenFlaggedAlas,
+  onOpenSetupStep,
 }: {
   onOpenAttendance: () => void;
   onOpenSettings: () => void;
@@ -989,6 +992,9 @@ export function DashboardTab({
   /** Jump to the Reminders tab with the "Noted" filter pre-applied
    *  (wired by page.tsx — sets a pending filter, then switches tabs). */
   onOpenFlaggedAlas: () => void;
+  /** Deep-link a setup-checklist row into the exact Settings card
+   *  (page.tsx switches to the Settings tab and spotlights the target). */
+  onOpenSetupStep?: (focus: SettingsFocus) => void;
 }) {
   /* Sort starts at the default and hydrates from localStorage after mount
      (SSR renders "lowest", so a saved preference swaps in post-paint — same
@@ -1252,6 +1258,14 @@ export function DashboardTab({
 
       {/* Row 0 — next deadline countdown */}
       <div className="print:hidden"><NextUpStrip items={data.reminders.items} flagPriorities={flagPriorities} /></div>
+
+      {/* Row 0.4 — finish-setup checklist. Derives every row from the live
+         config state and deep-links each row into the exact Settings card;
+         collapses once the core channels are live (never blocks on the
+         optional digest-time row), dismissal is device-local. */}
+      <div className="print:hidden">
+        <SetupChecklist onOpenStep={onOpenSetupStep} />
+      </div>
 
       {/* Row 0.5 — the student's private triage layer (notes/priority flags).
          Renders nothing until at least one ALA is flagged. */}

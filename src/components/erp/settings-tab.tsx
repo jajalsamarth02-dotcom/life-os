@@ -1,7 +1,7 @@
 "use client";
 
 import * as React from "react";
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   AlertCircle,
@@ -2664,9 +2664,48 @@ function NtfyCard() {
 
 /* ------------------------------------------------------------------ */
 
-export function SettingsTab() {
+/** Deep-link targets the dashboard's setup checklist can spotlight:
+ *  "notify" = the WhatsApp/ntfy channel grid, "backup" = data & backups
+ *  (which hosts the calendar subscription block). */
+export type SettingsFocus = "notify" | "backup";
+
+export function SettingsTab({
+  focus,
+  onConsumeFocus,
+}: {
+  /** Pending deep-link from the dashboard setup checklist (null = none). */
+  focus?: SettingsFocus | null;
+  /** Called once the focus has been picked up so a later revisit never
+   *  re-scrolls to a stale target (same consume pattern as pendingAlaFilter). */
+  onConsumeFocus?: () => void;
+} = {}) {
   const { data: erp } = useQuery({ queryKey: qk.erpStatus, queryFn: fetchErpStatus });
   const liveConnected = erp?.connected === true;
+
+  /* Spotlight: scroll the requested card into view and pulse a violet ring
+     around it for a moment. The timer lives in a ref instead of an effect
+     cleanup — consuming the focus flips the prop to null and re-runs the
+     effect, which must NOT cancel the already-scheduled clear. */
+  const notifyRef = useRef<HTMLDivElement | null>(null);
+  const backupRef = useRef<HTMLDivElement | null>(null);
+  const [spotlight, setSpotlight] = useState<SettingsFocus | null>(null);
+  const spotTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  React.useEffect(() => {
+    if (!focus) return;
+    onConsumeFocus?.();
+    const el = focus === "notify" ? notifyRef.current : backupRef.current;
+    el?.scrollIntoView({ behavior: "smooth", block: "center" });
+    setSpotlight(focus);
+    if (spotTimer.current) clearTimeout(spotTimer.current);
+    spotTimer.current = setTimeout(() => setSpotlight(null), 2800);
+  }, [focus, onConsumeFocus]);
+  const spotClass = (on: boolean) =>
+    cn(
+      "transition-all duration-500",
+      on
+        ? "rounded-2xl ring-2 ring-violet-500/60 ring-offset-4 ring-offset-background"
+        : "ring-0 ring-offset-4 ring-offset-transparent"
+    );
 
   return (
     <div className="space-y-4">
@@ -2677,9 +2716,14 @@ export function SettingsTab() {
       <SemesterCard />
       <SubjectTargetsCard />
       <NotificationPrefsCard />
-      <div className="grid gap-4 lg:grid-cols-2">
-        <WhatsAppCard />
-        <NtfyCard />
+      <div
+        ref={notifyRef}
+        className={spotClass(spotlight === "notify")}
+      >
+        <div className="grid gap-4 lg:grid-cols-2">
+          <WhatsAppCard />
+          <NtfyCard />
+        </div>
       </div>
       <div className="grid gap-4 lg:grid-cols-2">
         <BrowserRemindersCard />
@@ -2687,7 +2731,9 @@ export function SettingsTab() {
       </div>
       <TextSizeCard />
       <DemoModeCard liveConnected={liveConnected} />
-      <DataBackupCard />
+      <div ref={backupRef} className={spotClass(spotlight === "backup")}>
+        <DataBackupCard />
+      </div>
       <SyncHistoryCard />
 
       <Card className="rounded-xl border-border/60 bg-muted/40">

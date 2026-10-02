@@ -33,7 +33,7 @@ import { AppHeader } from "@/components/erp/header";
 import { DashboardTab } from "@/components/erp/dashboard-tab";
 import { AttendanceTab } from "@/components/erp/attendance-tab";
 import { RemindersTab, type AlaStatusFilter } from "@/components/erp/reminders-tab";
-import { SettingsTab } from "@/components/erp/settings-tab";
+import { SettingsTab, type SettingsFocus } from "@/components/erp/settings-tab";
 import { CommandPalette } from "@/components/erp/command-palette";
 import { useDueNotifications } from "@/components/erp/use-due-notifications";
 import { useOffline } from "@/components/erp/use-offline";
@@ -181,6 +181,22 @@ export default function Home() {
     window.scrollTo({ top: 0, behavior: "smooth" });
   }, []);
   const consumePendingAlaFilter = useCallback(() => setPendingAlaFilter(null), []);
+
+  /* Deep link from the dashboard's setup checklist: switch to Settings and
+     spotlight the exact card the row points at (consumed once on mount). */
+  const [pendingSettingsFocus, setPendingSettingsFocus] = useState<SettingsFocus | null>(null);
+  const openSettingsFocus = useCallback(
+    (f: SettingsFocus) => {
+      setPendingSettingsFocus(f);
+      setTabState("settings");
+      if (window.location.hash !== "#settings") {
+        window.history.replaceState(null, "", "#settings");
+      }
+      window.scrollTo({ top: 0, behavior: "smooth" });
+    },
+    []
+  );
+  const consumePendingSettingsFocus = useCallback(() => setPendingSettingsFocus(null), []);
 
   /* Tab → URL hash: every navigation leaves a shareable deep link
      (/#attendance …). replaceState keeps the browser history clean. */
@@ -384,6 +400,7 @@ export default function Home() {
                       onOpenSettings={() => setTab("settings")}
                       onOpenReminders={() => setTab("reminders")}
                       onOpenFlaggedAlas={openFlaggedAlas}
+                      onOpenSetupStep={openSettingsFocus}
                     />
                   )}
                   {key === "attendance" && <AttendanceTab onOpenSettings={() => setTab("settings")} />}
@@ -393,7 +410,12 @@ export default function Home() {
                       onConsumePendingAlaFilter={consumePendingAlaFilter}
                     />
                   )}
-                  {key === "settings" && <SettingsTab />}
+                  {key === "settings" && (
+                    <SettingsTab
+                      focus={pendingSettingsFocus}
+                      onConsumeFocus={consumePendingSettingsFocus}
+                    />
+                  )}
                 </motion.div>
               </TabsContent>
             ))}
