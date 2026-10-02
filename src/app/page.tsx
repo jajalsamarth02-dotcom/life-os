@@ -287,13 +287,15 @@ export default function Home() {
 
   return (
     <div className="relative flex min-h-screen flex-col overflow-x-clip bg-background">
-      {/* Decorative ambient gradient (subtle, theme-aware) */}
-      <div aria-hidden="true" className="pointer-events-none absolute inset-0 overflow-hidden">
+      {/* Decorative ambient gradient (subtle, theme-aware) — never printed */}
+      <div aria-hidden="true" className="pointer-events-none absolute inset-0 overflow-hidden print:hidden">
         <div className="absolute -top-32 left-1/2 h-72 w-[42rem] -translate-x-1/2 rounded-full bg-emerald-500/[0.07] blur-3xl" />
         <div className="absolute -right-24 top-64 h-56 w-56 rounded-full bg-amber-500/[0.05] blur-3xl" />
         <div className="absolute -left-24 top-96 h-56 w-56 rounded-full bg-emerald-500/[0.04] blur-3xl" />
       </div>
-      <AppHeader onOpenPalette={() => setPaletteOpen(true)} />
+      <div className="print:hidden">
+        <AppHeader onOpenPalette={() => setPaletteOpen(true)} />
+      </div>
 
       <main className="relative mx-auto w-full max-w-6xl flex-1 px-4 py-4 sm:py-6">
         <div className="space-y-4">
@@ -318,7 +320,7 @@ export default function Home() {
           {mode === "demo" && <DemoStrip onOpenSettings={() => setTab("settings")} />}
 
           <Tabs value={tab} onValueChange={(v) => setTab(v as TabKey)} className="space-y-4">
-            <TabsList className="grid h-auto w-full grid-cols-2 gap-1 rounded-xl p-1 sm:grid-cols-4">
+            <TabsList className="grid h-auto w-full grid-cols-2 gap-1 rounded-xl p-1 print:hidden sm:grid-cols-4">
               {TAB_ITEMS.map(({ key, label, icon: Icon }, i) => (
                 <TabsTrigger
                   key={key}
@@ -381,7 +383,7 @@ export default function Home() {
         semester={data?.semester}
       />
 
-      <footer className="relative mt-auto border-t border-border/60 bg-card/50">
+      <footer className="relative mt-auto border-t border-border/60 bg-card/50 print:hidden">
         <div className="mx-auto flex w-full max-w-6xl flex-col items-center justify-between gap-1 px-4 py-3.5 pb-[max(0.875rem,env(safe-area-inset-bottom))] text-center text-xs text-muted-foreground sm:flex-row sm:text-left">
           <p>
             Automatic ERP-Sync Student System · Gyanmanjari Innovative University · Data source:{" "}

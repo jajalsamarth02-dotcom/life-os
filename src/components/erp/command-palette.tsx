@@ -12,6 +12,7 @@ import {
   Keyboard,
   LayoutDashboard,
   Moon,
+  Printer,
   RefreshCw,
   Settings as SettingsIcon,
   Sun,
@@ -244,6 +245,14 @@ export function CommandPalette({
               Simulate ERP change (demo)
             </CommandItem>
           )}
+          <CommandItem
+            value="print report save pdf attendance"
+            onSelect={() => run(() => window.print())}
+          >
+            <Printer className="size-4 text-muted-foreground" aria-hidden="true" />
+            Print attendance report (PDF)
+            <CommandShortcut>Ctrl+P</CommandShortcut>
+          </CommandItem>
           <CommandItem onSelect={() => run(onShowShortcuts)}>
             <Keyboard className="size-4 text-muted-foreground" aria-hidden="true" />
             Keyboard shortcuts

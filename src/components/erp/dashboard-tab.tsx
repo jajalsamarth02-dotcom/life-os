@@ -20,6 +20,7 @@ import {
   ClipboardList,
   Copy,
   Layers,
+  Printer,
   Share2,
   WifiOff,
   XCircle,
@@ -800,6 +801,25 @@ export function DashboardTab({
         show: { transition: { staggerChildren: 0.05 } },
       }}
     >
+      {/* Print-only report header — replaces the app chrome on paper/PDF */}
+      <div className="hidden print:block" aria-hidden="true">
+        <div className="flex items-end justify-between border-b-2 border-black/80 pb-2">
+          <div>
+            <p className="text-base font-bold tracking-tight">Attendance Report</p>
+            <p className="text-xs text-black/70">
+              Gyanmanjari Innovative University · erp.gmiu.edu.in
+              {data.semester !== "all" ? ` · Semester ${data.semester}` : ""}
+            </p>
+          </div>
+          <div className="text-right text-xs tabular-nums text-black/70">
+            <p className="font-semibold text-black">
+              Overall {overall.percentage.toFixed(2)}% <span className="font-normal">(target {target}%)</span>
+            </p>
+            <p>Generated {fmtDT(data.erp?.sync?.lastSyncAt ?? new Date().toISOString())}</p>
+          </div>
+        </div>
+      </div>
+
       {/* Subject detail drawer (also covers what-if planning) */}
       <SubjectDrawer
         subject={data.subjects.find((s) => s.code === selectedCode) ?? null}
@@ -812,7 +832,7 @@ export function DashboardTab({
       />
 
       {/* Row 0 — next deadline countdown */}
-      <NextUpStrip items={data.reminders.items} />
+      <div className="print:hidden"><NextUpStrip items={data.reminders.items} /></div>
 
       {/* Row 1 — overall + stats */}
       <motion.div
@@ -839,9 +859,9 @@ export function DashboardTab({
                 <Button
                   variant="ghost"
                   size="sm"
-                  className="ml-auto h-7 gap-1 rounded-full border border-border/40 bg-background/40 px-2.5 text-xs text-muted-foreground hover:bg-accent hover:text-foreground"
+                  className="ml-auto h-7 gap-1 rounded-full border border-border/40 bg-background/40 px-2.5 text-xs text-muted-foreground hover:bg-accent hover:text-foreground print:hidden"
                   onClick={copySummary}
-                  aria-label="Copy attendance summary to clipboard"
+                  aria-label="Copy attendance summary to clipboard" data-noprint
                   title="Copy a plain-text attendance summary (per-subject %, status, targets)"
                 >
                   {copied ? (
@@ -855,9 +875,9 @@ export function DashboardTab({
                   <Button
                     variant="ghost"
                     size="sm"
-                    className="h-7 gap-1 rounded-full border border-border/40 bg-background/40 px-2.5 text-xs text-muted-foreground hover:bg-accent hover:text-foreground"
+                    className="h-7 gap-1 rounded-full border border-border/40 bg-background/40 px-2.5 text-xs text-muted-foreground hover:bg-accent hover:text-foreground print:hidden"
                     onClick={shareSummary}
-                    aria-label="Share attendance summary via your device"
+                    aria-label="Share attendance summary via your device" data-noprint
                     title="Share the plain-text attendance summary (per-subject %, status, targets)"
                   >
                     <Share2 className="size-3.5" aria-hidden="true" />
@@ -867,12 +887,23 @@ export function DashboardTab({
                 <Button
                   variant="ghost"
                   size="sm"
-                  className="h-7 gap-1 rounded-full border border-border/40 bg-background/40 px-2.5 text-xs text-muted-foreground hover:bg-accent hover:text-foreground"
+                  className="h-7 gap-1 rounded-full border border-border/40 bg-background/40 px-2.5 text-xs text-muted-foreground hover:bg-accent hover:text-foreground print:hidden"
                   onClick={() => setDigestOpen(true)}
-                  aria-label="Open the weekly attendance report"
+                  aria-label="Open the weekly attendance report" data-noprint
                 >
                   <CalendarRange className="size-3.5" aria-hidden="true" />
                   This week
+                </Button>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="h-7 gap-1 rounded-full border border-border/40 bg-background/40 px-2.5 text-xs text-muted-foreground hover:bg-accent hover:text-foreground print:hidden"
+                  onClick={() => window.print()}
+                  aria-label="Print the attendance report or save it as PDF" data-noprint
+                  title="Print the report or save it as a PDF — hides all app chrome automatically"
+                >
+                  <Printer className="size-3.5" aria-hidden="true" />
+                  Print
                 </Button>
                 {weekDelta !== null && (
                   <span
@@ -947,7 +978,7 @@ export function DashboardTab({
             <CardTitle className="text-base tracking-tight">Subject attendance</CardTitle>
             <CardDescription className="text-xs">Tap a subject for details and what-if planning</CardDescription>
           </div>
-          <div className="flex items-center gap-1.5">
+          <div className="flex items-center gap-1.5 print:hidden">
             <Select value={sort} onValueChange={(v) => setSort(v as SubjectSort)}>
               <SelectTrigger
                 className="h-8 w-full min-w-0 gap-1 text-xs sm:w-[190px]"

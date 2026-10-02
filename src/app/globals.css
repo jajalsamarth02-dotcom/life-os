@@ -297,3 +297,58 @@
     opacity: 0.45;
   }
 }
+
+
+/* ---------------------------------------------------------------------------
+   Print / save-as-PDF report styling (triggered by the Print chip or Ctrl+P).
+   The app chrome is hidden via Tailwind print: variants in the components;
+   these rules make the paper output readable: white background, black text,
+   exact colors for the ring/chips, and no cards split across pages.
+--------------------------------------------------------------------------- */
+@media print {
+  html,
+  body {
+    background: white !important;
+    color: black !important;
+  }
+
+  /* Keep the ring, status dots and chips colored on paper */
+  * {
+    -webkit-print-color-adjust: exact !important;
+    print-color-adjust: exact !important;
+  }
+
+  /* Scroll viewports must expand fully on paper (rows would be clipped) */
+  [class*="max-h-"],
+  [class*="overflow-y-auto"],
+  [class*="overflow-auto"] {
+    max-height: none !important;
+    overflow: visible !important;
+  }
+
+  /* Paper-friendly surfaces: drop glass/shadow effects, ink borders */
+  [class*="shadow"],
+  [class*="backdrop-blur"] {
+    box-shadow: none !important;
+    backdrop-filter: none !important;
+  }
+
+  .rounded-2xl,
+  .rounded-xl {
+    border-color: rgb(0 0 0 / 0.2) !important;
+  }
+
+  /* Individual rows/entries never split across pages (their cards may) */
+  button,
+  tr {
+    break-inside: avoid;
+  }
+
+  /* Dark theme must not leak into the printout */
+  .dark body,
+  .dark [class*="bg-card"],
+  .dark [class*="bg-background"] {
+    background: white !important;
+    color: black !important;
+  }
+}

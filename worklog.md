@@ -1361,3 +1361,24 @@ Unresolved issues / risks & next-phase priorities:
 4. Backup RESTORE (import) deliberately NOT built — would need a write endpoint and data-clobber rules; suggest asking the user before adding.
 5. Backlog unchanged: L/H/E columns folding (needs user consent), SMTP digest (needs credentials), TZ cosmetic, per-semester scoping (schema), weekly bunk-budget (needs timetable slots — still empty).
 6. Keeper cron 430680 must stay alive; worklog protocol: append-only, three-section handover.
+
+---
+Task ID: 24
+Agent: Z.ai Code (main orchestrator)
+Task: Round task 23:30+08 — status assessment, cold-load QA, Print / Save-as-PDF attendance report (chip + print-only report header + print stylesheet + palette command). Client-side only.
+
+Current project status / assessment:
+- Server healthy all round: 200s throughout; next-server RSS ~1.96GB (pre-cap instance, creeping ~+100MB/round — 900MB cap lands on next natural respawn; do NOT manual-restart, spawn reaping per Task 17). Memory ~1.4GB available after QA. No new OOM events.
+- Cold-load QA: 0 console errors. Gap analysis vs R18-23: no print support anywhere (no window.print, no @media print) — a genuine miss for a student who may need a paper/PDF attendance report. Chose as the round feature.
+
+Completed modifications / verified:
+1. NEW FEATURE — Print report: (a) "Print" chip (Printer icon, sibling pill styling) in the Overall attendance card chip row → window.print(); (b) print-ONLY report header (hidden print:block) replacing app chrome: "Attendance Report", university + source + semester, overall %/target, generated timestamp; (c) print stylesheet in globals.css (@media print): white bg + black text, print-color-adjust exact (ring/chips stay colored), shadow/backdrop removal, ink borders, scroll-viewports unclamped, rows/trs never split across pages; (d) Tailwind print:hidden on app chrome — header, tabs, footer, ambient blobs, NEXT UP strip, the 4 interactive chips, subject-card sort/View-all controls; (e) command-palette item "Print attendance report (PDF)" with Ctrl+P shortcut hint.
+2. DEBUGGING JOURNEY (documented for future rounds): first attempt used a global `button { display: none }` print rule — WRONG: subject rows ARE buttons (SubjectRow), the report lost its data; reverted to targeted print:hidden on chrome-only controls. Second issue: the subject list lives in a max-h-96 overflow-y-auto container — paged media clipped it; fixed by unclamping [class*="max-h-"]/overflow containers in print. Third issue: break-inside: avoid on the tall subject card made Chromium silently DROP mid-card rows in the PDF; relaxed cards to break-inside: auto and added row-level avoid (button/tr) so no ROW ever splits.
+3. VERIFICATION (ground truth): agent-browser pdf (renders with print media) → 5-page report; pages: 1) report header + overall card + stat cards + first subject rows, 2) remaining 6 subject rows + today's schedule + reminders, 3) ALA deadlines + ERP connection, 4) recent ERP changes, 5) overflow. All 8 subject rows present with real values (66.67% overall, AI/COMPILER 100% 1/1, "needs 3 more classes" hints). Palette item found via CDP ("Print attendance report (PDF) Ctrl+P"). Screen view unaffected (screenshot /tmp/qa-r24-screen.png: chips row Copy/This week/Print, everything intact). tsc --noEmit clean under src/. Console 0 errors. Browser CLOSED immediately; server 200 after.
+
+Unresolved issues / risks & next-phase priorities:
+1. Pre-cap instance RSS ~1.96GB — highest observed yet; if the supervisor kill line hits, a capped (900MB) respawn arrives ≤3 min via keeper/harness; leave it alone. If it survives another round or two, consider a quiet-window `rm -rf .next` + keeper respawn to shed cache weight.
+2. Print report minor noise: "Manage" button + download icon inside Today's-schedule empty state still print (buttons inside TimetableCard) — could add print:hidden there in a future styling pass; harmless.
+3. User decisions still pending: 2nd free notification channel (Telegram ⭐ / ntfy / Discord / email) and optional fixed daily WhatsApp digest time (digestTime unset — never send test/digest to the real phone during QA).
+4. Backlog unchanged: L/H/E columns folding (needs user consent), SMTP digest (needs credentials), TZ cosmetic, per-semester scoping (schema), weekly bunk-budget (needs timetable slots — still empty), backup restore (needs user consent for a write endpoint).
+5. Keeper cron 430680 must stay alive; worklog protocol: append-only, three-section handover.
