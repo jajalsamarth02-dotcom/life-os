@@ -121,6 +121,24 @@ export const postSync = () => api<SyncResponse>("/api/sync", { method: "POST" })
 export const postDemoEvolve = () =>
   api<SyncResponse>("/api/demo/evolve", { method: "POST" });
 
+export interface DemoResetResult {
+  ok: boolean;
+  message: string;
+  wiped: {
+    timetableSlots: number;
+    snapshots: number;
+    changeEvents: number;
+    syncLogs: number;
+    notifications: number;
+    erpReminders: number;
+    subjects: number;
+  };
+}
+
+/** Wipe all demo-generated data and rebuild from a fresh simulated ERP. */
+export const postDemoReset = () =>
+  api<DemoResetResult>("/api/demo/reset", { method: "POST" });
+
 export const markAllNotificationsRead = () =>
   api<{ ok: boolean }>("/api/notifications", {
     method: "POST",

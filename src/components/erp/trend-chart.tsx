@@ -55,6 +55,7 @@ export function Sparkline({
   height = 40,
   className,
   ariaLabel,
+  target,
 }: {
   points: number[];
   stroke: string;
@@ -62,6 +63,8 @@ export function Sparkline({
   height?: number;
   className?: string;
   ariaLabel?: string;
+  /** Optional attendance-target % — drawn as a faint dashed tick when inside the data range. */
+  target?: number;
 }) {
   const path = useMemo(() => {
     if (points.length < 2) return null;
@@ -74,8 +77,13 @@ export function Sparkline({
       const y = height - 4 - ((p - min) / span) * (height - 8);
       return [x, y] as const;
     });
-    return coords.reduce((acc, [x, y], i) => (i === 0 ? `M ${x},${y}` : `${acc} L ${x},${y}`), "");
-  }, [points, width, height]);
+    const d = coords.reduce((acc, [x, y], i) => (i === 0 ? `M ${x},${y}` : `${acc} L ${x},${y}`), "");
+    const targetY =
+      target !== undefined && target >= min && target <= max
+        ? height - 4 - ((target - min) / span) * (height - 8)
+        : null;
+    return { d, targetY };
+  }, [points, width, height, target]);
 
   if (!path) return null;
   return (
@@ -87,7 +95,19 @@ export function Sparkline({
       role="img"
       aria-label={ariaLabel ?? "attendance trend"}
     >
-      <path d={path} fill="none" stroke={stroke} strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" />
+      {path.targetY !== null && (
+        <line
+          x1={0}
+          x2={width}
+          y1={path.targetY}
+          y2={path.targetY}
+          stroke="var(--muted-foreground)"
+          strokeWidth={1}
+          strokeDasharray="2 3"
+          opacity={0.45}
+        />
+      )}
+      <path d={path.d} fill="none" stroke={stroke} strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" />
     </svg>
   );
 }

@@ -102,8 +102,9 @@ function SubjectCard({
                   stroke={color}
                   width={84}
                   height={20}
+                  target={s.targetPct}
                   className="max-w-full opacity-80"
-                  ariaLabel={`${s.name} attendance trend`}
+                  ariaLabel={`${s.name} attendance trend with target marker`}
                 />
               )}
             </div>

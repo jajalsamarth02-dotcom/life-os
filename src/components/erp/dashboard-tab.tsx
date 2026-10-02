@@ -587,15 +587,15 @@ export function DashboardTab({
 
       {/* Row 2 — subject list */}
       <Card className="rounded-xl border-border/60 transition-shadow hover:shadow-md">
-        <CardHeader className="flex flex-row items-center justify-between space-y-0 gap-2 pb-3">
-          <div>
+        <CardHeader className="flex flex-col gap-2 space-y-0 pb-3 sm:flex-row sm:items-center sm:justify-between">
+          <div className="min-w-0">
             <CardTitle className="text-base tracking-tight">Subject attendance</CardTitle>
             <CardDescription className="text-xs">Tap a subject for details and what-if planning</CardDescription>
           </div>
           <div className="flex items-center gap-1.5">
             <Select value={sort} onValueChange={(v) => setSort(v as SubjectSort)}>
               <SelectTrigger
-                className="h-8 w-[190px] gap-1 text-xs"
+                className="h-8 w-full min-w-0 gap-1 text-xs sm:w-[190px]"
                 aria-label="Sort subjects"
               >
                 <ArrowDownUp className="size-3.5 shrink-0 text-muted-foreground" aria-hidden="true" />
@@ -609,7 +609,7 @@ export function DashboardTab({
                 ))}
               </SelectContent>
             </Select>
-            <Button variant="ghost" size="sm" className="h-8 gap-1 text-xs" onClick={onOpenAttendance}>
+            <Button variant="ghost" size="sm" className="h-8 shrink-0 gap-1 text-xs" onClick={onOpenAttendance}>
               View all <ChevronRight className="size-3.5" aria-hidden="true" />
             </Button>
           </div>

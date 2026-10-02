@@ -85,6 +85,7 @@ import {
   fetchSettings,
   fetchSyncLogs,
   postDemoEvolve,
+  postDemoReset,
   putSettings,
   putSubjectTarget,
   ApiError,
@@ -923,6 +924,7 @@ function InstallAppCard() {
 function DemoModeCard({ liveConnected }: { liveConnected: boolean }) {
   const qc = useQueryClient();
   const { data: settings } = useQuery({ queryKey: qk.settings, queryFn: fetchSettings });
+  const [confirmReset, setConfirmReset] = React.useState(false);
 
   const toggle = useMutation({
     mutationFn: (demoMode: boolean) => putSettings({ demoMode }),
@@ -942,6 +944,19 @@ function DemoModeCard({ liveConnected }: { liveConnected: boolean }) {
       });
     },
     onError: (e) => toast.error("Simulation failed", { description: e.message }),
+  });
+
+  const reset = useMutation({
+    mutationFn: postDemoReset,
+    onSuccess: (res) => {
+      qc.invalidateQueries();
+      setConfirmReset(false);
+      const w = res.wiped;
+      (res.ok ? toast.success : toast.error)(res.message, {
+        description: `Wiped ${w.subjects} subjects, ${w.timetableSlots} slots, ${w.snapshots} snapshots, ${w.notifications} notifications — then re-synced from a fresh simulated ERP.`,
+      });
+    },
+    onError: (e) => toast.error("Reset failed", { description: e.message }),
   });
 
   if (liveConnected) return null;
@@ -999,6 +1014,47 @@ function DemoModeCard({ liveConnected }: { liveConnected: boolean }) {
           Creates a realistic change on the simulated ERP (new classes, moved deadlines, added subjects) and runs an
           immediate sync, so you can watch detection → recalculation → notifications happen end-to-end.
         </p>
+
+        <AlertDialog open={confirmReset} onOpenChange={setConfirmReset}>
+          <AlertDialogTrigger asChild>
+            <Button
+              variant="ghost"
+              className="h-8 w-full gap-1.5 text-xs text-muted-foreground hover:text-foreground"
+              disabled={!demoOn || reset.isPending}
+              aria-label="Reset demo data to the pristine baseline"
+            >
+              {reset.isPending ? (
+                <Loader2 className="size-3.5 animate-spin" aria-hidden="true" />
+              ) : (
+                <RotateCcw className="size-3.5" aria-hidden="true" />
+              )}
+              Reset demo data
+            </Button>
+          </AlertDialogTrigger>
+          <AlertDialogContent>
+            <AlertDialogHeader>
+              <AlertDialogTitle>Reset demo data?</AlertDialogTitle>
+              <AlertDialogDescription>
+                This wipes everything the demo has generated — subjects, attendance counts, the weekly timetable,
+                snapshots, history, ERP reminders and notifications — then immediately re-syncs a freshly seeded
+                simulated ERP. Your settings (targets, cadence, notification prefs) and personal reminders are kept.
+              </AlertDialogDescription>
+            </AlertDialogHeader>
+            <AlertDialogFooter>
+              <AlertDialogCancel>Cancel</AlertDialogCancel>
+              <AlertDialogAction
+                className="bg-red-600 text-white hover:bg-red-700 focus-visible:ring-red-500/40"
+                onClick={(e) => {
+                  e.preventDefault();
+                  reset.mutate();
+                }}
+              >
+                {reset.isPending && <Loader2 className="size-4 animate-spin" aria-hidden="true" />}
+                Reset &amp; re-sync
+              </AlertDialogAction>
+            </AlertDialogFooter>
+          </AlertDialogContent>
+        </AlertDialog>
       </CardContent>
     </Card>
   );

@@ -420,3 +420,60 @@ Unresolved issues / risks & next-phase priorities:
 4. Housekeeping: demo timetable accumulated personal slots from E2E rounds (Mon 09:00 CS-302
    personal, Fri 15:00 CS-302 personal, Sat 16:00 MA-305 personal) — harmless, but a "Reset demo
    data" button in Settings would make demos reproducible.
+
+---
+Task ID: 5 (webDevReview round 4, trace 1a0fb448552e0aed-web-cron-review-202610021745)
+Agent: Z.ai Code (main orchestrator)
+Task: Status assessment + agent-browser QA + backlog features (demo reset, .ics export) + [mandatory] styling
+
+Current project status / assessment:
+- Round 4 of the 15-min webDevReview cron. Round 3 left the app stable (header hardening, conflict UX,
+  per-subject trend target, rich palette rows; 0 console errors). QA sweep this round found no runtime
+  errors — only one mobile squeeze (below). Proceeded to the round-3 backlog list.
+
+Completed modifications / verified:
+1. FEATURE — RESET DEMO DATA (reproducible demos, backlog item #4):
+   - NEW endpoint POST /api/demo/reset (demo-mode-only, 400 otherwise): in one $transaction wipes
+     timetable slots, attendance snapshots, change events, sync logs, notifications, ERP-sourced
+     reminders and subject rows; then deletes the `demo.erpState` + `demo.timetableSeeded` setting
+     keys (both consumers treat a missing key as first-run) and immediately runSync("manual") — the
+     engine recreates subjects from a fresh simulated ERP, recomputes warnings and re-imports the
+     demo exams with fresh dates. Kept: app settings (targets/cadence/prefs — per-subject custom
+     targets survive by design, CS-304 70% verified after reset) and personal reminders.
+   - UI: "Reset demo data" ghost button in the Demo mode card (Settings) behind a destructive
+     AlertDialog ("Reset & re-sync"), spinner while pending, success/error toast with wiped counts.
+   - E2E (API): wiped 30 slots/134 snapshots/76 events/21 logs/64 notifications/10 ERP reminders/
+     5 subjects → baseline exactly initialState (CS-302 28/34 …), timetable re-seeded 26 demo-only
+     slots. E2E (UI): dialog → confirm → toast with counts + fresh sync row in Sync history.
+2. FEATURE — EXPORT TIMETABLE AS .ics (backlog item):
+   - NEW src/lib/ics.ts (pure, client-safe): RFC 5545 builder — weekly RRULE events with FLOATING
+     local times, DTSTART anchored to the slot's next occurrence (today only if not yet started —
+     unit-tested with a mocked clock), UID per slot id, escaped text, 74-octet line folding,
+     X-WR-CALNAME. downloadTimetableIcs() triggers the browser download.
+   - Buttons: ".ics" in the Manage-timetable dialog title row (pr-8 so it clears the X button) and a
+     Download icon-button on the dashboard Today's schedule card; both disabled when there are no
+     slots; success toast names the file and explains weekly recurrence. Verified: valid VCALENDAR
+     output, sorted by day/time, correct next-occurrence dates, toast shown in browser.
+3. STYLING (mandatory) — SPARKLINE TARGET TICKS: Sparkline gained an optional `target` prop; when the
+   target % falls inside the plotted range a faint dashed tick line (1px, 45% opacity, dashed 2-3)
+   marks it, so every subject card's mini-trend now shows headroom to ITS effective target (custom
+   targets included). Wired into AttendanceTab SubjectCard with ariaLabel updated.
+4. BUG FIX (mobile) — SUBJECT-ATTENDANCE HEADER SQUEEZE: at 390px the sort Select ("Lowest attendance
+   fi…") and "View all" were clipped by the fixed 190px trigger in a justify-between row. Header now
+   stacks on mobile (flex-col) with the trigger w-full min-w-0 (sm:w-[190px]) and a shrink-0 View-all.
+   Verified at 390px: full labels, no clipping.
+
+Verification results:
+- bun run lint: clean. agent-browser: 0 console/page errors across dashboard/attendance/settings,
+  light + dark (1280) and mobile (390). API-verified reset counts and baseline; UI-verified reset
+  dialog flow, .ics downloads (both buttons), sparkline ticks visible, custom-target chip intact
+  after reset. Unit-tested ics next-occurrence + output via bun -e. No dev restart, no build.
+
+Unresolved issues / risks & next-phase priorities:
+1. Live ERP scrape parser still generic — remains TOP priority if real credentials ever arrive.
+2. Demo backfill creates ~14 days of synthetic history on first sync after reset (by design so the
+   trend chart is populated); documented here so it is not mistaken for a bug.
+3. Remaining backlog: weekly digest delivery (dialog exists, no email), trend-point ↔ heatmap
+   cross-links, per-subject "what-if" from palette rows, notification severity accents in the bell.
+4. The .ics export uses floating local times (correct for a weekly class pattern); if the college
+   publishes exam dates they may deserve TZ-aware events later.

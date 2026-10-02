@@ -9,6 +9,7 @@ import {
   ChevronDown,
   CircleDot,
   Clock,
+  Download,
   Loader2,
   Play,
   Settings2,
@@ -37,6 +38,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { cn } from "@/lib/utils";
+import { downloadTimetableIcs } from "@/lib/ics";
 import { createSlot, deleteSlot, fetchTimetable, qk, ApiError, type SlotConflict } from "./api";
 import { useNow } from "./shared";
 import type { SubjectView, TimetableSlotRow } from "./types";
@@ -177,7 +179,25 @@ function ManageTimetableDialog({ subjects }: { subjects: SubjectView[] }) {
       </DialogTrigger>
       <DialogContent className="max-h-[85vh] overflow-y-auto rounded-xl sm:max-w-lg">
         <DialogHeader>
-          <DialogTitle className="tracking-tight">Weekly timetable</DialogTitle>
+          <DialogTitle className="flex items-center gap-2 pr-8 tracking-tight">
+            Weekly timetable
+            <Button
+              variant="outline"
+              size="sm"
+              className="ml-auto h-7 gap-1.5 px-2.5 text-[11px]"
+              disabled={slots.length === 0}
+              onClick={() => {
+                const filename = downloadTimetableIcs(slots, subjects);
+                toast.success(`${filename} downloaded`, {
+                  description: "Import it into Google Calendar / Apple Calendar / Outlook — classes repeat weekly.",
+                });
+              }}
+              aria-label="Export the weekly timetable as a calendar (.ics) file"
+            >
+              <Download className="size-3.5" aria-hidden="true" />
+              .ics
+            </Button>
+          </DialogTitle>
           <DialogDescription className="text-xs">
             The demo ERP seeded a sample schedule — adjust it to match your real classes. Personal slots persist
             independently of synchronization.
@@ -351,6 +371,21 @@ export function TimetableCard({ subjects }: { subjects: SubjectView[] }) {
           </p>
         </div>
         <ManageTimetableDialog subjects={subjects} />
+        <Button
+          variant="ghost"
+          size="icon"
+          className="size-8 shrink-0 text-muted-foreground"
+          disabled={slots.length === 0}
+          onClick={() => {
+            const filename = downloadTimetableIcs(slots, subjects);
+            toast.success(`${filename} downloaded`, {
+              description: "Classes repeat weekly — import into your calendar app.",
+            });
+          }}
+          aria-label="Export the weekly timetable as a calendar (.ics) file"
+        >
+          <Download className="size-4" aria-hidden="true" />
+        </Button>
       </div>
       <CardContent>
         {isPending ? (
