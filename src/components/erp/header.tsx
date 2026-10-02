@@ -41,9 +41,11 @@ import { ago, fmtDT, useNow } from "./shared";
 import type { AppMode, AppNotification, NotificationSeverity } from "./types";
 
 function ModeBadge({ mode }: { mode: AppMode | undefined }) {
+  // Hidden below sm: the demo banner / connection card already communicate the
+  // mode, and the 390px header cannot afford the width.
   if (mode === "live") {
     return (
-      <Badge className="border-emerald-500/40 bg-emerald-500/10 text-emerald-700 dark:text-emerald-400" variant="outline">
+      <Badge className="hidden shrink-0 border-emerald-500/40 bg-emerald-500/10 text-emerald-700 dark:text-emerald-400 sm:inline-flex" variant="outline">
         <span className="size-1.5 rounded-full bg-emerald-500" aria-hidden="true" />
         LIVE
       </Badge>
@@ -51,14 +53,14 @@ function ModeBadge({ mode }: { mode: AppMode | undefined }) {
   }
   if (mode === "demo") {
     return (
-      <Badge className="border-amber-500/40 bg-amber-500/10 text-amber-700 dark:text-amber-400" variant="outline">
+      <Badge className="hidden shrink-0 border-amber-500/40 bg-amber-500/10 text-amber-700 dark:text-amber-400 sm:inline-flex" variant="outline">
         <span className="size-1.5 rounded-full bg-amber-500" aria-hidden="true" />
         DEMO
       </Badge>
     );
   }
   return (
-    <Badge variant="outline" className="text-muted-foreground">
+    <Badge variant="outline" className="hidden shrink-0 text-muted-foreground sm:inline-flex">
       <span className="size-1.5 rounded-full bg-muted-foreground/50" aria-hidden="true" />
       NOT CONNECTED
     </Badge>
@@ -280,7 +282,7 @@ function NextClassChip({ subjects }: { subjects: { code: string; name: string }[
       <TooltipTrigger asChild>
         <span
           className={cn(
-            "hidden cursor-default items-center gap-1.5 rounded-full border px-2.5 py-1 text-xs font-medium lg:inline-flex",
+            "hidden shrink-0 cursor-default items-center gap-1.5 whitespace-nowrap rounded-full border px-2.5 py-1 text-xs font-medium lg:inline-flex",
             ongoing
               ? "border-emerald-500/40 bg-emerald-500/10 text-emerald-700 dark:text-emerald-400"
               : "border-border/70 bg-muted/50 text-muted-foreground"
@@ -343,7 +345,7 @@ export function AppHeader({ onOpenPalette }: { onOpenPalette?: () => void }) {
             <GraduationCap className="size-5" aria-hidden="true" />
           </span>
           <div className="min-w-0">
-            <h1 className="text-base font-semibold leading-tight tracking-tight">ERP Sync</h1>
+            <h1 className="truncate whitespace-nowrap text-base font-semibold leading-tight tracking-tight">ERP Sync</h1>
             <p className="hidden truncate text-xs text-muted-foreground sm:block">
               Gyanmanjari Innovative University
             </p>
@@ -356,7 +358,7 @@ export function AppHeader({ onOpenPalette }: { onOpenPalette?: () => void }) {
           {lastSyncAt ? (
             <Tooltip>
               <TooltipTrigger asChild>
-                <span className="hidden cursor-default text-xs text-muted-foreground md:inline-flex">
+                <span className="hidden shrink-0 cursor-default whitespace-nowrap text-xs text-muted-foreground md:inline-flex">
                   Last ERP sync:&nbsp;<span className="font-medium text-foreground/80">{ago(lastSyncAt, now)}</span>
                 </span>
               </TooltipTrigger>
@@ -371,13 +373,15 @@ export function AppHeader({ onOpenPalette }: { onOpenPalette?: () => void }) {
               <Button
                 variant="outline"
                 size="sm"
-                className="erp-cmd-trigger h-9 gap-2 px-3 text-muted-foreground"
+                className="erp-cmd-trigger h-9 gap-2 px-2 text-muted-foreground sm:px-3"
                 onClick={onOpenPalette}
                 aria-label="Open command palette (Control K)"
               >
                 <Search className="size-4" aria-hidden="true" />
                 <span className="hidden text-xs md:inline">Search…</span>
-                <kbd className="kbd hidden md:inline-flex" aria-hidden="true">⌘K</kbd>
+                <span className="hidden md:inline-flex" aria-hidden="true">
+                  <kbd className="kbd">⌘K</kbd>
+                </span>
               </Button>
             )}
             <Button

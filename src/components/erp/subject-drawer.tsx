@@ -16,6 +16,7 @@ import {
   Target,
   TrendingDown,
   TrendingUp,
+  TriangleAlert,
   X,
   Zap,
 } from "lucide-react";
@@ -40,7 +41,7 @@ import {
 import { Slider } from "@/components/ui/slider";
 import { cn } from "@/lib/utils";
 import { classesCanSkip, classesToReachTarget } from "@/lib/attendance";
-import { createSlot, fetchHistory, fetchTimetable, putSubjectTarget, qk } from "./api";
+import { ApiError, createSlot, fetchHistory, fetchTimetable, putSubjectTarget, qk, type SlotConflict } from "./api";
 import { AnimatedNumber } from "./trend-chart";
 import { CustomTargetChip, fmtDT, MiniBar, statusColors, StatusChip, useNow } from "./shared";
 import type { AttendanceStatus, HistoryResponse, SubjectView, TimetableSlotRow } from "./types";
@@ -409,21 +410,36 @@ function SubjectTimetable({ slots, subjectCode, subjectName }: { slots: Timetabl
   const [day, setDay] = useState<string>(String(today));
   const [start, setStart] = useState("");
   const [end, setEnd] = useState("");
+  const [conflicts, setConflicts] = useState<SlotConflict[] | null>(null);
 
   const addMutation = useMutation({
-    mutationFn: () => createSlot({ dayOfWeek: Number(day), start, end, subjectCode }),
-    onSuccess: () => {
+    mutationFn: (force: boolean) =>
+      createSlot({ dayOfWeek: Number(day), start, end, subjectCode, force }),
+    onSuccess: (_res, force) => {
       qc.invalidateQueries({ queryKey: qk.timetable });
       qc.invalidateQueries({ queryKey: qk.dashboard });
-      toast.success(`${DAY_SHORT[Number(day)]} ${start}–${end} added for ${subjectCode}`);
+      toast.success(
+        force
+          ? `${DAY_SHORT[Number(day)]} ${start}–${end} added for ${subjectCode} (overlap accepted)`
+          : `${DAY_SHORT[Number(day)]} ${start}–${end} added for ${subjectCode}`
+      );
+      setConflicts(null);
       setAdding(false);
       setStart("");
       setEnd("");
     },
-    onError: (e) => toast.error(e instanceof Error ? e.message : "Could not add the class"),
+    onError: (e) => {
+      if (e instanceof ApiError && e.status === 409 && Array.isArray(e.body.conflicts)) {
+        setConflicts(e.body.conflicts as SlotConflict[]);
+        return;
+      }
+      setConflicts(null);
+      toast.error(e instanceof Error ? e.message : "Could not add the class");
+    },
   });
 
   const valid = /^\d{2}:\d{2}$/.test(start) && /^\d{2}:\d{2}$/.test(end) && start < end;
+  const resetConflicts = () => setConflicts(null);
 
   const byDay = useMemo(() => {
     const m = new Map<number, TimetableSlotRow[]>();
@@ -470,7 +486,7 @@ function SubjectTimetable({ slots, subjectCode, subjectName }: { slots: Timetabl
               <label htmlFor="slot-day" className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
                 Day
               </label>
-              <Select value={day} onValueChange={setDay}>
+              <Select value={day} onValueChange={(v) => { setDay(v); resetConflicts(); }}>
                 <SelectTrigger id="slot-day" className="h-9 text-xs" aria-label="Day of the week">
                   <SelectValue />
                 </SelectTrigger>
@@ -492,7 +508,7 @@ function SubjectTimetable({ slots, subjectCode, subjectName }: { slots: Timetabl
                 id="slot-start"
                 type="time"
                 value={start}
-                onChange={(e) => setStart(e.target.value)}
+                onChange={(e) => { setStart(e.target.value); resetConflicts(); }}
                 className="h-9 text-xs"
               />
             </div>
@@ -504,11 +520,49 @@ function SubjectTimetable({ slots, subjectCode, subjectName }: { slots: Timetabl
                 id="slot-end"
                 type="time"
                 value={end}
-                onChange={(e) => setEnd(e.target.value)}
+                onChange={(e) => { setEnd(e.target.value); resetConflicts(); }}
                 className="h-9 text-xs"
               />
             </div>
           </div>
+          {conflicts && conflicts.length > 0 && (
+            <div role="alert" className="mt-2.5 rounded-lg border border-amber-500/50 bg-amber-500/[0.08] p-2.5">
+              <p className="flex items-center gap-1.5 text-[11px] font-semibold text-amber-700 dark:text-amber-400">
+                <TriangleAlert className="size-3.5 shrink-0" aria-hidden="true" />
+                Time conflict — overlaps {conflicts.length === 1 ? "1 class" : `${conflicts.length} classes`}
+              </p>
+              <ul className="mt-1.5 space-y-1">
+                {conflicts.map((c) => (
+                  <li key={c.id} className="flex items-center gap-1.5 text-[11px] text-amber-800 dark:text-amber-300/90">
+                    <span className="size-1.5 shrink-0 rounded-full bg-amber-500" aria-hidden="true" />
+                    <span className="font-mono font-semibold">{c.subjectCode}</span>
+                    <span className="tabular-nums">{c.start}–{c.end}</span>
+                    {c.source === "demo" && <span className="text-amber-700/60 dark:text-amber-400/50">· demo</span>}
+                  </li>
+                ))}
+              </ul>
+              <div className="mt-2 flex gap-1.5">
+                <Button
+                  size="sm"
+                  variant="outline"
+                  className="h-7 gap-1 border-amber-500/50 px-2.5 text-[11px] text-amber-700 hover:bg-amber-500/15 dark:text-amber-400"
+                  disabled={addMutation.isPending}
+                  onClick={() => addMutation.mutate(true)}
+                >
+                  {addMutation.isPending ? <Loader2 className="size-3 animate-spin" aria-hidden="true" /> : <CalendarPlus className="size-3" aria-hidden="true" />}
+                  Add anyway
+                </Button>
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  className="h-7 px-2.5 text-[11px] text-muted-foreground"
+                  onClick={resetConflicts}
+                >
+                  Pick another time
+                </Button>
+              </div>
+            </div>
+          )}
           <div className="mt-2.5 flex items-center justify-between gap-2">
             <p className="text-[11px] text-muted-foreground">
               {valid ? "Looks good — saved locally, never written to the ERP." : "Pick a day and a start/end time (end must be after start)."}
@@ -517,7 +571,7 @@ function SubjectTimetable({ slots, subjectCode, subjectName }: { slots: Timetabl
               size="sm"
               className="h-8 gap-1 text-xs"
               disabled={!valid || addMutation.isPending}
-              onClick={() => addMutation.mutate()}
+              onClick={() => addMutation.mutate(false)}
             >
               {addMutation.isPending && <Loader2 className="size-3.5 animate-spin" aria-hidden="true" />}
               Add class

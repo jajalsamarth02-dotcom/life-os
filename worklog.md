@@ -356,3 +356,67 @@ Unresolved issues / risks & next-phase recommendations:
    for the single-student scope).
 3. Backlog: per-subject target in the command palette rows; "target line" per subject on the trend chart when
    a single subject is selected; timetable conflict warnings (overlapping slots); weekly digest email.
+
+---
+Task ID: 4 (webDevReview round 3, trace 1a0fb448552e0aed-web-cron-review-202610021730)
+Agent: Z.ai Code (main orchestrator)
+Task: Status assessment + agent-browser QA + bug fixes + [mandatory] styling deepening + [mandatory] new features
+
+Current project status / assessment:
+- Round 3 of the 15-min webDevReview cron. Starting point: round 2 shipped per-subject target
+  overrides, inline timetable add and 4 bug fixes; app was stable (0 console errors desktop+mobile).
+- QA this round: fresh sessions at 1280 desktop and 390 mobile, light + dark, all 4 tabs, command
+  palette, manage-timetable dialog, subject drawer. Found 2 real UI bugs (below), no runtime/API errors.
+
+Completed modifications / verified:
+1. BUG FIX — HEADER CHIPS WRAPPED INTERMITTENTLY (desktop): the live-class chip ("CS-302 ends in N min")
+   and "Last ERP sync: N minutes ago" sat ~10px over budget, so flex squeezed them into 2-line pills
+   whenever text widths shifted (8→11 min, countdown re-render). The row flipped between OK and wrapped.
+   Fixed: shrink-0 + whitespace-nowrap on NextClassChip, last-sync span and all ModeBadge variants —
+   title block (min-w-0) is now the only flexible element. Verified: chipH 42→26px, syncH 32→16px,
+   stable across reloads and countdown ticks.
+2. BUG FIX — MOBILE (390px) BADGE OVERLAPPED TITLE: shrink-0 on the badge made the title div collapse
+   until "ERP Sync" wrapped under the DEMO badge (visual overlap). Fixed on three fronts:
+   a) ModeBadge hidden below sm (the demo banner + connection card already communicate the mode);
+   b) palette trigger icon-only below md — the ⌘K kbd needed a wrapper span because the custom `.kbd`
+      class sets `display:inline-flex` which overrode Tailwind's `hidden` (root cause of a first
+      fix that didn't take);
+   c) h1 got whitespace-nowrap+truncate. Verified at 390: full "ERP Sync" title (no clip/overlap),
+      search = icon only; at 1280 nothing clipped.
+3. FEATURE — TIMETABLE CONFLICT UX (completes the backlog item; server 409+force existed, UI didn't):
+   both the Manage dialog and the drawer's inline form now catch ApiError 409, render an amber
+   role=alert box listing each conflicting slot (code · time · demo marker), with "Add anyway"
+   (retries with force:true → success toast says "overlap accepted") and "Pick another time" (clears
+   the box); any input change clears stale conflict state. E2E: default Mon 09:00 dialog add → box
+   showed 2 conflicts (DBMS-301 + CS-302) → Add anyway → 3rd slot created (verified in API, then
+   deleted); drawer Fri 10:00–10:50 → 1 conflict (CS-304 demo) shown → reset verified.
+4. FEATURE — PER-SUBJECT TARGET LINE ON TREND CHART: with exactly one subject selected the dashed
+   ReferenceLine now uses THAT subject's effective target (amber #f59e0b at 80% opacity when custom,
+   muted otherwise) and the label reads e.g. "CS-304 target 70%"; description line mirrors it
+   ("CS-304 target 70% (custom)"). All-subjects/zero-selected keeps the global 75% line. Verified
+   both states in the browser.
+5. FEATURE/STYLE — COMMAND PALETTE SUBJECT ROWS (backlog "per-subject targets in palette"): status
+   dot (safe/warning/danger), status-colored percentage, ◎ Target icon + effective targetPct, amber
+   "custom" chip on CS-304; search value now includes % and "target" so typing "70" or "target"
+   finds subjects too.
+6. STYLING deepening (mandatory): amber conflict alert box (border/bg/icon/button system, dark-mode
+   variants), palette row layout (dot + mono code + name + right-aligned metric cluster),
+   shrink-proofed header pills, icon-only responsive search trigger.
+
+Verification results:
+- bun run lint: clean. agent-browser: 0 console/page errors after all changes (fresh reloads at both
+  viewports, light + dark). Header metrics verified via DOM measurements (heights/clipping), conflict
+  E2E verified against /api/timetable + DB delete cleanup, trend ReferenceLine visually verified for
+  both custom and global targets. No dev server restart, no production build (per round constraints).
+
+Unresolved issues / risks & next-phase priorities:
+1. Live ERP scrape parser still generic — TOP priority the moment real student credentials exist
+   (demo mode keeps every feature exercisable meanwhile).
+2. The header row is still ~full at md–lg widths; if more chips are ever added, consider a
+   "context" dropdown instead of more inline pills.
+3. Backlog ideas not yet built: weekly digest email (digest dialog exists, delivery doesn't);
+   attendance heatmap link from trend chart points; export timetable as .ics; per-subject sparkline
+   target ticks; notification severity sound/badge styles.
+4. Housekeeping: demo timetable accumulated personal slots from E2E rounds (Mon 09:00 CS-302
+   personal, Fri 15:00 CS-302 personal, Sat 16:00 MA-305 personal) — harmless, but a "Reset demo
+   data" button in Settings would make demos reproducible.

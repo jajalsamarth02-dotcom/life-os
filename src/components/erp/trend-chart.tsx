@@ -199,6 +199,13 @@ export function TrendSection({
   const last = history.overall[history.overall.length - 1]?.percentage ?? 0;
   const delta = last - first;
 
+  // When exactly one subject is selected, the reference line reflects THAT
+  // subject's effective target (global or custom) instead of the global one.
+  const singleSubject = selected.length === 1 ? subjects.find((s) => s.code === selected[0]) ?? null : null;
+  const targetLine = singleSubject ? singleSubject.targetPct : target;
+  const targetLabel = singleSubject ? `${singleSubject.code} target ${singleSubject.targetPct}%` : `target ${target}%`;
+  const targetIsCustom = singleSubject ? singleSubject.hasCustomTarget : false;
+
   return (
     <Card className="overflow-hidden rounded-xl border-border/60">
       <CardHeader className="flex flex-col gap-3 pb-2 sm:flex-row sm:items-start sm:justify-between">
@@ -216,7 +223,7 @@ export function TrendSection({
             </span>
           </CardTitle>
           <CardDescription className="text-xs">
-            Overall {last.toFixed(2)}% · target {target}% · from sync snapshots
+            Overall {last.toFixed(2)}% · {singleSubject ? `${singleSubject.code} target ${singleSubject.targetPct}%${singleSubject.hasCustomTarget ? " (custom)" : ""}` : `target ${target}%`} · from sync snapshots
           </CardDescription>
         </div>
         <div className="flex flex-wrap items-center gap-1.5">
@@ -290,15 +297,15 @@ export function TrendSection({
                 </defs>
                 <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" vertical={false} />
                 <ReferenceLine
-                  y={target}
-                  stroke="var(--muted-foreground)"
+                  y={targetLine}
+                  stroke={targetIsCustom ? "#f59e0b" : "var(--muted-foreground)"}
                   strokeDasharray="5 5"
-                  strokeOpacity={0.55}
+                  strokeOpacity={targetIsCustom ? 0.8 : 0.55}
                   label={{
-                    value: `target ${target}%`,
+                    value: targetLabel,
                     position: "insideTopRight",
                     fontSize: 10,
-                    fill: "var(--muted-foreground)",
+                    fill: targetIsCustom ? "#f59e0b" : "var(--muted-foreground)",
                   }}
                 />
                 <XAxis dataKey="label" tick={{ fontSize: 11 }} tickLine={false} axisLine={false} interval="preserveStartEnd" minTickGap={24} />
@@ -323,15 +330,15 @@ export function TrendSection({
               <LineChart data={chartRows} margin={{ top: 6, right: 8, left: -18, bottom: 0 }}>
                 <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" vertical={false} />
                 <ReferenceLine
-                  y={target}
-                  stroke="var(--muted-foreground)"
+                  y={targetLine}
+                  stroke={targetIsCustom ? "#f59e0b" : "var(--muted-foreground)"}
                   strokeDasharray="5 5"
-                  strokeOpacity={0.55}
+                  strokeOpacity={targetIsCustom ? 0.8 : 0.55}
                   label={{
-                    value: `target ${target}%`,
+                    value: targetLabel,
                     position: "insideTopRight",
                     fontSize: 10,
-                    fill: "var(--muted-foreground)",
+                    fill: targetIsCustom ? "#f59e0b" : "var(--muted-foreground)",
                   }}
                 />
                 <XAxis dataKey="label" tick={{ fontSize: 11 }} tickLine={false} axisLine={false} interval="preserveStartEnd" minTickGap={24} />

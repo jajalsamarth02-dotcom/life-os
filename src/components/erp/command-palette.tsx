@@ -13,6 +13,7 @@ import {
   RefreshCw,
   Settings as SettingsIcon,
   Sun,
+  Target,
 } from "lucide-react";
 import {
   CommandDialog,
@@ -24,8 +25,15 @@ import {
   CommandSeparator,
   CommandShortcut,
 } from "@/components/ui/command";
+import { cn } from "@/lib/utils";
 import { postDemoEvolve, postSync } from "./api";
-import type { SubjectView } from "./types";
+import type { AttendanceStatus, SubjectView } from "./types";
+
+const STATUS_DOT: Record<AttendanceStatus, string> = {
+  safe: "bg-emerald-500",
+  warning: "bg-amber-500",
+  danger: "bg-red-500",
+};
 
 export type PaletteTab = "dashboard" | "attendance" | "reminders" | "settings";
 
@@ -103,14 +111,27 @@ export function CommandPalette({
               {subjects.map((s) => (
                 <CommandItem
                   key={s.code}
-                  value={`${s.code} ${s.name}`}
+                  value={`${s.code} ${s.name} ${s.percentage.toFixed(1)}% target`}
                   onSelect={() => openSubject(s.code)}
                 >
-                  <BarChart3 className="size-4 text-muted-foreground" aria-hidden="true" />
+                  <span
+                    className={cn("size-2 shrink-0 rounded-full", STATUS_DOT[s.status] ?? "bg-muted-foreground")}
+                    aria-hidden="true"
+                  />
                   <span className="font-mono text-xs font-semibold">{s.code}</span>
                   <span className="truncate text-sm text-muted-foreground">{s.name}</span>
-                  <span className="ml-auto text-xs tabular-nums text-muted-foreground">
-                    {s.percentage.toFixed(1)}%
+                  <span className="ml-auto flex items-center gap-1.5 whitespace-nowrap text-xs tabular-nums text-muted-foreground">
+                    <span className={cn("font-semibold", s.status === "danger" && "text-red-600 dark:text-red-400", s.status === "warning" && "text-amber-600 dark:text-amber-400", s.status === "safe" && "text-emerald-600 dark:text-emerald-400")}>
+                      {s.percentage.toFixed(1)}%
+                    </span>
+                    <span aria-hidden="true">·</span>
+                    <Target className="size-3" aria-hidden="true" />
+                    {s.targetPct}%
+                    {s.hasCustomTarget && (
+                      <span className="rounded-full border border-amber-500/40 bg-amber-500/10 px-1.5 text-[10px] font-semibold text-amber-700 dark:text-amber-400">
+                        custom
+                      </span>
+                    )}
                   </span>
                 </CommandItem>
               ))}

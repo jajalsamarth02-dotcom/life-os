@@ -13,6 +13,7 @@ import {
   Play,
   Settings2,
   Trash2,
+  TriangleAlert,
 } from "lucide-react";
 import { toast } from "sonner";
 import { Badge } from "@/components/ui/badge";
@@ -36,7 +37,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { cn } from "@/lib/utils";
-import { createSlot, deleteSlot, fetchTimetable, qk, ApiError } from "./api";
+import { createSlot, deleteSlot, fetchTimetable, qk, ApiError, type SlotConflict } from "./api";
 import { useNow } from "./shared";
 import type { SubjectView, TimetableSlotRow } from "./types";
 
@@ -124,6 +125,7 @@ function ManageTimetableDialog({ subjects }: { subjects: SubjectView[] }) {
   const [start, setStart] = useState("09:00");
   const [end, setEnd] = useState("09:50");
   const [code, setCode] = useState(subjects[0]?.code ?? "");
+  const [conflicts, setConflicts] = useState<SlotConflict[] | null>(null);
 
   const { data } = useQuery({
     queryKey: qk.timetable,
@@ -132,13 +134,27 @@ function ManageTimetableDialog({ subjects }: { subjects: SubjectView[] }) {
   });
 
   const add = useMutation({
-    mutationFn: () => createSlot({ dayOfWeek: Number(day), start, end, subjectCode: code }),
-    onSuccess: () => {
+    mutationFn: (force: boolean) =>
+      createSlot({ dayOfWeek: Number(day), start, end, subjectCode: code, force }),
+    onSuccess: (_res, force) => {
       qc.invalidateQueries({ queryKey: qk.timetable });
-      toast.success("Class added to your timetable");
+      qc.invalidateQueries({ queryKey: qk.dashboard });
+      setConflicts(null);
+      toast.success(
+        force ? "Class added (overlap accepted)" : "Class added to your timetable"
+      );
     },
-    onError: (e) => toast.error("Could not add class", { description: e instanceof ApiError ? e.message : e.message }),
+    onError: (e) => {
+      if (e instanceof ApiError && e.status === 409 && Array.isArray(e.body.conflicts)) {
+        setConflicts(e.body.conflicts as SlotConflict[]);
+        return;
+      }
+      setConflicts(null);
+      toast.error("Could not add class", { description: e instanceof ApiError ? e.message : e.message });
+    },
   });
+
+  const resetConflicts = () => setConflicts(null);
 
   const remove = useMutation({
     mutationFn: deleteSlot,
@@ -175,7 +191,7 @@ function ManageTimetableDialog({ subjects }: { subjects: SubjectView[] }) {
           <div className="grid grid-cols-2 gap-2.5 sm:grid-cols-4">
             <div className="space-y-1">
               <Label htmlFor="tt-day" className="text-[11px]">Day</Label>
-              <Select value={day} onValueChange={setDay}>
+              <Select value={day} onValueChange={(v) => { setDay(v); resetConflicts(); }}>
                 <SelectTrigger id="tt-day" className="h-9 text-xs"><SelectValue /></SelectTrigger>
                 <SelectContent>
                   {WEEK_ORDER.map((d) => (
@@ -186,7 +202,7 @@ function ManageTimetableDialog({ subjects }: { subjects: SubjectView[] }) {
             </div>
             <div className="space-y-1">
               <Label htmlFor="tt-subject" className="text-[11px]">Subject</Label>
-              <Select value={code} onValueChange={setCode}>
+              <Select value={code} onValueChange={(v) => { setCode(v); resetConflicts(); }}>
                 <SelectTrigger id="tt-subject" className="h-9 text-xs"><SelectValue /></SelectTrigger>
                 <SelectContent>
                   {subjects.map((s) => (
@@ -197,17 +213,63 @@ function ManageTimetableDialog({ subjects }: { subjects: SubjectView[] }) {
             </div>
             <div className="space-y-1">
               <Label htmlFor="tt-start" className="text-[11px]">Starts</Label>
-              <Input id="tt-start" type="time" value={start} onChange={(e) => setStart(e.target.value)} className="h-9 text-xs" />
+              <Input id="tt-start" type="time" value={start} onChange={(e) => { setStart(e.target.value); resetConflicts(); }} className="h-9 text-xs" />
             </div>
             <div className="space-y-1">
               <Label htmlFor="tt-end" className="text-[11px]">Ends</Label>
-              <Input id="tt-end" type="time" value={end} onChange={(e) => setEnd(e.target.value)} className="h-9 text-xs" />
+              <Input id="tt-end" type="time" value={end} onChange={(e) => { setEnd(e.target.value); resetConflicts(); }} className="h-9 text-xs" />
             </div>
           </div>
+
+          {conflicts && conflicts.length > 0 && (
+            <div
+              role="alert"
+              className="mt-2.5 rounded-lg border border-amber-500/50 bg-amber-500/[0.08] p-2.5"
+            >
+              <p className="flex items-center gap-1.5 text-[11px] font-semibold text-amber-700 dark:text-amber-400">
+                <TriangleAlert className="size-3.5 shrink-0" aria-hidden="true" />
+                Time conflict — overlaps {conflicts.length === 1 ? "1 class" : `${conflicts.length} classes`}
+              </p>
+              <ul className="mt-1.5 space-y-1">
+                {conflicts.map((c) => (
+                  <li key={c.id} className="flex items-center gap-1.5 text-[11px] text-amber-800 dark:text-amber-300/90">
+                    <span className="size-1.5 shrink-0 rounded-full bg-amber-500" aria-hidden="true" />
+                    <span className="font-mono font-semibold">{c.subjectCode}</span>
+                    <span className="tabular-nums">{c.start}–{c.end}</span>
+                    {c.source === "demo" && <span className="text-amber-700/60 dark:text-amber-400/50">· demo</span>}
+                  </li>
+                ))}
+              </ul>
+              <p className="mt-1.5 text-[11px] leading-snug text-amber-800/80 dark:text-amber-300/70">
+                Pick a different time, or add it anyway if these genuinely share a window.
+              </p>
+              <div className="mt-2 flex gap-1.5">
+                <Button
+                  size="sm"
+                  variant="outline"
+                  className="h-7 gap-1 border-amber-500/50 px-2.5 text-[11px] text-amber-700 hover:bg-amber-500/15 dark:text-amber-400"
+                  disabled={add.isPending}
+                  onClick={() => add.mutate(true)}
+                >
+                  {add.isPending ? <Loader2 className="size-3 animate-spin" aria-hidden="true" /> : <CalendarPlus className="size-3" aria-hidden="true" />}
+                  Add anyway
+                </Button>
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  className="h-7 px-2.5 text-[11px] text-muted-foreground"
+                  onClick={resetConflicts}
+                >
+                  Pick another time
+                </Button>
+              </div>
+            </div>
+          )}
+
           <Button
             size="sm"
             className="mt-2.5 h-8 gap-1.5 text-xs"
-            onClick={() => add.mutate()}
+            onClick={() => add.mutate(false)}
             disabled={add.isPending || !code}
           >
             {add.isPending ? <Loader2 className="size-3.5 animate-spin" aria-hidden="true" /> : <CalendarPlus className="size-3.5" aria-hidden="true" />}
