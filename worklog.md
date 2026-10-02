@@ -2011,3 +2011,32 @@ Unresolved issues / risks & next-phase priorities:
 4. Feature seeds still blocked/built: per-semester scoping (schema); weekly bunk-budget (only stale demo slots — needs personal slots); L/H/E columns folding (consent); SMTP digest (credentials); day-of-week heatmap (snapshots are sync-time, not per-class); trend charts (live history only 1-2 points — revisit after a week of accumulating snapshots).
 5. QA journey notes: (a) single-page app — /settings is a TAB not a route (404 page exists and is friendly); (b) text-splitting across nodes breaks agent-browser find text — use TreeWalker/innerText checks; (c) headless clipboard-write may be permission-denied — the copy button degrades gracefully by design (silent catch, input still selectable); (d) never judge scheduler death before waiting one full 60s tick phase past the due mark.
 6. Keeper cron 430680 must stay alive; worklog protocol unchanged.
+
+---
+Task ID: 49
+Agent: Z.ai Code (main orchestrator)
+Task: Status assessment + QA + LIVE calendar subscription feed (token-protected /api/calendar) + settings link management UI
+
+Work Log (Round 49 — 3 Oct, 06:00–06:13 +08):
+- Round start: server 200; sync healthy (last ok 21:53:19 UTC, 0 fails); memory 2998MB used / 1161MB available (elevated but holding); browser QA pass, 0 console errors.
+- Seed selection: trend/day-of-week seeds remain data-blocked (live snapshots still 1-2 same-day points; timetable slots all stale demo rows). Chose the natural Round 46 sequel: turn the one-shot .ics export into a LIVE subscribable feed the phone calendar can auto-refresh — the stable-UID work from Round 46 pays off directly (subscribed calendars receive UPDATES, never duplicates).
+
+Completed modifications / verified:
+1. NEW FEATURE — live ICS subscription feed:
+   - src/lib/calendar-feed.ts (new): token management (24-char base64url via crypto.randomBytes; Setting key "calendar.ics.token"; explicit create/rotate/revoke — nothing exists until the user asks; constant-shape token comparison) + buildCalendarFeed() that mirrors the Settings export's event set EXACTLY (same Reminder-table queries, same courseNames + Subject meta, same alaUid/reminderUid UIDs via shared buildDeadlineIcs — both paths can never drift).
+   - src/app/api/calendar/route.ts (new): GET ?token=… → text/calendar (Content-Disposition inline erp-sync-deadlines.ics, Cache-Control no-store, X-Feed-Events header); wrong/missing/revoked token → bland text/plain 404 (no existence leak).
+   - src/app/api/calendar/token/route.ts (new): GET status ({token,url} — null while none); POST create (409 if one exists) | rotate (old URLs die instantly) | revoke (feed closed until re-created).
+2. SETTINGS UI — DataBackupCard grew a "Live subscription link" block nested directly under the violet .ics export row (ml-[42px] indent + violet-tinted border reads as one calendar feature): empty state = dashed violet "Create subscription link" (disabled with honest copy when 0 dated items); active state = ACTIVE badge + "43 dated items" counter + mono URL (truncate + title tooltip) + copy button (CheckCircle2 confirm, graceful clipboard-denied catch) + Rotate/Revoke ghost buttons behind AlertDialog confirmations with precise consequence copy; ShieldCheck note "the link contains a private token — treat it like a password"; Skeleton loading state.
+3. tsc ONCE: src/ + next.config.ts clean (scaffold noise untouched).
+4. API QA — full lifecycle, ALL GREEN: no-token→404; create→token+url; valid→200 text/calendar, 43 events (EXACT parity with Round 46 export: 43 unique UIDs, 23 VALARMs, 99 folded lines, CRLF-only bytes, ends CRLF); wrong token→404; duplicate create→409; rotate→old 404/new 200; revoke→token null + feed 404; end state PRISTINE (no token row).
+5. BROWSER QA — ALL GREEN: violet block renders under the export row (empty state); Create click → URL + ACTIVE badge + counter appear; Rotate dialog opens with consequence copy, "Keep current link" cancels safely; Revoke dialog → confirm → back to empty state + toast; console 0 errors; mobile 390px docWidth=390 (no overflow, block wraps cleanly); browser restored to desktop viewport on settings tab.
+6. Scheduler health re-confirmed after recompiles: scheduled sync fired on its own at 22:09:19 UTC (0 changes, 0 fails, next 22:24:19); watchdog silent. QA safety: no WhatsApp/ntfy messages; feed tested via curl with a QA token then fully revoked.
+
+Unresolved issues / risks & next-phase priorities:
+1. NEXT ROUND FIRST ACTIONS: (a) keeper one-liner if down; (b) warm /api/dashboard + /api/sync if reaped; (c) memory watch — 2998MB used / 1161MB available at round START (up from 1764 available last round); if available keeps shrinking across rounds, consider flagging the reaper/cache pressure in the report.
+2. The feed URL is generated for the DEPLOYMENT ORIGIN (req.nextUrl.origin) — on the public preview URL the token-protected link is share-safe and revocable; localhost copies get localhost URLs. Worth remembering if the user reports "subscribed but no updates" (a calendar app cannot reach a localhost URL — they must use the public origin).
+3. User setup path now has TWO ready channels: ntfy push (Round 48) + calendar subscription (this round) — both unconfigured-by-design; a single "finish setup" checklist could onboard both in one pass (candidate seed).
+4. MilestoneCelebration real crossing still pending (needs 1 attended class → 3/4 = 75%).
+5. Seeds still blocked/built: per-semester scoping (schema); weekly bunk-budget (stale demo slots); L/H/E folding (consent); SMTP digest (credentials); day-of-week heatmap (sync-time snapshots); trend charts (1-2 live points — revisit after a week).
+6. QA journey notes: (a) a failed Write that creates a parent dir can leave a route silently MISSING — after any mkdir+Write dance, verify the file actually exists before QA (this round's /api/calendar feed 404'd with the SPA's HTML page while the token route worked; dev.log "404 + text/html" was the tell); (b) Radix tab labels need snapshot-ref clicks, not TreeWalker text clicks; (c) X-Feed-Events header is a handy one-look health signal for the feed.
+7. Keeper cron 430680 must stay alive; worklog protocol unchanged.

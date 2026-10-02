@@ -97,6 +97,7 @@ import {
   fetchAttendance,
   fetchAlaNotes,
   fetchAssignments,
+  fetchCalendarToken,
   fetchErpStatus,
   fetchReminders,
   fetchSemesters,
@@ -106,6 +107,7 @@ import {
   fetchWaStatus,
   postDemoEvolve,
   postDemoReset,
+  postCalendarTokenAction,
   putSelectedSemester,
   putSettings,
   putSubjectTarget,
@@ -1451,6 +1453,14 @@ function DataBackupCard() {
   });
   const fileInputRef = React.useRef<HTMLInputElement>(null);
 
+  /* Live calendar subscription — the SAME events as the .ics export above,
+     served at a token-protected URL that phone calendars can subscribe to.
+     Token state is explicit: nothing exists until the user creates a link. */
+  const calTok = useQuery({ queryKey: qk.calendarToken, queryFn: fetchCalendarToken, staleTime: 60_000 });
+  const [calBusy, setCalBusy] = useState<null | "create" | "rotate" | "revoke">(null);
+  const [calCopied, setCalCopied] = useState(false);
+  const calUrl = calTok.data?.url ?? null;
+
   /* Surface persisted "last backup / restore" stamps on mount (+ staleness). */
   React.useEffect(() => {
     setStamps({ backup: readLocalStamp(LAST_BACKUP_KEY), restore: readLocalStamp(LAST_RESTORE_KEY) });
@@ -1579,6 +1589,47 @@ function DataBackupCard() {
       });
     } finally {
       setBusy(null);
+    }
+  };
+
+  /* Subscription link lifecycle: create (only if none), rotate (old URLs die
+     instantly), revoke (feed closed until a new link is made). */
+  const calRun = async (action: "create" | "rotate" | "revoke") => {
+    setCalBusy(action);
+    try {
+      await postCalendarTokenAction(action);
+      await qc.invalidateQueries({ queryKey: qk.calendarToken });
+      setCalCopied(false);
+      toast.success(
+        action === "create"
+          ? "Subscription link created"
+          : action === "rotate"
+            ? "Link rotated"
+            : "Link revoked",
+        {
+          description:
+            action === "create"
+              ? "Paste the URL into Google/Apple/Outlook 'add calendar by URL' — it always reflects the latest sync."
+              : action === "rotate"
+                ? "Every previously shared URL stopped working — re-subscribe with the new one."
+                : "The feed answers 404 until you create a new link.",
+        }
+      );
+    } catch (e) {
+      toast.error("Calendar link action failed", { description: e instanceof ApiError ? e.message : "Try again." });
+    } finally {
+      setCalBusy(null);
+    }
+  };
+
+  const copyCalUrl = async () => {
+    if (!calUrl) return;
+    try {
+      await navigator.clipboard.writeText(calUrl);
+      setCalCopied(true);
+      setTimeout(() => setCalCopied(false), 2000);
+    } catch {
+      // clipboard denied (plain http etc.) — the URL is selectable text anyway
     }
   };
 
@@ -1748,6 +1799,147 @@ function DataBackupCard() {
             )}
             Export
           </Button>
+        </div>
+
+        {/* Live subscription — same events, auto-refreshing URL. Indented to
+            read as part of the calendar feature above. */}
+        <div className="ml-[42px] space-y-2 rounded-lg border border-violet-500/25 bg-violet-500/[0.04] p-3">
+          <div className="flex items-center justify-between gap-2">
+            <p className="flex items-center gap-1.5 text-xs font-medium">
+              <CalendarClock className="size-3.5 text-violet-500" aria-hidden="true" />
+              Live subscription link
+              {calUrl && (
+                <Badge variant="outline" className="border-violet-500/40 text-[9px] font-bold uppercase tracking-wider text-violet-600 dark:text-violet-400">
+                  active
+                </Badge>
+              )}
+            </p>
+            {calUrl && (
+              <span className="text-[10px] text-muted-foreground">
+                {icsEvents.length} dated item{icsEvents.length === 1 ? "" : "s"}
+              </span>
+            )}
+          </div>
+
+          {calTok.isLoading ? (
+            <div className="space-y-1.5">
+              <Skeleton className="h-7 w-full" />
+              <Skeleton className="h-4 w-2/3" />
+            </div>
+          ) : calUrl ? (
+            <>
+              <div className="flex items-center gap-1.5">
+                <code
+                  className="min-w-0 flex-1 truncate rounded-md bg-muted/70 px-2 py-1.5 font-mono text-[10px] text-muted-foreground"
+                  title={calUrl}
+                >
+                  {calUrl}
+                </code>
+                <button
+                  type="button"
+                  onClick={copyCalUrl}
+                  aria-label={calCopied ? "Subscription link copied" : "Copy the subscription link"}
+                  className="shrink-0 rounded-md border border-border/60 bg-background p-1.5 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground motion-safe:active:scale-90"
+                >
+                  {calCopied ? (
+                    <CheckCircle2 className="size-3.5 text-emerald-500" aria-hidden="true" />
+                  ) : (
+                    <Copy className="size-3.5" aria-hidden="true" />
+                  )}
+                </button>
+              </div>
+              <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-[10px] leading-snug text-muted-foreground">
+                <span className="min-w-0">
+                  Your calendar app re-fetches this URL on its own schedule — moved deadlines update in place
+                  (same stable events, never duplicates).
+                </span>
+                <AlertDialog>
+                  <AlertDialogTrigger asChild>
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      className="h-6 gap-1 rounded-md px-1.5 text-[10px] text-muted-foreground hover:text-destructive"
+                      disabled={calBusy !== null}
+                    >
+                      {calBusy === "rotate" ? <Loader2 className="size-3 animate-spin" aria-hidden="true" /> : <RotateCcw className="size-3" aria-hidden="true" />}
+                      Rotate
+                    </Button>
+                  </AlertDialogTrigger>
+                  <AlertDialogContent>
+                    <AlertDialogHeader>
+                      <AlertDialogTitle>Rotate the subscription link?</AlertDialogTitle>
+                      <AlertDialogDescription>
+                        Every calendar currently subscribed to the old URL stops receiving updates. Re-add the
+                        calendar on your phone with the new link after rotating.
+                      </AlertDialogDescription>
+                    </AlertDialogHeader>
+                    <AlertDialogFooter>
+                      <AlertDialogCancel>Keep current link</AlertDialogCancel>
+                      <AlertDialogAction onClick={() => void calRun("rotate")}>
+                        Rotate link
+                      </AlertDialogAction>
+                    </AlertDialogFooter>
+                  </AlertDialogContent>
+                </AlertDialog>
+                <AlertDialog>
+                  <AlertDialogTrigger asChild>
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      className="h-6 gap-1 rounded-md px-1.5 text-[10px] text-muted-foreground hover:text-destructive"
+                      disabled={calBusy !== null}
+                    >
+                      {calBusy === "revoke" ? <Loader2 className="size-3 animate-spin" aria-hidden="true" /> : <X className="size-3" aria-hidden="true" />}
+                      Revoke
+                    </Button>
+                  </AlertDialogTrigger>
+                  <AlertDialogContent>
+                    <AlertDialogHeader>
+                      <AlertDialogTitle>Revoke the subscription link?</AlertDialogTitle>
+                      <AlertDialogDescription>
+                        The feed will answer 404 immediately — subscribed calendars keep whatever they already
+                        downloaded, but never get updates until you create a new link.
+                      </AlertDialogDescription>
+                    </AlertDialogHeader>
+                    <AlertDialogFooter>
+                      <AlertDialogCancel>Keep the link</AlertDialogCancel>
+                      <AlertDialogAction onClick={() => void calRun("revoke")}>
+                        Revoke link
+                      </AlertDialogAction>
+                    </AlertDialogFooter>
+                  </AlertDialogContent>
+                </AlertDialog>
+              </div>
+            </>
+          ) : (
+            <>
+              <p className="text-[11px] leading-snug text-muted-foreground">
+                Subscribe once from Google/Apple/Outlook “add calendar by URL” — the link always reflects the
+                latest synced deadlines. No manual re-export, ever.
+              </p>
+              <Button
+                variant="outline"
+                size="sm"
+                className="h-8 gap-1.5 border-dashed border-violet-500/40 text-violet-600 dark:text-violet-400"
+                disabled={calBusy !== null || icsEvents.length === 0}
+                onClick={() => void calRun("create")}
+                aria-label="Create a live calendar subscription link"
+              >
+                {calBusy === "create" ? (
+                  <Loader2 className="size-3.5 animate-spin" aria-hidden="true" />
+                ) : (
+                  <CalendarClock className="size-3.5" aria-hidden="true" />
+                )}
+                {icsEvents.length === 0 ? "Nothing dated to subscribe yet" : "Create subscription link"}
+              </Button>
+            </>
+          )}
+
+          <p className="flex items-start gap-1.5 text-[10px] leading-snug text-muted-foreground">
+            <ShieldCheck className="mt-0.5 size-3 shrink-0" aria-hidden="true" />
+            The link contains a private token — treat it like a password. Rotate to instantly kill every shared
+            copy; revoke to close the feed entirely.
+          </p>
         </div>
 
         {/* Restore dropzone — dashed idle, solid+glow while dragging a file over. */}

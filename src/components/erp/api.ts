@@ -83,6 +83,7 @@ export const qk = {
   erpStatus: ["erp-status"] as const,
   waStatus: ["wa-status"] as const,
   ntfyStatus: ["ntfy-status"] as const,
+  calendarToken: ["calendar-token"] as const,
 };
 
 /* ---------- GET ---------- */
@@ -338,6 +339,21 @@ export const postNtfyAction = (
     "/api/notify/ntfy",
     { method: "POST", body: JSON.stringify({ action, ...payload }) }
   );
+
+/* ---------- Live calendar subscription feed ---------- */
+
+export interface CalendarTokenResponse {
+  token: string | null;
+  url: string | null;
+}
+
+export const fetchCalendarToken = () => api<CalendarTokenResponse>("/api/calendar/token");
+
+export const postCalendarTokenAction = (action: "create" | "rotate" | "revoke") =>
+  api<{ ok: boolean; token: string | null; url: string | null }>("/api/calendar/token", {
+    method: "POST",
+    body: JSON.stringify({ action }),
+  });
 
 /** Upload one ALA to the ERP portal (explicit, user-initiated). */
 export async function submitAlaToErp(
