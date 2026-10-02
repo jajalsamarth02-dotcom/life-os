@@ -18,9 +18,11 @@ import {
   LogOut,
   MonitorSmartphone,
   RefreshCw,
+  RotateCcw,
   Save,
   ShieldCheck,
   Sparkles,
+  Target,
   TriangleAlert,
 } from "lucide-react";
 import { toast } from "sonner";
@@ -42,6 +44,13 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { Separator } from "@/components/ui/separator";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Slider } from "@/components/ui/slider";
@@ -71,16 +80,18 @@ import {
 import {
   connectErp,
   disconnectErp,
+  fetchAttendance,
   fetchErpStatus,
   fetchSettings,
   fetchSyncLogs,
   postDemoEvolve,
   putSettings,
+  putSubjectTarget,
   ApiError,
   qk,
 } from "./api";
-import { fmtDT, syncLogIcon } from "./shared";
-import type { AppSettings, ErpConnectFailure } from "./types";
+import { CustomTargetChip, fmtDT, syncLogIcon } from "./shared";
+import type { AppSettings, ErpConnectFailure, SubjectView } from "./types";
 
 /* ------------------------------------------------------------------ */
 /* ERP connection card                                                 */
@@ -550,6 +561,170 @@ function NotificationPrefsCard() {
 }
 
 /* ------------------------------------------------------------------ */
+/* Per-subject attendance targets                                      */
+/* ------------------------------------------------------------------ */
+
+const TARGET_OPTIONS = [60, 65, 70, 75, 80, 85, 90];
+
+function TargetRow({ s }: { s: SubjectView }) {
+  const qc = useQueryClient();
+  const mutation = useMutation({
+    mutationFn: (v: number | null) => putSubjectTarget(s.code, v),
+    onSuccess: (res) => {
+      qc.invalidateQueries({ queryKey: qk.attendance });
+      qc.invalidateQueries({ queryKey: qk.dashboard });
+      qc.invalidateQueries({ queryKey: qk.settings });
+      toast.success(
+        res.hasCustomTarget
+          ? `Target for ${s.code} set to ${res.targetPct}%`
+          : `${s.code} reset to the global target (${res.targetPct}%)`
+      );
+    },
+    onError: (e) => toast.error(e instanceof Error ? e.message : "Could not save the target"),
+  });
+
+  return (
+    <TableRow className={cn("transition-colors", mutation.isPending && "opacity-60")}>
+      <TableCell className="py-2.5">
+        <div className="flex min-w-0 items-center gap-2.5">
+          <span className="shrink-0 rounded-md bg-muted px-1.5 py-0.5 font-mono text-[10px] font-semibold text-muted-foreground">
+            {s.code}
+          </span>
+          <span className="min-w-0 truncate text-sm">{s.name}</span>
+        </div>
+      </TableCell>
+      <TableCell className="py-2.5 text-right">
+        <div className="flex items-center justify-end gap-2">
+          {s.hasCustomTarget ? (
+            <CustomTargetChip target={s.targetPct} />
+          ) : (
+            <span className="text-[11px] text-muted-foreground">global</span>
+          )}
+        </div>
+      </TableCell>
+      <TableCell className="py-2.5 text-right">
+        <div className="flex items-center justify-end gap-1.5">
+          <Select
+            value={s.hasCustomTarget ? String(s.targetPct) : "default"}
+            onValueChange={(v) => {
+              if (v === "default") {
+                if (s.hasCustomTarget) mutation.mutate(null);
+              } else {
+                const n = Number(v);
+                if (n !== s.targetPct) mutation.mutate(n);
+              }
+            }}
+          >
+            <SelectTrigger
+              className="h-8 w-[122px] gap-1 text-xs"
+              aria-label={`Attendance target for ${s.name}`}
+            >
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="default" className="text-xs">
+                Default
+              </SelectItem>
+              {TARGET_OPTIONS.map((p) => (
+                <SelectItem key={p} value={String(p)} className="text-xs">
+                  {p}%
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+          {s.hasCustomTarget && (
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  className="size-7 text-muted-foreground"
+                  disabled={mutation.isPending}
+                  onClick={() => mutation.mutate(null)}
+                  aria-label={`Reset ${s.name} to the global target`}
+                >
+                  <RotateCcw className="size-3.5" aria-hidden="true" />
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent>Back to the global target</TooltipContent>
+            </Tooltip>
+          )}
+        </div>
+      </TableCell>
+    </TableRow>
+  );
+}
+
+function SubjectTargetsCard() {
+  const { data, isPending, isError, error } = useQuery({
+    queryKey: qk.attendance,
+    queryFn: fetchAttendance,
+  });
+
+  const customCount = data?.subjects.filter((s) => s.hasCustomTarget).length ?? 0;
+
+  return (
+    <Card className="rounded-xl border-border/60">
+      <CardHeader className="flex flex-row items-start justify-between space-y-0 gap-2 pb-3">
+        <div>
+          <CardTitle className="flex items-center gap-2 text-base tracking-tight">
+            <Target className="size-4 text-emerald-600 dark:text-emerald-400" aria-hidden="true" />
+            Per-subject targets
+          </CardTitle>
+          <CardDescription className="text-xs">
+            Different papers can require different attendance. Each subject&apos;s target drives its status,
+            warnings and what-if planning; the overall figure keeps the global target.
+          </CardDescription>
+        </div>
+        <Badge variant="outline" className="shrink-0 tabular-nums">
+          {customCount}/{data?.subjects.length ?? 0} custom
+        </Badge>
+      </CardHeader>
+      <CardContent>
+        {isPending ? (
+          <div className="space-y-2">
+            {Array.from({ length: 4 }).map((_, i) => (
+              <Skeleton key={i} className="h-10 w-full" />
+            ))}
+          </div>
+        ) : isError || !data ? (
+          <p className="flex items-center gap-2 text-sm text-red-600 dark:text-red-400">
+            <AlertCircle className="size-4 shrink-0" aria-hidden="true" />
+            Could not load subjects: {error?.message ?? "unknown error"}
+          </p>
+        ) : data.subjects.length === 0 ? (
+          <p className="py-4 text-center text-sm text-muted-foreground">
+            No subjects synchronized yet — targets can be set after the first sync.
+          </p>
+        ) : (
+          <div className="max-h-96 overflow-y-auto rounded-lg border border-border/50">
+            <Table>
+              <TableHeader className="sticky top-0 z-10 bg-card">
+                <TableRow>
+                  <TableHead className="text-xs">Subject</TableHead>
+                  <TableHead className="text-right text-xs">Current</TableHead>
+                  <TableHead className="text-right text-xs">Target</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {data.subjects.map((s) => (
+                  <TargetRow key={s.id} s={s} />
+                ))}
+              </TableBody>
+            </Table>
+          </div>
+        )}
+        <p className="mt-3 flex items-start gap-1.5 text-[11px] leading-relaxed text-muted-foreground">
+          <Info className="mt-0.5 size-3.5 shrink-0" aria-hidden="true" />
+          Targets are stored locally and never sent to the ERP. Changing one recomputes that subject&apos;s
+          warning immediately — no sync needed.
+        </p>
+      </CardContent>
+    </Card>
+  );
+}
+
+/* ------------------------------------------------------------------ */
 /* Browser reminders (system notifications when something is due)      */
 /* ------------------------------------------------------------------ */
 
@@ -931,6 +1106,7 @@ export function SettingsTab() {
         <ErpConnectionCard />
         <SyncSettingsCard />
       </div>
+      <SubjectTargetsCard />
       <NotificationPrefsCard />
       <div className="grid gap-4 lg:grid-cols-2">
         <BrowserRemindersCard />

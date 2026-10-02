@@ -1,5 +1,5 @@
 import { db } from "@/lib/db";
-import { getSettings, getRawSetting, setRawSetting, isNotifyEnabled } from "@/lib/settings";
+import { getSettings, getRawSetting, setRawSetting, isNotifyEnabled, type AppSettings } from "@/lib/settings";
 import { attendancePercentage, classesToReachTarget } from "@/lib/attendance";
 import { fetchDemoSnapshot } from "@/lib/erp/demo";
 import { fetchLiveSnapshot } from "@/lib/erp/live";
@@ -144,7 +144,7 @@ export async function runSync(
     const prevFailures = stateBefore.consecutiveFailures;
     const { snapshot, mode } = await fetchSnapshot(trigger);
 
-    const changes = await applySnapshot(snapshot, settings.targetPercentage);
+    const changes = await applySnapshot(snapshot, settings);
     await recordSnapshots(mode);
     void pruneSnapshots();
     const now = new Date();
@@ -269,7 +269,7 @@ export async function runSync(
  * Diff a fresh snapshot against local data; apply only actual changes.
  * Returns the number of changes applied.
  */
-async function applySnapshot(snapshot: ErpSnapshot, targetPct: number): Promise<number> {
+async function applySnapshot(snapshot: ErpSnapshot, settings: AppSettings): Promise<number> {
   let changes = 0;
   const previous = await db.subject.findMany({ where: { active: true } });
   const prevByCode = new Map(previous.map((s) => [s.code, s]));
@@ -319,7 +319,10 @@ async function applySnapshot(snapshot: ErpSnapshot, targetPct: number): Promise<
   }
 
   // --- warnings + auto-managed ATTENDANCE_WARNING reminders ---
-  await recomputeAttendanceWarnings(targetPct, prevByCode);
+  await recomputeAttendanceWarnings(settings.targetPercentage, {
+    prevByCode,
+    subjectTargets: settings.subjectTargets,
+  });
 
   // --- ERP reminders (exams, assignments, ...) — dedup via externalId ---
   const seenExternal = new Set<string>();
@@ -386,39 +389,49 @@ async function applySnapshot(snapshot: ErpSnapshot, targetPct: number): Promise<
 }
 
 /**
- * Recalculate per-subject warnings for the current target without contacting
- * the ERP. Used after syncs and whenever the user changes the target %.
+ * Recalculate per-subject warnings without contacting the ERP. Each subject is
+ * measured against its own effective target (per-subject override when set,
+ * otherwise the global target). Used after syncs and whenever the user changes
+ * the global target or a per-subject override.
  */
 export async function recomputeAttendanceWarnings(
   targetPct: number,
-  prevByCode?: Map<string, { present: number; total: number }>
+  opts?: {
+    prevByCode?: Map<string, { present: number; total: number }>;
+    subjectTargets?: Record<string, number>;
+  }
 ): Promise<void> {
+  const overrides = opts?.subjectTargets ?? {};
   const activeSubjects = await db.subject.findMany({ where: { active: true } });
   for (const sub of activeSubjects) {
     if (sub.total <= 0) continue;
+    const override = overrides[sub.code];
+    const effectiveTargetPct =
+      typeof override === "number" && Number.isFinite(override) ? override : targetPct;
     const pct = attendancePercentage(sub.present, sub.total);
-    const below = pct < targetPct;
-    const prevRow = prevByCode?.get(sub.code);
+    const below = pct < effectiveTargetPct;
+    const prevRow = opts?.prevByCode?.get(sub.code);
     const wasBelow =
       prevRow && prevRow.total > 0
-        ? attendancePercentage(prevRow.present, prevRow.total) < targetPct
+        ? attendancePercentage(prevRow.present, prevRow.total) < effectiveTargetPct
         : false;
 
     if (below && !wasBelow) {
-      const need = classesToReachTarget(sub.present, sub.total, targetPct);
+      const need = classesToReachTarget(sub.present, sub.total, effectiveTargetPct);
       await notify(
         "ATTENDANCE_WARNING",
         `Attendance Alert — ${sub.name}`,
-        `${sub.name} attendance is now ${pct.toFixed(2)}%.\nTarget: ${targetPct}%.\nYou need to attend the next ${need} class${need === 1 ? "" : "es"} to reach the target.`,
-        pct < targetPct - 10 ? "critical" : "warning"
+        `${sub.name} attendance is now ${pct.toFixed(2)}%.\nTarget: ${effectiveTargetPct}%${override != null ? " (custom for this subject)" : ""}.\nYou need to attend the next ${need} class${need === 1 ? "" : "es"} to reach the target.`,
+        pct < effectiveTargetPct - 10 ? "critical" : "warning"
       );
     }
 
     const externalId = `erp:warn:${sub.code}`;
     const warnReminder = await db.reminder.findUnique({ where: { externalId } });
     if (below) {
-      const need = classesToReachTarget(sub.present, sub.total, targetPct);
+      const need = classesToReachTarget(sub.present, sub.total, effectiveTargetPct);
       const dueAt = endOfToday();
+      const description = `${pct.toFixed(2)}% vs ${effectiveTargetPct}% target${override != null ? " (custom)" : ""}. Attend the next ${need} class${need === 1 ? "" : "es"}.`;
       if (!warnReminder) {
         await db.reminder.create({
           data: {
@@ -426,7 +439,7 @@ export async function recomputeAttendanceWarnings(
             externalId,
             type: "ATTENDANCE_WARNING",
             title: `Attendance below target — ${sub.name}`,
-            description: `${pct.toFixed(2)}% vs ${targetPct}% target. Attend the next ${need} class${need === 1 ? "" : "es"}.`,
+            description,
             dueAt,
           },
         });
@@ -435,7 +448,7 @@ export async function recomputeAttendanceWarnings(
           where: { id: warnReminder.id },
           data: {
             title: `Attendance below target — ${sub.name}`,
-            description: `${pct.toFixed(2)}% vs ${targetPct}% target. Attend the next ${need} class${need === 1 ? "" : "es"}.`,
+            description,
             dueAt,
           },
         });

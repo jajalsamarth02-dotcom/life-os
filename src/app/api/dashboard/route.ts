@@ -13,7 +13,7 @@ export async function GET() {
   try {
     const settings = await getSettings();
     const state = await getSyncState();
-    const subjects = await getSubjectViews(settings.targetPercentage);
+    const subjects = await getSubjectViews(settings.targetPercentage, settings.subjectTargets);
     const overall = overallWithTarget(subjects, settings.targetPercentage);
 
     const now = new Date();

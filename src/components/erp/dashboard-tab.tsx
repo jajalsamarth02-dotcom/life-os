@@ -35,6 +35,7 @@ import {
   dueGroup,
   EmptyHero,
   fmtDT,
+  CustomTargetChip,
   KindIcon,
   MiniBar,
   ProgressRing,
@@ -342,6 +343,7 @@ function SubjectRow({ s, onOpen, shimmer }: { s: SubjectView; onOpen: () => void
               {s.present}/{s.total}
             </span>
           )}
+          {s.hasCustomTarget && <CustomTargetChip target={s.targetPct} className="shrink-0" />}
         </div>
       </div>
       <ChevronRight className="size-4 shrink-0 text-muted-foreground/60" aria-hidden="true" />
@@ -412,7 +414,9 @@ export function DashboardTab({
   onOpenSettings: () => void;
 }) {
   const [sort, setSort] = useState<SubjectSort>("lowest");
-  const [selectedSubject, setSelectedSubject] = useState<SubjectView | null>(null);
+  /* Store the CODE (not the object) and derive the view from fresh query data,
+     so the drawer reflects updated targets/percentages after refetches. */
+  const [selectedCode, setSelectedCode] = useState<string | null>(null);
   const [digestOpen, setDigestOpen] = useState(false);
   const { data, isPending, isError, error } = useQuery({
     queryKey: qk.dashboard,
@@ -490,11 +494,12 @@ export function DashboardTab({
     >
       {/* Subject detail drawer (also covers what-if planning) */}
       <SubjectDrawer
-        subject={selectedSubject}
+        subject={data.subjects.find((s) => s.code === selectedCode) ?? null}
         target={target}
-        open={selectedSubject !== null}
+        globalTarget={target}
+        open={selectedCode !== null}
         onOpenChange={(o) => {
-          if (!o) setSelectedSubject(null);
+          if (!o) setSelectedCode(null);
         }}
       />
 
@@ -618,7 +623,7 @@ export function DashboardTab({
                 <SubjectRow
                   key={s.id}
                   s={s}
-                  onOpen={() => setSelectedSubject(s)}
+                  onOpen={() => setSelectedCode(s.code)}
                   shimmer={data.erp.sync.status === "syncing"}
                 />
               ))}

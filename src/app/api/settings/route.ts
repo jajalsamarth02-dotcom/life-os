@@ -36,12 +36,25 @@ export async function PUT(req: Request) {
       }
       patch.notifyPrefs = clean;
     }
+    if (
+      body.subjectTargets &&
+      typeof body.subjectTargets === "object" &&
+      !Array.isArray(body.subjectTargets)
+    ) {
+      const clean: Record<string, number> = {};
+      for (const [k, v] of Object.entries(body.subjectTargets as Record<string, unknown>)) {
+        if (typeof v === "number" && Number.isFinite(v)) clean[k] = v;
+      }
+      patch.subjectTargets = clean;
+    }
 
     const prev = await getSettings();
     const next = await updateSettings(patch);
 
     if (prev.targetPercentage !== next.targetPercentage) {
-      await recomputeAttendanceWarnings(next.targetPercentage);
+      await recomputeAttendanceWarnings(next.targetPercentage, {
+        subjectTargets: next.subjectTargets,
+      });
     }
 
     // apply the new cadence to the schedule without waiting a full cycle

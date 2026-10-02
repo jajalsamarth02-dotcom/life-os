@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { motion } from "framer-motion";
-import { CheckCircle2, PanelRightOpen, TrendingUp, Users, XCircle, Zap } from "lucide-react";
+import { CheckCircle2, PanelRightOpen, Target, TrendingUp, Users, XCircle, Zap } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -13,6 +13,7 @@ import { fetchAttendance, fetchHistory, qk } from "./api";
 import { HistoryHeatmap } from "./history-heatmap";
 import { SubjectDrawer } from "./subject-drawer";
 import {
+  CustomTargetChip,
   EmptyHero,
   fmtPct2,
   MiniBar,
@@ -84,8 +85,10 @@ function SubjectCard({
     >
       <Card className="flex h-full flex-col rounded-xl border-border/60 transition-colors hover:border-primary/30">
         <CardHeader className="pb-2">
-          <div className="flex items-start justify-between gap-2">
-            <div className="min-w-0">
+          {/* min-w-0: this row is a grid child of CardHeader — without it a long
+              unwrapped title pushes the sparkline column past the card edge. */}
+          <div className="flex min-w-0 items-start justify-between gap-2">
+            <div className="min-w-0 flex-1">
               <CardTitle className="truncate text-base tracking-tight">{s.name}</CardTitle>
               <CardDescription className="mt-0.5 font-mono text-xs">{s.code}</CardDescription>
             </div>
@@ -125,7 +128,8 @@ function SubjectCard({
           <MiniBar percentage={s.percentage} status={s.status} />
 
           <div className="flex flex-wrap items-center gap-2">
-            <StatusChip status={s.status} target={target} />
+            <StatusChip status={s.status} target={s.targetPct} />
+            {s.hasCustomTarget && <CustomTargetChip target={s.targetPct} />}
             {safe ? (
               s.canSkip > 0 ? (
                 <Badge variant="outline" className="gap-1 border-emerald-500/30 text-emerald-700 dark:text-emerald-400">
@@ -141,15 +145,15 @@ function SubjectCard({
             ) : (
               <Badge variant="outline" className="gap-1 border-amber-500/40 text-amber-700 dark:text-amber-400">
                 <TrendingUp className="size-3" aria-hidden="true" />
-                Attend next {s.classesToTarget} {s.classesToTarget === 1 ? "class" : "classes"} to reach {target}%
+                Attend next {s.classesToTarget} {s.classesToTarget === 1 ? "class" : "classes"} to reach {s.targetPct}%
               </Badge>
             )}
           </div>
 
           <p className="text-xs text-muted-foreground">
             {safe
-              ? `You can miss ${s.canSkip} more ${s.canSkip === 1 ? "class" : "classes"} and stay above the ${target}% target.`
-              : `Attend the next ${s.classesToTarget} ${s.classesToTarget === 1 ? "class" : "classes"} to reach ${target}%.`}
+              ? `You can miss ${s.canSkip} more ${s.canSkip === 1 ? "class" : "classes"} and stay above the ${s.targetPct}% target${s.hasCustomTarget ? " (custom)" : ""}.`
+              : `Attend the next ${s.classesToTarget} ${s.classesToTarget === 1 ? "class" : "classes"} to reach ${s.targetPct}%${s.hasCustomTarget ? " (custom target)" : ""}.`}
           </p>
 
           <div className="mt-auto space-y-2">
@@ -223,6 +227,7 @@ export function AttendanceTab({ onOpenSettings }: { onOpenSettings: () => void }
   }
 
   const { overall, subjects, target } = data;
+  const customCount = subjects.filter((s) => s.hasCustomTarget).length;
 
   if (subjects.length === 0) {
     return (
@@ -240,6 +245,7 @@ export function AttendanceTab({ onOpenSettings }: { onOpenSettings: () => void }
       <SubjectDrawer
         subject={selectedSubject}
         target={target}
+        globalTarget={target}
         open={selectedSubject !== null}
         onOpenChange={(o) => {
           if (!o) setSelectedCode(null);
@@ -255,6 +261,16 @@ export function AttendanceTab({ onOpenSettings }: { onOpenSettings: () => void }
               <h2 className="text-base font-semibold tracking-tight">Overall</h2>
               <Badge variant="outline" className="tabular-nums">Target {target}%</Badge>
               <StatusChip status={overall.status} target={target} />
+              {customCount > 0 && (
+                <Badge
+                  variant="outline"
+                  className="gap-1 border-amber-500/40 text-amber-700 dark:text-amber-400"
+                  title="Some subjects use their own attendance target — see each subject card"
+                >
+                  <Target className="size-3" aria-hidden="true" />
+                  {customCount} custom {customCount === 1 ? "target" : "targets"}
+                </Badge>
+              )}
             </div>
             <p className="text-sm text-muted-foreground tabular-nums">
               <span className="inline-flex items-center gap-1">
@@ -274,8 +290,9 @@ export function AttendanceTab({ onOpenSettings }: { onOpenSettings: () => void }
               </p>
             )}
           </div>
-          <div className="ms-auto">
-            <ExportAttendanceButton subjects={subjects} target={target} />
+          {/* Full-width row under the ring+text on mobile, right-aligned on larger screens */}
+          <div className="ms-auto w-full sm:w-auto">
+            <ExportAttendanceButton subjects={subjects} />
           </div>
         </CardContent>
       </Card>

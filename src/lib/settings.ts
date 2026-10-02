@@ -8,6 +8,8 @@ export interface AppSettings {
   minLiveSyncGapMinutes: number;
   /** Per-type notification switches; missing key = enabled. */
   notifyPrefs: Record<string, boolean>;
+  /** Per-subject attendance target overrides (subject code → %). Missing key = global target. */
+  subjectTargets: Record<string, number>;
 }
 
 /** Notification types the engine can emit (whitelisted in the API + UI). */
@@ -26,7 +28,22 @@ export const DEFAULT_SETTINGS: AppSettings = {
   demoMode: true, // clearly-labelled simulator so the pipeline is usable without live credentials
   minLiveSyncGapMinutes: 5, // rate-limit protection for the real ERP
   notifyPrefs: {},
+  subjectTargets: {},
 };
+
+/** Resolve the effective attendance target for one subject. */
+export function effectiveTarget(
+  code: string,
+  settings: Pick<AppSettings, "targetPercentage" | "subjectTargets">
+): number {
+  const override = settings.subjectTargets?.[code];
+  return typeof override === "number" && Number.isFinite(override) ? override : settings.targetPercentage;
+}
+
+/** Number of subjects using a custom target. */
+export function countCustomTargets(subjectTargets: Record<string, number> | undefined): number {
+  return subjectTargets ? Object.keys(subjectTargets).length : 0;
+}
 
 export function isNotifyType(type: string): boolean {
   return (NOTIFY_TYPES as readonly string[]).includes(type);
@@ -63,6 +80,16 @@ export async function updateSettings(patch: Partial<AppSettings>): Promise<AppSe
       if (isNotifyType(k) && typeof v === "boolean") merged[k] = v;
     }
     next.notifyPrefs = merged;
+  }
+  // subject targets: replace when provided, keep only sane numeric values (1–100)
+  if (patch.subjectTargets !== undefined) {
+    const clean: Record<string, number> = {};
+    for (const [k, v] of Object.entries(patch.subjectTargets ?? {})) {
+      if (typeof v === "number" && Number.isFinite(v)) {
+        clean[k] = Math.min(100, Math.max(1, Math.round(v)));
+      }
+    }
+    next.subjectTargets = clean;
   }
   await db.setting.upsert({
     where: { key: SETTINGS_KEY },

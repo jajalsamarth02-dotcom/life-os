@@ -1,22 +1,34 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import { useQuery } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { format } from "date-fns";
+import { toast } from "sonner";
 import {
   Activity,
   CalendarDays,
+  CalendarPlus,
   CheckCircle2,
   Footprints,
   History,
+  Loader2,
   RotateCcw,
   Target,
   TrendingDown,
   TrendingUp,
+  X,
   Zap,
 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { Separator } from "@/components/ui/separator";
 import {
   Sheet,
@@ -28,12 +40,13 @@ import {
 import { Slider } from "@/components/ui/slider";
 import { cn } from "@/lib/utils";
 import { classesCanSkip, classesToReachTarget } from "@/lib/attendance";
-import { fetchHistory, fetchTimetable, qk } from "./api";
+import { createSlot, fetchHistory, fetchTimetable, putSubjectTarget, qk } from "./api";
 import { AnimatedNumber } from "./trend-chart";
-import { fmtDT, MiniBar, statusColors, StatusChip, useNow } from "./shared";
+import { CustomTargetChip, fmtDT, MiniBar, statusColors, StatusChip, useNow } from "./shared";
 import type { AttendanceStatus, HistoryResponse, SubjectView, TimetableSlotRow } from "./types";
 
 const DAY_SHORT = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+const TARGET_PRESETS = [60, 65, 70, 75, 80, 85];
 
 function hhmm(min: number): string {
   const h = Math.floor(min / 60);
@@ -66,7 +79,6 @@ function WhatIfPlanner({ s, target }: { s: SubjectView; target: number }) {
   const projectedStatus: AttendanceStatus =
     projected >= target ? "safe" : projected >= target - 5 ? "warning" : "danger";
   const pc = statusColors(projectedStatus);
-  const c = statusColors(s.status);
 
   const setToTarget = () => {
     setMode("attend");
@@ -228,6 +240,98 @@ function WhatIfPlanner({ s, target }: { s: SubjectView; target: number }) {
 }
 
 /* ------------------------------------------------------------------ */
+/* Per-subject target editor                                           */
+/* ------------------------------------------------------------------ */
+
+function SubjectTargetEditor({ s, globalTarget }: { s: SubjectView; globalTarget: number }) {
+  const qc = useQueryClient();
+  const [justSet, setJustSet] = useState<number | null>(null);
+
+  const mutation = useMutation({
+    mutationFn: (v: number | null) => putSubjectTarget(s.code, v),
+    onSuccess: (res) => {
+      qc.invalidateQueries({ queryKey: qk.attendance });
+      qc.invalidateQueries({ queryKey: qk.dashboard });
+      qc.invalidateQueries({ queryKey: qk.settings });
+      setJustSet(res.targetPct);
+      window.setTimeout(() => setJustSet(null), 1600);
+      toast.success(
+        res.hasCustomTarget
+          ? `Target for ${s.code} set to ${res.targetPct}%`
+          : `${s.code} reset to the global target (${res.targetPct}%)`
+      );
+    },
+    onError: (e) => toast.error(e instanceof Error ? e.message : "Could not save the target"),
+  });
+
+  const isActive = (p: number) => (s.hasCustomTarget ? s.targetPct === p : p === globalTarget);
+
+  return (
+    <div className="rounded-xl border border-border/70 bg-muted/30 p-4">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <p className="flex items-center gap-1.5 text-sm font-semibold tracking-tight">
+          <Target className="size-4 text-emerald-600 dark:text-emerald-400" aria-hidden="true" />
+          Target for this subject
+        </p>
+        {s.hasCustomTarget ? (
+          <CustomTargetChip target={s.targetPct} />
+        ) : (
+          <Badge variant="outline" className="text-[10px] font-medium uppercase tracking-wide text-muted-foreground">
+            global {globalTarget}%
+          </Badge>
+        )}
+      </div>
+      <p className="mt-2 text-xs text-muted-foreground">
+        Different subjects can have different requirements (e.g. labs at 70%, theory at 75%). This changes the
+        status colors, warnings and what-if math for <b className="text-foreground">{s.code}</b> only.
+      </p>
+
+      <div className="mt-3 flex flex-wrap items-center gap-1.5" role="group" aria-label={`Attendance target for ${s.code}`}>
+        {TARGET_PRESETS.map((p) => (
+          <button
+            key={p}
+            type="button"
+            disabled={mutation.isPending}
+            onClick={() => {
+              if (!isActive(p)) mutation.mutate(p);
+            }}
+            aria-pressed={isActive(p)}
+            className={cn(
+              "h-8 min-w-11 rounded-lg border px-2 text-xs font-semibold tabular-nums transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-60",
+              isActive(p)
+                ? "border-emerald-500/50 bg-emerald-500/15 text-emerald-700 dark:text-emerald-400"
+                : "border-border/70 bg-background text-muted-foreground hover:border-emerald-500/40 hover:text-foreground"
+            )}
+          >
+            {p}%
+          </button>
+        ))}
+        <Button
+          variant="outline"
+          size="sm"
+          disabled={mutation.isPending || !s.hasCustomTarget}
+          className="h-8 gap-1 border-dashed text-xs text-muted-foreground"
+          onClick={() => mutation.mutate(null)}
+          aria-label={`Reset ${s.code} target to the global ${globalTarget}%`}
+        >
+          {mutation.isPending ? (
+            <Loader2 className="size-3.5 animate-spin" aria-hidden="true" />
+          ) : (
+            <RotateCcw className="size-3.5" aria-hidden="true" />
+          )}
+          Default ({globalTarget}%)
+        </Button>
+        {justSet !== null && (
+          <span className="flex items-center gap-1 text-[11px] font-medium text-emerald-600 dark:text-emerald-400" role="status">
+            <CheckCircle2 className="size-3.5" aria-hidden="true" /> saved — {justSet}%
+          </span>
+        )}
+      </div>
+    </div>
+  );
+}
+
+/* ------------------------------------------------------------------ */
 /* Subject trend mini chart (pure SVG, no deps)                        */
 /* ------------------------------------------------------------------ */
 
@@ -294,12 +398,33 @@ function MiniAreaChart({ points }: { points: number[] }) {
 }
 
 /* ------------------------------------------------------------------ */
-/* Weekly classes for this subject                                     */
+/* Weekly classes for this subject + quick add                         */
 /* ------------------------------------------------------------------ */
 
-function SubjectTimetable({ slots }: { slots: TimetableSlotRow[] }) {
+function SubjectTimetable({ slots, subjectCode, subjectName }: { slots: TimetableSlotRow[]; subjectCode: string; subjectName: string }) {
   const now = useNow();
   const today = new Date(now).getDay();
+  const qc = useQueryClient();
+  const [adding, setAdding] = useState(false);
+  const [day, setDay] = useState<string>(String(today));
+  const [start, setStart] = useState("");
+  const [end, setEnd] = useState("");
+
+  const addMutation = useMutation({
+    mutationFn: () => createSlot({ dayOfWeek: Number(day), start, end, subjectCode }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: qk.timetable });
+      qc.invalidateQueries({ queryKey: qk.dashboard });
+      toast.success(`${DAY_SHORT[Number(day)]} ${start}–${end} added for ${subjectCode}`);
+      setAdding(false);
+      setStart("");
+      setEnd("");
+    },
+    onError: (e) => toast.error(e instanceof Error ? e.message : "Could not add the class"),
+  });
+
+  const valid = /^\d{2}:\d{2}$/.test(start) && /^\d{2}:\d{2}$/.test(end) && start < end;
+
   const byDay = useMemo(() => {
     const m = new Map<number, TimetableSlotRow[]>();
     for (const s of slots) {
@@ -319,29 +444,106 @@ function SubjectTimetable({ slots }: { slots: TimetableSlotRow[] }) {
 
   return (
     <div className="rounded-xl border border-border/70 p-4">
-      <p className="flex items-center gap-1.5 text-sm font-semibold tracking-tight">
-        <CalendarDays className="size-4 text-emerald-500" aria-hidden="true" />
-        Weekly classes
+      <div className="flex items-center gap-1.5">
+        <p className="flex items-center gap-1.5 text-sm font-semibold tracking-tight">
+          <CalendarDays className="size-4 text-emerald-500" aria-hidden="true" />
+          Weekly classes
+        </p>
         <Badge variant="secondary" className="ml-auto tabular-nums">{slots.length}/week</Badge>
-      </p>
+        <Button
+          variant="ghost"
+          size="sm"
+          className="h-7 gap-1 px-2 text-[11px] text-muted-foreground"
+          onClick={() => setAdding((v) => !v)}
+          aria-expanded={adding}
+          aria-label={adding ? "Cancel adding a class" : `Add a weekly class for ${subjectName}`}
+        >
+          {adding ? <X className="size-3.5" aria-hidden="true" /> : <CalendarPlus className="size-3.5" aria-hidden="true" />}
+          {adding ? "Cancel" : "Add"}
+        </Button>
+      </div>
+
+      {adding && (
+        <div className="mt-3 rounded-lg border border-border/60 bg-background p-3">
+          <div className="grid grid-cols-3 gap-2">
+            <div className="space-y-1">
+              <label htmlFor="slot-day" className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
+                Day
+              </label>
+              <Select value={day} onValueChange={setDay}>
+                <SelectTrigger id="slot-day" className="h-9 text-xs" aria-label="Day of the week">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {[1, 2, 3, 4, 5, 6, 0].map((d) => (
+                    <SelectItem key={d} value={String(d)} className="text-xs">
+                      {DAY_SHORT[d]}
+                      {d === today ? " · today" : ""}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="space-y-1">
+              <label htmlFor="slot-start" className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
+                Start
+              </label>
+              <Input
+                id="slot-start"
+                type="time"
+                value={start}
+                onChange={(e) => setStart(e.target.value)}
+                className="h-9 text-xs"
+              />
+            </div>
+            <div className="space-y-1">
+              <label htmlFor="slot-end" className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
+                End
+              </label>
+              <Input
+                id="slot-end"
+                type="time"
+                value={end}
+                onChange={(e) => setEnd(e.target.value)}
+                className="h-9 text-xs"
+              />
+            </div>
+          </div>
+          <div className="mt-2.5 flex items-center justify-between gap-2">
+            <p className="text-[11px] text-muted-foreground">
+              {valid ? "Looks good — saved locally, never written to the ERP." : "Pick a day and a start/end time (end must be after start)."}
+            </p>
+            <Button
+              size="sm"
+              className="h-8 gap-1 text-xs"
+              disabled={!valid || addMutation.isPending}
+              onClick={() => addMutation.mutate()}
+            >
+              {addMutation.isPending && <Loader2 className="size-3.5 animate-spin" aria-hidden="true" />}
+              Add class
+            </Button>
+          </div>
+        </div>
+      )}
+
       {slots.length === 0 ? (
         <p className="mt-2 text-xs text-muted-foreground">
-          No timetable slots recorded for this subject. You can add them from the schedule manager on the dashboard.
+          No timetable slots recorded for this subject{adding ? "." : " — use the Add button above to record one."}
         </p>
       ) : (
         <ul className="mt-3 space-y-1.5">
-          {orderedDays.map((day) => (
-            <li key={day} className="flex items-center gap-2.5">
+          {orderedDays.map((d) => (
+            <li key={d} className="flex items-center gap-2.5">
               <span
                 className={cn(
                   "w-10 shrink-0 rounded-md px-1.5 py-0.5 text-center text-[11px] font-semibold",
-                  day === today ? "bg-emerald-500/15 text-emerald-700 dark:text-emerald-400" : "bg-muted text-muted-foreground"
+                  d === today ? "bg-emerald-500/15 text-emerald-700 dark:text-emerald-400" : "bg-muted text-muted-foreground"
                 )}
               >
-                {DAY_SHORT[day]}
+                {DAY_SHORT[d]}
               </span>
               <div className="flex flex-wrap gap-1.5">
-                {byDay.get(day)!.map((slot) => (
+                {byDay.get(d)!.map((slot) => (
                   <span
                     key={slot.id}
                     className="rounded-md border border-border/60 bg-background px-2 py-0.5 text-[11px] tabular-nums text-foreground/80"
@@ -365,11 +567,13 @@ function SubjectTimetable({ slots }: { slots: TimetableSlotRow[] }) {
 export function SubjectDrawer({
   subject,
   target,
+  globalTarget,
   open,
   onOpenChange,
 }: {
   subject: SubjectView | null;
   target: number;
+  globalTarget: number;
   open: boolean;
   onOpenChange: (open: boolean) => void;
 }) {
@@ -417,7 +621,8 @@ export function SubjectDrawer({
                 <span className={cn("rounded-md bg-background/70 px-2 py-0.5 font-mono text-[11px] font-bold backdrop-blur", c.text)}>
                   {subject.code}
                 </span>
-                <StatusChip status={subject.status} target={target} />
+                <StatusChip status={subject.status} target={subject.targetPct} />
+                {subject.hasCustomTarget && <CustomTargetChip target={subject.targetPct} />}
               </div>
               <h2 className="mt-1.5 truncate text-lg font-semibold tracking-tight">{subject.name}</h2>
               <p className="mt-0.5 flex items-center gap-1 text-xs text-muted-foreground">
@@ -429,7 +634,9 @@ export function SubjectDrawer({
               <p className={cn("text-3xl font-bold tracking-tight tabular-nums", c.text)}>
                 <AnimatedNumber value={subject.percentage} suffix="%" />
               </p>
-              <p className="text-[11px] text-muted-foreground">target {target}%</p>
+              <p className="text-[11px] text-muted-foreground">
+                target {subject.targetPct}%{subject.hasCustomTarget ? " · custom" : ""}
+              </p>
             </div>
           </div>
           <MiniBar percentage={subject.percentage} status={subject.status} className="relative mt-3.5 h-2.5" />
@@ -465,10 +672,12 @@ export function SubjectDrawer({
             </div>
           </div>
 
-          <WhatIfPlanner key={subject.id} s={subject} target={target} />
+          <WhatIfPlanner key={subject.id} s={subject} target={subject.targetPct} />
+
+          <SubjectTargetEditor s={subject} globalTarget={globalTarget} />
 
           <SubjectTrend history={history.data} code={subject.code} />
-          <SubjectTimetable slots={mySlots} />
+          <SubjectTimetable slots={mySlots} subjectCode={subject.code} subjectName={subject.name} />
 
           <Separator />
           <p className="pb-2 text-center text-[11px] leading-relaxed text-muted-foreground">

@@ -11,7 +11,7 @@ export const dynamic = "force-dynamic";
 export async function GET() {
   try {
     const settings = await getSettings();
-    const subjects = await getSubjectViews(settings.targetPercentage);
+    const subjects = await getSubjectViews(settings.targetPercentage, settings.subjectTargets);
     return NextResponse.json({
       target: settings.targetPercentage,
       overall: overallWithTarget(subjects, settings.targetPercentage),

@@ -63,7 +63,10 @@ export function isIOS(): boolean {
 
 /** Reactive flag: a native install prompt is available right now. */
 export function useCanInstall(): boolean {
-  const [can, setCan] = useState(() => deferredPrompt !== null);
+  /* Initial state MUST be false on both server and client's first (hydrating)
+     render — reading `deferredPrompt` here would mismatch the SSR HTML whenever
+     the browser fires beforeinstallprompt before React hydrates. */
+  const [can, setCan] = useState(false);
   useEffect(() => {
     const update = () => setCan(deferredPrompt !== null);
     listeners.add(update);
@@ -77,7 +80,8 @@ export function useCanInstall(): boolean {
 
 /** Reactive flag: the app is already running installed (standalone). */
 export function useIsInstalled(): boolean {
-  const [val, setVal] = useState(installed);
+  /* Same hydration rule: start false, sync the real value after mount. */
+  const [val, setVal] = useState(false);
   useEffect(() => {
     const update = () => setVal(installed);
     listeners.add(update);

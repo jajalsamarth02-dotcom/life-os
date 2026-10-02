@@ -22,6 +22,10 @@ export interface SubjectView extends AttendanceView {
   code: string;
   name: string;
   updatedAt: string;
+  /** Effective target for THIS subject (override or global). */
+  targetPct: number;
+  /** True when this subject uses its own target (≠ global). */
+  hasCustomTarget: boolean;
 }
 
 export type ReminderSource = "ERP" | "PERSONAL";
@@ -174,6 +178,8 @@ export interface AppSettings {
   minLiveSyncGapMinutes: number;
   /** Per-type notification switches; missing key = enabled. */
   notifyPrefs: Record<string, boolean>;
+  /** Per-subject target overrides (code → %); missing key = global target. */
+  subjectTargets: Record<string, number>;
 }
 
 export interface SyncResponse {

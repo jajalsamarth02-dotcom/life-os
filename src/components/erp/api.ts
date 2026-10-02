@@ -135,6 +135,13 @@ export const putSettings = (patch: Partial<AppSettings>) =>
     body: JSON.stringify(patch),
   });
 
+/** Set (or clear with null) a per-subject attendance target override. */
+export const putSubjectTarget = (code: string, targetPct: number | null) =>
+  api<{ ok: boolean; code: string; hasCustomTarget: boolean; targetPct: number }>(
+    "/api/subjects/target",
+    { method: "PUT", body: JSON.stringify({ code, targetPct }) }
+  );
+
 export const connectErp = (username: string, password: string) =>
   api<ErpConnectSuccess>("/api/erp/connect", {
     method: "POST",

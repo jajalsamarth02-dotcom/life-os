@@ -8,6 +8,7 @@ import {
   CartesianGrid,
   Line,
   LineChart,
+  ReferenceLine,
   ResponsiveContainer,
   Tooltip,
   XAxis,
@@ -288,6 +289,18 @@ export function TrendSection({
                   </linearGradient>
                 </defs>
                 <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" vertical={false} />
+                <ReferenceLine
+                  y={target}
+                  stroke="var(--muted-foreground)"
+                  strokeDasharray="5 5"
+                  strokeOpacity={0.55}
+                  label={{
+                    value: `target ${target}%`,
+                    position: "insideTopRight",
+                    fontSize: 10,
+                    fill: "var(--muted-foreground)",
+                  }}
+                />
                 <XAxis dataKey="label" tick={{ fontSize: 11 }} tickLine={false} axisLine={false} interval="preserveStartEnd" minTickGap={24} />
                 <YAxis tick={{ fontSize: 11 }} tickLine={false} axisLine={false} domain={["auto", "auto"]} unit="%" width={52} tickCount={5} />
                 <Tooltip
@@ -309,6 +322,18 @@ export function TrendSection({
             ) : (
               <LineChart data={chartRows} margin={{ top: 6, right: 8, left: -18, bottom: 0 }}>
                 <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" vertical={false} />
+                <ReferenceLine
+                  y={target}
+                  stroke="var(--muted-foreground)"
+                  strokeDasharray="5 5"
+                  strokeOpacity={0.55}
+                  label={{
+                    value: `target ${target}%`,
+                    position: "insideTopRight",
+                    fontSize: 10,
+                    fill: "var(--muted-foreground)",
+                  }}
+                />
                 <XAxis dataKey="label" tick={{ fontSize: 11 }} tickLine={false} axisLine={false} interval="preserveStartEnd" minTickGap={24} />
                 <YAxis tick={{ fontSize: 11 }} tickLine={false} axisLine={false} domain={["auto", "auto"]} unit="%" width={52} tickCount={5} />
                 <Tooltip
@@ -342,12 +367,12 @@ export function TrendSection({
 /* Export buttons                                                      */
 /* ------------------------------------------------------------------ */
 
-export function ExportAttendanceButton({ subjects, target }: { subjects: SubjectView[]; target: number }) {
+export function ExportAttendanceButton({ subjects }: { subjects: SubjectView[] }) {
   return (
     <Button
       variant="outline"
       size="sm"
-      className="h-8 gap-1.5 text-xs"
+      className="h-8 w-full gap-1.5 text-xs sm:w-auto"
       onClick={() =>
         downloadCsv(
           `attendance-${format(new Date(), "yyyy-MM-dd")}.csv`,
@@ -360,7 +385,7 @@ export function ExportAttendanceButton({ subjects, target }: { subjects: Subject
             s.absent,
             s.percentage.toFixed(2),
             s.status,
-            target,
+            s.targetPct,
             s.classesToTarget,
             s.canSkip,
           ])

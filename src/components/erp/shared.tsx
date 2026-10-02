@@ -28,6 +28,7 @@ import {
   BellRing,
   Layers,
   UserCheck,
+  Target,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import type { AttendanceStatus, ChangeKind, ReminderSource, ReminderType } from "./types";
@@ -153,6 +154,28 @@ export function StatusChip({
       title={`Target ${target}%`}
     >
       {label}
+    </span>
+  );
+}
+
+/** Tiny amber chip marking a subject that uses its own attendance target. */
+export function CustomTargetChip({
+  target,
+  className,
+}: {
+  target: number;
+  className?: string;
+}) {
+  return (
+    <span
+      className={cn(
+        "inline-flex items-center gap-1 rounded-full border border-amber-500/40 bg-amber-500/10 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-amber-700 dark:text-amber-400",
+        className
+      )}
+      title={`This subject uses a custom target of ${target}% (differs from the global target)`}
+    >
+      <Target className="size-2.5" aria-hidden="true" />
+      target {target}% · custom
     </span>
   );
 }

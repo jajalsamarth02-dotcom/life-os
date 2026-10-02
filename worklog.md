@@ -281,3 +281,78 @@ Unresolved issues / risks & next-phase recommendations:
    deployed build.
 3. Backlog: per-subject target overrides, weekly digest as scheduled email/report, command-palette
    recent actions, "add to timetable from drawer" shortcut.
+---
+Task ID: R7 (webDevReview round 7)
+Agent: Z.ai Code (autonomous review & feature round)
+Task: QA + per-subject target overrides (flagship) + add-to-timetable from drawer + 3 bug fixes + styling polish
+
+Work Log / Current status assessment:
+- Read worklog (R1–R6 done). QA sweep: server healthy, scheduler syncing, all 4 tabs navigate, 0 console/page
+  errors → no blocking bugs at start of round → proceeded to backlog work (R6 recommendation #1: per-subject
+  target overrides) and found/fixed 3 real issues during feature E2E (below).
+
+Completed modifications:
+1. PER-SUBJECT TARGET OVERRIDES (flagship — different papers can require different attendance):
+   - Backend: AppSettings.subjectTargets (code → %, missing = global; NO schema change needed — stored in the
+     settings KV so overrides survive subject removal/re-add and never collide with sync writes; also avoided
+     the known "db:push needs dev-server restart" risk).
+   - NEW endpoint PUT /api/subjects/target {code, targetPct|null} — 404 unknown code, clamp 1–100, null resets
+     to global, then locally recomputes warnings (no ERP call).
+   - views.ts SubjectView now carries effective `targetPct` + `hasCustomTarget`; dashboard/attendance APIs pass
+     settings.subjectTargets through.
+   - engine recomputeAttendanceWarnings(targetPct, {prevByCode?, subjectTargets?}) — per-subject effective
+     target for below/wasBelow/notification text ("vs 70% target (custom)") and the auto-managed warning
+     reminder; applySnapshot now takes full settings.
+   - UI: SubjectDrawer "Target for this subject" editor (preset chips 60–85% + "Default (global%)" reset +
+     saved-confirmation + toasts, invalidates attendance/dashboard/settings); WhatIf planner + header now use
+     the subject's effective target ("Reach 85% → attend 18"). New SubjectTargetsCard in Settings (table with
+     per-row Select + reset, "n/m custom" badge, sticky header, scroll). CustomTargetChip (amber, ◎ target N%
+     · custom) on dashboard rows, attendance cards, drawer header and settings rows. Attendance summary strip
+     shows "n custom target(s)" badge. CSV export now exports each subject's OWN target.
+2. ADD-TO-TIMETABLE FROM SUBJECT DRAWER (R6 backlog):
+   - SubjectTimetable gained an inline "Add" form (day select w/ today marker + start/end time inputs,
+     client validation, server-verified) → POST /api/timetable (source=personal) → invalidates timetable +
+     dashboard → toast. Empty state now points at the inline form instead of sending users elsewhere.
+3. BUG FIXES found by QA during this round:
+   a. STALE DRAWER after target change — DashboardTab stored the whole SubjectView object in state, so the
+      drawer kept pre-refetch values after invalidation. Fixed: store the CODE and derive the view from fresh
+      query data (same pattern AttendanceTab already used).
+   b. TREND HISTORY REGRESSION — the demo 14-day backfill stamped its final "today" point at a RANDOM hour
+      (9–15h). It ran when overall was 132/183, landing at 09:58 — AFTER all real sync points of the day — so
+      /api/history's last point (and the chart header/delta) showed a stale 72.13% instead of the live 68.97%.
+      Fixed: final backfill point is stamped at now−60s (code) + one-off SQL cleanup of the artifact rows
+      (capturedAt=1790935080000). /api/history last point verified == current overall.
+   c. HYDRATION MISMATCH in InstallButton ("1 Issue" badge) — useCanInstall/useIsInstalled initialized state
+      from browser-only data (deferredPrompt / localStorage / matchMedia). When beforeinstallprompt fired
+      before hydration, SSR HTML ≠ client first render. Fixed: both hooks start false and sync after mount.
+   d. MOBILE Overall strip squeeze (390px) — Export CSV button stole flex width, crushing the stats text to
+      ~90px. Fixed: button wraps to a full-width row under the ring+text on mobile (w-full sm:w-auto).
+4. STYLING polish (mandatory):
+   - Trend chart: dashed "target 75%" ReferenceLine (theme-aware var(--muted-foreground), insideTopRight
+     label) on both the overall area chart and the per-subject line chart — instantly visible headroom/breach.
+   - Sparkline overflow fix via min-w-0 on the CardHeader grid child (long unwrapped titles like "Database
+     Management Systems" previously pushed the sparkline column past the card edge — verified −25px inset on
+     all 5 cards now).
+   - SubjectTargetEditor segmented preset buttons (emerald active state, dashed reset, disabled-while-pending,
+     aria-pressed group); subject rows/cards gained the amber custom-target chip; settings table rows with
+     hover + sticky header.
+
+Verification results:
+- bun run lint: clean. agent-browser: fresh sessions desktop (1280) + mobile (390), light + dark — 0 console
+  errors, 0 page errors, hydration "1 Issue" badge GONE after fix.
+- API E2E: PUT /api/subjects/target 85 → CS-302 status warning→"At risk" with classesToTarget 18 (math
+  verified: ceil((0.85·49−39)/0.15)=18); erp:warn:CS-302 reminder deleted when 70% target made it safe and
+  warning text "64.44% vs 70% target (custom). Attend the next 9 classes." correct for CS-304; clamp 150→100;
+  404 unknown code; reset→global works. Settings card select→70 verified server-side.
+- Drawer E2E: editor reflects changes live after the stale-state fix (GLOBAL→CUSTOM chips, "On track ✓"→"At
+  risk ✗"); timetable Add form created Fri 15:00–15:50 for CS-302 (8/week, source=personal verified in DB).
+- Trend chart verified: ReferenceLine renders (1 node, "target 75%" label); header "Overall 68.97% · target
+  75%" now matches the ring; same-day time labels intact.
+
+Unresolved issues / risks & next-phase recommendations:
+1. Live ERP scrape parser still generic — needs one real student login to fine-tune against the actual
+   dashboard HTML (demo mode covers everything meanwhile). TOP priority if credentials arrive.
+2. Custom targets live in app settings — a future multi-user/deploy story would want them per-account (fine
+   for the single-student scope).
+3. Backlog: per-subject target in the command palette rows; "target line" per subject on the trend chart when
+   a single subject is selected; timetable conflict warnings (overlapping slots); weekly digest email.

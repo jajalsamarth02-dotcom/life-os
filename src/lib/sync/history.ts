@@ -107,7 +107,14 @@ async function maybeBackfill(source: "demo" | "live"): Promise<void> {
 
   for (let i = 1; i <= days; i++) {
     const capturedAt = new Date(now - (days - i) * 24 * 3600 * 1000);
-    capturedAt.setHours(9 + Math.floor(Math.random() * 7), Math.floor(Math.random() * 60), 0, 0);
+    if (i === days) {
+      // Final (today) point: stamp it just before "now" so it can never land in
+      // the future or AFTER the real sync points that follow it the same day —
+      // otherwise the chart's "latest" value would be the stale backfill figure.
+      capturedAt.setTime(now - 60 * 1000);
+    } else {
+      capturedAt.setHours(9 + Math.floor(Math.random() * 7), Math.floor(Math.random() * 60), 0, 0);
+    }
     let sumP = 0;
     let sumT = 0;
     for (const inc of increments) {
