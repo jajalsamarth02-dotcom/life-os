@@ -320,6 +320,72 @@ export function CustomTargetChip({
 }
 
 /* ------------------------------------------------------------------ */
+/* Skip-budget pips                                                     */
+/* ------------------------------------------------------------------ */
+
+/**
+ * Skip-budget pip strip — one filled emerald dot per class the student could
+ * still miss while staying at/above the target (classesCanSkip). Counts above
+ * `max` collapse to `max` dots plus an exact "×N" suffix, so a fat budget
+ * (e.g. 23) never blows up a row layout. `count === 0` renders a single hollow
+ * amber pip: the subject is exactly on target, so ANY miss drops it below.
+ *
+ * Callers decide visibility by status — only render for `safe` subjects whose
+ * status is known (non-safe rows already carry a "needs N classes" hint, and
+ * no-data rows have no budget at all). Staggered pop-in via framer-motion is
+ * a subtle entrance detail consistent with the rest of the dashboard.
+ */
+export function SkipPips({
+  count,
+  title,
+  max = 6,
+  className,
+}: {
+  /** Remaining skip budget (classesCanSkip). 0 = no buffer (hollow pip). */
+  count: number;
+  /** Full-sentence tooltip — the exact math lives here, not in the dots. */
+  title: string;
+  /** Dots shown before collapsing to dots + "×N". */
+  max?: number;
+  className?: string;
+}) {
+  const dots = count > 0 ? Math.min(count, max) : 1;
+  const overflow = count > max ? count : null;
+  return (
+    <span
+      className={cn("inline-flex shrink-0 items-center gap-[3px] align-middle", className)}
+      title={title}
+      role="img"
+      aria-label={title}
+    >
+      {Array.from({ length: dots }).map((_, i) =>
+        count > 0 ? (
+          <motion.span
+            key={i}
+            className="size-1.5 rounded-full bg-emerald-500"
+            initial={{ opacity: 0, scale: 0.3 }}
+            animate={{ opacity: 1, scale: 1 }}
+            transition={{ duration: 0.25, delay: Math.min(i * 0.035, 0.25), ease: "easeOut" }}
+            aria-hidden="true"
+          />
+        ) : (
+          <span
+            key={i}
+            className="size-1.5 rounded-full border border-amber-500/70 bg-amber-500/15"
+            aria-hidden="true"
+          />
+        )
+      )}
+      {overflow != null && (
+        <span className="ml-0.5 text-[10px] font-semibold leading-none text-emerald-700 dark:text-emerald-400">
+          ×{overflow}
+        </span>
+      )}
+    </span>
+  );
+}
+
+/* ------------------------------------------------------------------ */
 /* Animated progress ring                                              */
 /* ------------------------------------------------------------------ */
 

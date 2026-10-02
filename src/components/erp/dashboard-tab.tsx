@@ -60,6 +60,7 @@ import {
   useNow,
   AlaStatChip,
   collectAlaStats,
+  SkipPips,
   type SubjectAlaStat,
 } from "./shared";
 import type { AlaUpcomingRow, ChangeEvent, HistoryPoint, Reminder, SubjectView } from "./types";
@@ -75,6 +76,19 @@ const SUBJECT_SORTS = [
 ] as const;
 
 type SubjectSort = (typeof SUBJECT_SORTS)[number]["key"];
+
+/** Remembered subject sort order — a view preference, so device-local. */
+const SUBJECT_SORT_KEY = "erp:subjectSort";
+
+function loadSavedSort(): SubjectSort {
+  if (typeof window === "undefined") return "lowest";
+  try {
+    const saved = window.localStorage.getItem(SUBJECT_SORT_KEY);
+    return SUBJECT_SORTS.some((o) => o.key === saved) ? (saved as SubjectSort) : "lowest";
+  } catch {
+    return "lowest";
+  }
+}
 
 /* No-data subjects (total === 0) have no attendance yet — a 0.00% is not a
    real value, so they never compete with actual percentages: they sink to
@@ -679,6 +693,19 @@ function SubjectRow({
         </div>
         <div className="mt-1.5 flex items-center gap-2">
           <MiniBar percentage={s.percentage} status={s.status} target={s.targetPct} className="flex-1" shimmer={shimmer} />
+          {s.status === "safe" && (
+            <SkipPips
+              count={s.canSkip}
+              title={
+                s.canSkip > 0
+                  ? `Skip budget: you could miss ${s.canSkip} more ${
+                      s.canSkip === 1 ? "class" : "classes"
+                    } and stay at/above ${s.targetPct}% (${s.present}/${s.total} now)`
+                  : `Exactly on target — missing even 1 class drops you below ${s.targetPct}%`
+              }
+              className="hidden sm:inline-flex"
+            />
+          )}
           {s.status === "none" ? (
             <span className="shrink-0 text-[11px] italic text-muted-foreground/80">no classes yet</span>
           ) : s.status !== "safe" && s.classesToTarget > 0 ? (
@@ -774,7 +801,21 @@ export function DashboardTab({
   onOpenSettings: () => void;
   onOpenReminders: () => void;
 }) {
-  const [sort, setSort] = useState<SubjectSort>("lowest");
+  /* Sort starts at the default and hydrates from localStorage after mount
+     (SSR renders "lowest", so a saved preference swaps in post-paint — same
+     pattern as the text-size setting). Saved on every change below. */
+  const [sort, setSortState] = useState<SubjectSort>("lowest");
+  useEffect(() => {
+    setSortState(loadSavedSort());
+  }, []);
+  const setSort = (next: SubjectSort) => {
+    setSortState(next);
+    try {
+      window.localStorage.setItem(SUBJECT_SORT_KEY, next);
+    } catch {
+      /* private mode / storage full — the preference just won't persist */
+    }
+  };
   /* Store the CODE (not the object) and derive the view from fresh query data,
      so the drawer reflects updated targets/percentages after refetches. */
   const [selectedCode, setSelectedCode] = useState<string | null>(null);

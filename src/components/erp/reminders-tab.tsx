@@ -1696,6 +1696,9 @@ function AlaDeadlineCalendar({
 
 type AlaDeadlineMode = "radar" | "calendar";
 
+/** Remembered deadline overview style — a device-local view preference. */
+const ALA_MODE_KEY = "erp:alaDeadlineMode";
+
 /**
  * Segmented switch between the two deadline overviews (35-day radar strip vs
  * month calendar) plus month jump chips. Owns the visible month; when the user
@@ -1719,6 +1722,17 @@ function AlaDeadlineViews({
     return new Date(d.getFullYear(), d.getMonth(), 1);
   });
 
+  /* Hydrate the remembered style after mount (SSR always renders "radar",
+     so a saved "calendar" swaps in post-paint — no hydration mismatch). */
+  useEffect(() => {
+    try {
+      const saved = window.localStorage.getItem(ALA_MODE_KEY);
+      if (saved === "radar" || saved === "calendar") setMode(saved);
+    } catch {
+      /* storage unavailable — keep the radar default */
+    }
+  }, []);
+
   const todayMid = useMemo(() => {
     const d = new Date(now);
     d.setHours(0, 0, 0, 0);
@@ -1727,6 +1741,11 @@ function AlaDeadlineViews({
 
   const switchMode = (m: AlaDeadlineMode) => {
     setMode(m);
+    try {
+      window.localStorage.setItem(ALA_MODE_KEY, m);
+    } catch {
+      /* private mode — the choice still applies for this session */
+    }
     if (m === "calendar" && selectedOffset != null) {
       const t = new Date(todayMid + selectedOffset * 86_400_000);
       setViewMonth(new Date(t.getFullYear(), t.getMonth(), 1));
@@ -1759,6 +1778,7 @@ function AlaDeadlineViews({
         <div
           role="group"
           aria-label="Deadline overview style"
+          title="Radar shows today → +34 days; Month shows full calendar months. Your choice is remembered on this device."
           className="flex items-center gap-0.5 rounded-full border border-border/60 bg-muted/40 p-0.5"
         >
           <button
@@ -2780,10 +2800,58 @@ function BrowserRemindersBanner() {
   );
 }
 
+/** Remembered reminders filter + layout — device-local view preferences. */
+const REMINDERS_PREF_KEY = "erp:remindersPrefs";
+
+function loadReminderPrefs(): { filter: RemindersFilter; view: "timeline" | "subject" } {
+  const fallback = { filter: "all" as RemindersFilter, view: "timeline" as const };
+  if (typeof window === "undefined") return fallback;
+  try {
+    const raw = window.localStorage.getItem(REMINDERS_PREF_KEY);
+    if (!raw) return fallback;
+    const p = JSON.parse(raw) as Partial<{ filter: string; view: string }>;
+    return {
+      filter: p.filter === "erp" || p.filter === "personal" || p.filter === "all" ? p.filter : fallback.filter,
+      view: p.view === "timeline" || p.view === "subject" ? p.view : fallback.view,
+    };
+  } catch {
+    return fallback;
+  }
+}
+
 export function RemindersTab() {
-  const [filter, setFilter] = useState<RemindersFilter>("all");
+  /* Filter + layout hydrate from localStorage after mount (SSR renders the
+     defaults; a saved choice swaps in post-paint — no hydration mismatch). */
+  const [filter, setFilterState] = useState<RemindersFilter>("all");
   const [includeDone, setIncludeDone] = useState(false);
-  const [view, setView] = useState<"timeline" | "subject">("timeline");
+  const [view, setViewState] = useState<"timeline" | "subject">("timeline");
+  useEffect(() => {
+    const saved = loadReminderPrefs();
+    setFilterState(saved.filter);
+    setViewState(saved.view);
+  }, []);
+  const setFilter = (f: RemindersFilter) => {
+    setFilterState(f);
+    try {
+      window.localStorage.setItem(
+        REMINDERS_PREF_KEY,
+        JSON.stringify({ filter: f, view })
+      );
+    } catch {
+      /* storage unavailable — preference applies for this session only */
+    }
+  };
+  const setView = (v: "timeline" | "subject") => {
+    setViewState(v);
+    try {
+      window.localStorage.setItem(
+        REMINDERS_PREF_KEY,
+        JSON.stringify({ filter, view: v })
+      );
+    } catch {
+      /* storage unavailable — preference applies for this session only */
+    }
+  };
 
   const { data, isPending, isError, error } = useQuery({
     queryKey: qk.reminders(filter, includeDone),
@@ -2800,6 +2868,7 @@ export function RemindersTab() {
           <div
             role="tablist"
             aria-label="Filter reminders"
+            title="Filter is remembered on this device"
             className="flex rounded-lg border border-border/60 bg-muted/60 p-0.5"
           >
             {(["all", "erp", "personal"] as const).map((f) => (

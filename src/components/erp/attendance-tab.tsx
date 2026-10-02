@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { motion } from "framer-motion";
-import { CheckCircle2, GraduationCap, Inbox, PanelRightOpen, Target, TrendingUp, Users, XCircle, Zap } from "lucide-react";
+import { GraduationCap, Inbox, PanelRightOpen, Target, TrendingUp, Users, XCircle, Zap } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -22,6 +22,7 @@ import {
   fmtPct2,
   MiniBar,
   ProgressRing,
+  SkipPips,
   statusColors,
   StatusChip,
   useNow,
@@ -273,13 +274,22 @@ function SubjectCard({
             {s.hasCustomTarget && <CustomTargetChip target={s.targetPct} />}
             {safe ? (
               s.canSkip > 0 ? (
-                <Badge variant="outline" className="gap-1 border-emerald-500/30 text-emerald-700 dark:text-emerald-400">
-                  <CheckCircle2 className="size-3" aria-hidden="true" />
+                <Badge variant="outline" className="gap-1.5 border-emerald-500/30 text-emerald-700 dark:text-emerald-400">
+                  <SkipPips
+                    count={s.canSkip}
+                    max={8}
+                    title={`You could miss ${s.canSkip} more ${
+                      s.canSkip === 1 ? "class" : "classes"
+                    } and stay at/above ${s.targetPct}%`}
+                  />
                   Can miss {s.canSkip} {s.canSkip === 1 ? "class" : "classes"}
                 </Badge>
               ) : (
-                <Badge variant="outline" className="gap-1 border-emerald-500/30 text-emerald-700 dark:text-emerald-400">
-                  <CheckCircle2 className="size-3" aria-hidden="true" />
+                <Badge variant="outline" className="gap-1.5 border-emerald-500/30 text-emerald-700 dark:text-emerald-400">
+                  <SkipPips
+                    count={0}
+                    title={`Exactly on target — missing even 1 class drops you below ${s.targetPct}%`}
+                  />
                   Exactly on target
                 </Badge>
               )
