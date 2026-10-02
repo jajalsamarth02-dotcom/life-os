@@ -40,6 +40,7 @@ import { compactErrorText } from "@/lib/compact-error";
 import { fetchAssignments, fetchDashboard, fetchHistory, fetchSyncLogs, fetchAlaNotes, qk } from "./api";
 import { WeeklyDigestDialog } from "./digest-dialog";
 import { TodayCard } from "./today-card";
+import { SkipBudgetCard } from "./skip-budget-card";
 import { MilestoneCelebration, MilestonesStrip } from "./milestones";
 import { SubjectDrawer } from "./subject-drawer";
 import { TimetableCard } from "./timetable-card";
@@ -1541,6 +1542,10 @@ export function DashboardTab({
 
       {/* Weekly digest report dialog */}
       <WeeklyDigestDialog open={digestOpen} onOpenChange={setDigestOpen} demoMode={mode === "demo"} />
+
+      {/* Row 1.5 — consolidated skip budget (scarcest subject first, rows open
+          the subject drawer). Shares the live per-subject canSkip math. */}
+      <SkipBudgetCard subjects={data.subjects} onOpenSubject={setSelectedCode} />
 
       {/* Row 2 — subject list */}
       <Card className="rounded-xl border-border/60 transition-shadow hover:shadow-md">

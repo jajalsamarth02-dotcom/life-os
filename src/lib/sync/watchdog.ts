@@ -1,5 +1,6 @@
 import { db } from "@/lib/db";
 import { getSettings } from "@/lib/settings";
+import { maybeDailyDigest } from "@/lib/notify/whatsapp";
 import { runSync } from "./engine";
 
 /**
@@ -54,7 +55,18 @@ export async function kickSyncIfStalled(): Promise<void> {
       .finally(() => {
         g.__erpKickInFlight = false;
       });
+  } catch (e) {
+    // The watchdog must never break the read path that hosts it — but a
+    // silent swallow here would make stalls undiagnosable. Always log.
+    console.warn("[erp-sync] watchdog error:", e instanceof Error ? e.message : e);
+  }
+
+  // The dead-tick scenario also silences the fixed-time daily WhatsApp
+  // digest (same scheduler). maybeDailyDigest is internally throttled and
+  // never throws — piggyback it here so digests survive tick outages too.
+  try {
+    await maybeDailyDigest();
   } catch {
-    // The watchdog must never break the read path that hosts it.
+    /* unreachable by contract; extra guard for the host read path */
   }
 }

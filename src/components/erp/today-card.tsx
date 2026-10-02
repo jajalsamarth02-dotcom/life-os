@@ -127,6 +127,12 @@ export function buildTodaySms(input: TodaySmsInput): string {
     } else {
       lines.push("ON TARGET - keep it up");
     }
+    const budget = input.subjects.reduce((n, s) => n + (s.total > 0 ? s.canSkip : 0), 0);
+    lines.push(
+      budget > 0
+        ? `BUDGET ${budget} safe skip${budget === 1 ? "" : "s"} across subjects`
+        : "BUDGET 0 - attend everything"
+    );
   }
 
   const worst = input.subjects
