@@ -78,6 +78,7 @@ export const qk = {
   semesters: ["semesters"] as const,
   sync: ["sync"] as const,
   erpStatus: ["erp-status"] as const,
+  waStatus: ["wa-status"] as const,
 };
 
 /* ---------- GET ---------- */
@@ -243,3 +244,42 @@ export const disconnectErp = () =>
   api<{ ok: boolean }>("/api/erp/disconnect", { method: "POST" });
 
 export type { ErpConnectFailure };
+
+/* ---------- WhatsApp alerts (CallMeBot) ---------- */
+
+export interface WaStatusResponse {
+  enabled: boolean;
+  configured: boolean;
+  phoneMasked: string | null;
+  lastAutoAt: string | null;
+  lastPendingCount: number | null;
+  lastResult: string | null;
+}
+
+export const fetchWaStatus = () => api<WaStatusResponse>("/api/notify/whatsapp");
+
+export const postWaAction = (
+  action: "save" | "enable" | "test" | "digest",
+  payload?: { phone?: string; apikey?: string; enabled?: boolean }
+) =>
+  api<{ ok?: boolean; status?: WaStatusResponse; snippet?: string; text?: string; message?: string }>(
+    "/api/notify/whatsapp",
+    { method: "POST", body: JSON.stringify({ action, ...payload }) }
+  );
+
+/** Upload one ALA to the ERP portal (explicit, user-initiated). */
+export async function submitAlaToErp(
+  id: string,
+  file: File | null,
+  link: string | null
+): Promise<{ ok: boolean; confirmed: boolean; message?: string }> {
+  const fd = new FormData();
+  if (file) fd.set("file", file);
+  if (link) fd.set("link", link);
+  const res = await fetch(`/api/assignments/${id}/submit`, { method: "POST", body: fd });
+  const body: Record<string, unknown> = await res.json().catch(() => ({}));
+  if (!res.ok) {
+    throw new ApiError(res.status, body, typeof body.message === "string" ? body.message : "Submission failed");
+  }
+  return { ok: true, confirmed: Boolean(body.confirmed), message: typeof body.message === "string" ? body.message : undefined };
+}

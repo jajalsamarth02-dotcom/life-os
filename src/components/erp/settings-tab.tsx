@@ -17,6 +17,7 @@ import {
   Loader2,
   Lock,
   LogOut,
+  MessageCircle,
   MonitorSmartphone,
   RefreshCw,
   RotateCcw,
@@ -87,11 +88,13 @@ import {
   fetchSemesters,
   fetchSettings,
   fetchSyncLogs,
+  fetchWaStatus,
   postDemoEvolve,
   postDemoReset,
   putSelectedSemester,
   putSettings,
   putSubjectTarget,
+  postWaAction,
   ApiError,
   qk,
 } from "./api";
@@ -1309,6 +1312,167 @@ function SyncHistoryCard() {
 }
 
 /* ------------------------------------------------------------------ */
+/* WhatsApp alerts card (CallMeBot)                                    */
+/* ------------------------------------------------------------------ */
+
+function WhatsAppCard() {
+  const qc = useQueryClient();
+  const { data: status } = useQuery({ queryKey: qk.waStatus, queryFn: fetchWaStatus });
+  const [phone, setPhone] = useState("");
+  const [apikey, setApikey] = useState("");
+  const [busy, setBusy] = useState<null | "save" | "test" | "digest">(null);
+
+  const refresh = () => qc.invalidateQueries({ queryKey: qk.waStatus });
+
+  const run = async (action: "save" | "test" | "digest") => {
+    setBusy(action);
+    try {
+      if (action === "save") {
+        if (!phone.trim() || !apikey.trim()) {
+          toast.error("Phone and apikey are both required.");
+          return;
+        }
+        await postWaAction("save", { phone: phone.trim(), apikey: apikey.trim() });
+        toast.success("WhatsApp settings saved", { description: "The apikey is stored AES-256-GCM encrypted." });
+        setApikey("");
+        refresh();
+      } else if (action === "test") {
+        const res = await postWaAction("test");
+        (res.ok ? toast.success : toast.error)(res.ok ? "Test message sent — check WhatsApp" : "The provider did not accept the test", {
+          description: res.snippet,
+        });
+        refresh();
+      } else {
+        const res = await postWaAction("digest");
+        (res.ok ? toast.success : toast.error)(res.ok ? "Digest sent — check WhatsApp" : "The provider did not accept the digest", {
+          description: res.snippet,
+        });
+        refresh();
+      }
+    } catch (e) {
+      toast.error("WhatsApp action failed", { description: e instanceof ApiError ? e.message : "Try again." });
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  const toggle = async (enabled: boolean) => {
+    try {
+      await postWaAction("enable", { enabled });
+      toast[enabled ? "success" : "info"](enabled ? "WhatsApp alerts enabled" : "WhatsApp alerts disabled", {
+        description: enabled
+          ? "A short pending-work digest is sent at most once a day, right after a scheduled sync, when something changed."
+          : undefined,
+      });
+      refresh();
+    } catch (e) {
+      toast.error("Could not update the setting", { description: e instanceof ApiError ? e.message : "Try again." });
+    }
+  };
+
+  const enabled = status?.enabled ?? false;
+  const configured = status?.configured ?? false;
+
+  return (
+    <Card className="rounded-xl border-border/60">
+      <CardHeader className="flex flex-row items-start justify-between space-y-0 pb-3">
+        <div>
+          <CardTitle className="flex items-center gap-2 text-base tracking-tight">
+            <MessageCircle className="size-4 text-emerald-500" aria-hidden="true" />
+            WhatsApp alerts
+            <Badge variant="outline" className="text-[9px] font-bold uppercase tracking-wider text-emerald-700 dark:text-emerald-400">
+              Beta
+            </Badge>
+          </CardTitle>
+          <CardDescription>Pending ALA/assignment digests straight to your WhatsApp</CardDescription>
+        </div>
+        <Switch
+          checked={enabled}
+          disabled={!configured}
+          onCheckedChange={toggle}
+          aria-label="Enable WhatsApp alerts"
+        />
+      </CardHeader>
+      <CardContent className="space-y-3">
+        {!configured ? (
+          <ol className="list-inside list-decimal space-y-1 text-sm text-muted-foreground">
+            <li>
+              Get a free apikey at{" "}
+              <a
+                href="https://www.callmebot.com/blog/free-api-for-send-whatsapp-messages/"
+                target="_blank"
+                rel="noopener noreferrer"
+                className="font-medium text-primary underline-offset-2 hover:underline"
+              >
+                callmebot.com
+              </a>{" "}
+              (one WhatsApp message from your phone to their bot)
+            </li>
+            <li>Paste your number and the apikey below — stored encrypted, never exported</li>
+            <li>Send a test, then flip the switch on</li>
+          </ol>
+        ) : (
+          <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
+            <Badge variant="secondary" className="font-mono text-[10px]">{status?.phoneMasked}</Badge>
+            {enabled ? (
+              <span className="flex items-center gap-1 text-emerald-600 dark:text-emerald-400">
+                <BellRing className="size-3" aria-hidden="true" /> auto-digest on (max 1/day, after scheduled syncs when something changed)
+              </span>
+            ) : (
+              <span>Sending is off — flip the switch to enable auto digests.</span>
+            )}
+          </div>
+        )}
+
+        <div className="grid gap-2 sm:grid-cols-[1fr_1fr_auto]">
+          <Input
+            inputMode="tel"
+            placeholder={configured ? status?.phoneMasked ?? "Phone" : "Phone (e.g. 91 98XXXXXXXX)"}
+            value={phone}
+            onChange={(e) => setPhone(e.target.value)}
+            aria-label="WhatsApp phone number with country code"
+          />
+          <Input
+            type="password"
+            placeholder={configured ? "apikey saved — paste to replace" : "CallMeBot apikey"}
+            value={apikey}
+            onChange={(e) => setApikey(e.target.value)}
+            aria-label="CallMeBot apikey"
+          />
+          <Button size="sm" variant="outline" className="h-9 gap-1.5" disabled={busy !== null} onClick={() => run("save")}>
+            {busy === "save" ? <Loader2 className="size-3.5 animate-spin" aria-hidden="true" /> : <Save className="size-3.5" aria-hidden="true" />}
+            Save
+          </Button>
+        </div>
+
+        <div className="flex flex-wrap gap-2">
+          <Button size="sm" variant="secondary" className="h-8 gap-1.5" disabled={!configured || busy !== null} onClick={() => run("test")}>
+            {busy === "test" ? <Loader2 className="size-3.5 animate-spin" aria-hidden="true" /> : <MessageCircle className="size-3.5" aria-hidden="true" />}
+            Send test
+          </Button>
+          <Button size="sm" variant="secondary" className="h-8 gap-1.5" disabled={!configured || busy !== null} onClick={() => run("digest")}>
+            {busy === "digest" ? <Loader2 className="size-3.5 animate-spin" aria-hidden="true" /> : <CalendarClock className="size-3.5" aria-hidden="true" />}
+            Send pending-work digest now
+          </Button>
+        </div>
+
+        {status?.lastResult && (
+          <p className="truncate rounded-lg bg-muted/60 px-2.5 py-1.5 font-mono text-[10px] text-muted-foreground" title={status.lastResult}>
+            last: {status.lastResult}
+          </p>
+        )}
+
+        <p className="flex items-start gap-1.5 text-[11px] leading-snug text-muted-foreground">
+          <ShieldCheck className="mt-0.5 size-3.5 shrink-0" aria-hidden="true" />
+          Uses the free CallMeBot relay with YOUR paired phone. Nothing is sent while disabled or unconfigured;
+          messages are generated only from real synced ERP data.
+        </p>
+      </CardContent>
+    </Card>
+  );
+}
+
+/* ------------------------------------------------------------------ */
 
 export function SettingsTab() {
   const { data: erp } = useQuery({ queryKey: qk.erpStatus, queryFn: fetchErpStatus });
@@ -1323,6 +1487,7 @@ export function SettingsTab() {
       <SemesterCard />
       <SubjectTargetsCard />
       <NotificationPrefsCard />
+      <WhatsAppCard />
       <div className="grid gap-4 lg:grid-cols-2">
         <BrowserRemindersCard />
         <InstallAppCard />
@@ -1336,8 +1501,9 @@ export function SettingsTab() {
           <div className="space-y-1 text-xs leading-relaxed text-muted-foreground">
             <p className="font-medium text-foreground">Privacy &amp; data flow</p>
             <p>
-              The ERP is the source of truth. This app stores a read-only synchronized copy for fast dashboards,
-              calculations and reminders. It never writes to the ERP.
+              The ERP is the source of truth. This app stores a synchronized copy for fast dashboards,
+              calculations and reminders. The only write to the ERP is an ALA submission that YOU trigger
+              explicitly, row by row.
             </p>
             <p className="text-muted-foreground/70">
               erp.gmiu.edu.in · encrypted credential storage (AES-256-GCM) · synchronization status is always

@@ -1,0 +1,205 @@
+import { db } from "@/lib/db";
+import { decryptSecret, encryptSecret } from "@/lib/crypto";
+import { ASSIGNMENT_EXT_PREFIX } from "@/lib/sync/engine";
+
+/**
+ * WhatsApp alerts for pending work — personal-project grade via CallMeBot
+ * (https://www.callmebot.com/blog/free-api-for-send-whatsapp-messages/).
+ *
+ * The student pairs their own WhatsApp with the CallMeBot once and pastes the
+ * resulting phone + apikey here. Nothing is sent until both are configured
+ * AND the feature is enabled — honest by design (spec #6/#13: no fake sends).
+ *
+ * Secrets (phone, apikey) are stored AES-256-GCM encrypted in ONE Setting row
+ * ("notify.wa.enc") — same at-rest protection as the ERP credentials (#10).
+ */
+
+const SETTING_ENC = "notify.wa.enc";
+const SETTING_ENABLED = "notify.wa.enabled";
+const SETTING_LAST_AUTO = "notify.wa.lastAutoAt";
+const SETTING_LAST_COUNT = "notify.wa.lastPendingCount";
+const SETTING_LAST_RESULT = "notify.wa.lastResult";
+
+export interface WaConfig {
+  /** International format without + (CallMeBot), e.g. 9198XXXXXXXX. */
+  phone: string;
+  apikey: string;
+}
+
+export interface WaStatus {
+  enabled: boolean;
+  configured: boolean;
+  phoneMasked: string | null;
+  lastAutoAt: string | null;
+  lastPendingCount: number | null;
+  lastResult: string | null;
+}
+
+async function getRawSetting(key: string): Promise<string | null> {
+  const row = await db.setting.findUnique({ where: { key } });
+  return row?.value ?? null;
+}
+
+async function setRawSetting(key: string, value: string): Promise<void> {
+  await db.setting.upsert({ where: { key }, create: { key, value }, update: { value } });
+}
+
+export async function getWaConfig(): Promise<WaConfig | null> {
+  const enc = await getRawSetting(SETTING_ENC);
+  if (!enc) return null;
+  try {
+    const parsed = JSON.parse(decryptSecret(enc)) as Partial<WaConfig>;
+    if (!parsed.phone || !parsed.apikey) return null;
+    return { phone: parsed.phone, apikey: parsed.apikey };
+  } catch {
+    return null;
+  }
+}
+
+export async function saveWaConfig(input: { phone: string; apikey: string; enabled?: boolean }): Promise<void> {
+  // Normalize: digits only; Indian 10-digit numbers get the 91 prefix.
+  const digits = input.phone.replace(/\D/g, "");
+  const phone = digits.length === 10 ? `91${digits}` : digits;
+  if (phone.length < 8 || phone.length > 15) {
+    throw new Error("Phone must be an international number, e.g. 91 98XXXXXXXX.");
+  }
+  if (!input.apikey.trim()) throw new Error("The CallMeBot apikey is required.");
+  await setRawSetting(SETTING_ENC, encryptSecret(JSON.stringify({ phone, apikey: input.apikey.trim() })));
+  if (typeof input.enabled === "boolean") {
+    await setRawSetting(SETTING_ENABLED, input.enabled ? "1" : "0");
+  }
+}
+
+export async function setWaEnabled(enabled: boolean): Promise<void> {
+  await setRawSetting(SETTING_ENABLED, enabled ? "1" : "0");
+}
+
+export async function getWaStatus(): Promise<WaStatus> {
+  const [enabled, config, lastAutoAt, lastCount, lastResult] = await Promise.all([
+    getRawSetting(SETTING_ENABLED),
+    getWaConfig(),
+    getRawSetting(SETTING_LAST_AUTO),
+    getRawSetting(SETTING_LAST_COUNT),
+    getRawSetting(SETTING_LAST_RESULT),
+  ]);
+  const phone = config?.phone ?? null;
+  return {
+    enabled: enabled === "1",
+    configured: !!config,
+    phoneMasked: phone ? `${phone.slice(0, 2)}${"*".repeat(Math.max(0, phone.length - 4))}${phone.slice(-2)}` : null,
+    lastAutoAt,
+    lastPendingCount: lastCount ? parseInt(lastCount, 10) : null,
+    lastResult,
+  };
+}
+
+/** Fire-and-forget text via CallMeBot. Returns the provider's response snippet. */
+export async function sendWhatsAppText(text: string): Promise<{ ok: boolean; snippet: string }> {
+  const config = await getWaConfig();
+  if (!config) return { ok: false, snippet: "Not configured — add your CallMeBot phone + apikey first." };
+  const url =
+    `https://api.callmebot.com/whatsapp.php?phone=${encodeURIComponent(config.phone)}` +
+    `&text=${encodeURIComponent(text)}&apikey=${encodeURIComponent(config.apikey)}`;
+  try {
+    const res = await fetch(url, { signal: AbortSignal.timeout(15_000) });
+    const body = (await res.text().catch(() => "")).replace(/\s+/g, " ").trim();
+    // CallMeBot answers 200 with "Message queued" on success.
+    const ok = res.ok && /queued|sent|success/i.test(body);
+    return { ok, snippet: body.slice(0, 160) || `HTTP ${res.status}` };
+  } catch (e) {
+    return { ok: false, snippet: e instanceof Error ? e.message : "WhatsApp request failed" };
+  }
+}
+
+/** Compact pending-work digest (server-side twin of the dashboard digest). */
+export async function buildPendingDigest(): Promise<string> {
+  const now = Date.now();
+  const rows = await db.reminder.findMany({
+    where: { type: "ASSIGNMENT", status: "ACTIVE", externalId: { startsWith: ASSIGNMENT_EXT_PREFIX } },
+    orderBy: { dueAt: "asc" },
+  });
+  const overdue = rows.filter((r) => r.dueAt.getTime() < now);
+  const upcoming = rows.filter((r) => r.dueAt.getTime() >= now);
+
+  const fmt = (d: Date) =>
+    d.toLocaleDateString("en-IN", { day: "numeric", month: "short", timeZone: "Asia/Kolkata" });
+
+  const lines: string[] = [];
+  if (rows.length === 0) {
+    lines.push("✅ ERP Sync: no pending ALA/assignments — all clear!");
+  } else {
+    lines.push(
+      `📚 ERP Sync: ${rows.length} pending ALA/assignment${rows.length === 1 ? "" : "s"}` +
+        (overdue.length ? ` (${overdue.length} overdue ⚠️)` : "")
+    );
+    const worst = new Map<string, number>();
+    for (const r of overdue) {
+      const code = r.subjectCode ?? "?";
+      worst.set(code, (worst.get(code) ?? 0) + 1);
+    }
+    for (const [code, n] of [...worst.entries()].sort((a, b) => b[1] - a[1]).slice(0, 3)) {
+      lines.push(`⚠️ ${code}: ${n} overdue`);
+    }
+    for (const r of upcoming.slice(0, 3)) {
+      const days = Math.ceil((r.dueAt.getTime() - now) / 86_400_000);
+      lines.push(`• ${r.title} [${r.subjectCode ?? "?"}] — due ${fmt(r.dueAt)} (in ${days}d)`);
+    }
+  }
+  const actives = await db.reminder.count({ where: { status: "ACTIVE", type: { not: "ASSIGNMENT" } } });
+  if (actives > 0) lines.push(`🔔 ${actives} other active reminder${actives === 1 ? "" : "s"}`);
+  return lines.join("\n");
+}
+
+export async function sendPendingDigest(
+  trigger: "manual" | "auto"
+): Promise<{ ok: boolean; snippet: string; text: string }> {
+  const text = await buildPendingDigest();
+  const result = await sendWhatsAppText(text);
+  await setRawSetting(
+    SETTING_LAST_RESULT,
+    `${new Date().toISOString()} ${trigger === "auto" ? "(auto)" : "(manual)"} → ${result.ok ? "sent" : "FAILED"}: ${result.snippet}`
+  );
+  if (trigger === "auto") {
+    await setRawSetting(SETTING_LAST_AUTO, new Date().toISOString());
+    await setRawSetting(SETTING_LAST_COUNT, String(await countPendingAla()));
+  }
+  return { ...result, text };
+}
+
+async function countPendingAla(): Promise<number> {
+  return db.reminder.count({
+    where: { type: "ASSIGNMENT", status: "ACTIVE", externalId: { startsWith: ASSIGNMENT_EXT_PREFIX } },
+  });
+}
+
+/**
+ * Auto-notify after a scheduled sync. Sends at most once every 24h, and only
+ * when the pending count changed since the previous auto send (or something
+ * is overdue). Never throws — a notification hiccup must not fail a sync.
+ */
+export async function maybeAutoNotify(): Promise<void> {
+  try {
+    const [enabled, config] = await Promise.all([getRawSetting(SETTING_ENABLED), getWaConfig()]);
+    if (enabled !== "1" || !config) return;
+
+    const now = Date.now();
+    const rows = await db.reminder.findMany({
+      where: { type: "ASSIGNMENT", status: "ACTIVE", externalId: { startsWith: ASSIGNMENT_EXT_PREFIX } },
+      select: { dueAt: true },
+    });
+    const pending = rows.length;
+    const hasOverdue = rows.some((r) => r.dueAt.getTime() < now);
+
+    const lastAuto = await getRawSetting(SETTING_LAST_AUTO);
+    const lastCount = (await getRawSetting(SETTING_LAST_COUNT)) ?? "-1";
+    const hoursSince = lastAuto ? (now - new Date(lastAuto).getTime()) / 3_600_000 : Infinity;
+    if (hoursSince < 24) return;
+
+    const changed = String(pending) !== lastCount;
+    if (!changed && !hasOverdue) return;
+
+    await sendPendingDigest("auto");
+  } catch (e) {
+    console.error("[erp-sync] whatsapp auto-notify failed:", e);
+  }
+}

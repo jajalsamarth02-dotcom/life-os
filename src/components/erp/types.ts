@@ -67,6 +67,8 @@ export interface AlaUpcomingRow {
   subjectCode: string | null;
   subjectName: string | null;
   dueAt: string;
+  /** `erp:assign:{id}` for real ERP rows — enables the portal deep link. */
+  externalId: string | null;
 }
 
 export interface SyncState {

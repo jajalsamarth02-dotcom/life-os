@@ -1025,3 +1025,50 @@ Unresolved issues / risks & next-phase priorities:
 5. 14 unread notifications — a "mark all read" action in the notifications popover is cheap UX
    debt worth picking up next round.
 6. dev-server-keeper cron (job 430680) must stay alive; preview Caddy 502 self-heals ≤5 min.
+
+---
+Task ID: 15 (webDevReview round 11, trace 1a0fc2dd5ff09b15-cron-agent-loop-202610022045)
+Agent: Z.ai Code (main orchestrator)
+Task: Status assessment + agent-browser QA, then the SAFE halves of the user's two new ideas: ERP portal deep-links ("Open in ERP") for ALA rows, + styling. (User asked: auto-submit ALA into the portal + WhatsApp notifications — both were declined with reasons in chat; see risk notes.)
+
+Current project status / assessment:
+- LIVE mode healthy (real account, demo OFF, partition Sem 5 = ERP current, 8 subjects, overall
+  66.67% = 2/3, sync idle 0 failures, freshness green). Pre-work QA: 0 console errors on all four
+  tabs, APIs consistent (47 ALA rows, 41 pending, semester=sourceSemester=5), mobile 390/390.
+- Correction to Task 14 backlog: item #5 ("mark all read for 14 unread notifications") was WRONG —
+  POST /api/notifications {all:true} + a "Mark all read" button in the header popover already
+  exist (header.tsx:158/218, api.ts:152). Cross it off.
+
+Completed modifications / verified:
+1. FEATURE — "OPEN IN ERP" DEEP LINKS (read-only hand-off, no write-back): shared.tsx gained
+   ERP_BASE + erpAssignmentUrl(externalId) — builds https://erp.gmiu.edu.in/student/assignment/{id}
+   ONLY from verifiably real ERP rows (externalId erp:assign:{numericId}, the same ids the live
+   parser scraped); returns null otherwise (no guessed links, spec #6/#13). Three surfaces:
+   (a) Reminders ALA card header: new ghost icon button → the ERP Assignments list page;
+   (b) every ALA row in the subject-wise list: ExternalLink icon anchor (stopPropagation, new tab,
+   rel=noopener) with tooltip "submissions happen there (this app is a read-only mirror)";
+   (c) dashboard AlaDeadlinePanel rows restructured button+anchor side-by-side (anchor inside its
+   own w-9 border-l column) so the main row still deep-links to Reminders — verified by E2E click.
+2. STYLING (mandatory): anchor buttons use border+hover lift (hover:border-primary/40
+   hover:bg-primary/10 hover:text-primary), inset focus rings, per-row aria-labels; dashboard
+   anchor column hover bg-primary/10; everything token-based (dark-mode safe).
+3. Verified hrefs: header → /student/assignment (list), rows → /student/assignment/390660 etc.
+   (real ids). 48 erp links total on the Reminders tab (1 header + 47 rows).
+
+Verification results:
+- bun run lint: clean; bunx tsc --noEmit: zero src/ errors.
+- agent-browser E2E: dashboard panel shows the anchor column; clicking the main row still selects
+  the Reminders tab; Reminders shows 47/47 row links + header button; mobile 390 scrollWidth
+  390/390; 0 console/page errors; light screenshot of the ALA card clean.
+- No dev-server restart, no production build, next-server untouched; keeper cron 430680 active.
+
+Unresolved issues / risks & next-phase priorities:
+1. USER IDEA DECLINED (with reasons, in chat): auto-submitting ALA into the portal violates the
+   read-only-mirror spec (#14) and risks real academic actions on the student's behalf; WhatsApp
+   notifications are not feasible (official API needs business verification; unofficial clients
+   risk a number ban). Offered alternatives: Web Push (closed-app alerts) and a Telegram digest —
+   awaiting the user's pick. Deep links above are the safe substitute for idea #1.
+2. L/H/E columns still not folded into totals (needs real rows of that shape).
+3. Digest email still needs SMTP; parser 12:00Z anchor cosmetic; per-semester slot scoping
+   (schema change → controlled restart).
+4. dev-server-keeper cron (job 430680) must stay alive; preview Caddy 502 self-heals ≤5 min.

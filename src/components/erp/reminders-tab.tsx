@@ -20,6 +20,7 @@ import {
   ClipboardList,
   Clock,
   Download,
+  ExternalLink,
   Link2,
   Loader2,
   Lock,
@@ -27,6 +28,7 @@ import {
   Search,
   Trash2,
   TriangleAlert,
+  Upload,
   Undo2,
   X,
   XCircle,
@@ -96,11 +98,12 @@ import {
   fetchReminders,
   qk,
   snoozeReminder,
+  submitAlaToErp,
   updateReminderStatus,
   updateReminderSubject,
   ApiError,
 } from "./api";
-import { dueGroup, fmtDT, fmtDay, GROUP_META, SourceBadge, TypeIcon, typeLabel, useNow } from "./shared";
+import { dueGroup, ERP_BASE, erpAssignmentUrl, fmtDT, fmtDay, GROUP_META, SourceBadge, TypeIcon, typeLabel, useNow } from "./shared";
 import { downloadCsv } from "./trend-chart";
 import type { DueGroup } from "./shared";
 import type { RemindersFilter, Reminder, ReminderType } from "./types";
@@ -628,6 +631,192 @@ function relDue(dueMs: number, now: number): string {
 
 /** One subject group inside the ALA list — collapsible, with a mini progress bar.
  *  Open state is controlled by the parent so Expand/Collapse-all and search work. */
+/* ------------------------------------------------------------------ */
+/* ALA submit-to-portal (explicit write-back)                           */
+/* ------------------------------------------------------------------ */
+
+const ALA_FILE_ACCEPT = ".pdf,.docx,.zip,.xlsx,.ppt,.csv,.mp4,.png,.jpg,.jpeg,.pptx,.odp";
+
+type SubmitPhase = "idle" | "sending" | "done";
+
+/**
+ * Upload ONE ALA to erp.gmiu.edu.in on the student's behalf. Uses the same
+ * encrypted session the sync engine uses; the ERP's own confirmation page is
+ * the only accepted success proof (never fabricated locally).
+ */
+function AlaSubmitDialog({
+  row,
+  open,
+  onOpenChange,
+}: {
+  row: Reminder | null;
+  open: boolean;
+  onOpenChange: (o: boolean) => void;
+}) {
+  const queryClient = useQueryClient();
+  const [file, setFile] = useState<File | null>(null);
+  const [link, setLink] = useState("");
+  const [phase, setPhase] = useState<SubmitPhase>("idle");
+  const [result, setResult] = useState<{ ok: boolean; message: string } | null>(null);
+
+  const canSend = Boolean(row) && (file !== null || link.trim().length > 0) && phase !== "sending";
+
+  const reset = () => {
+    setFile(null);
+    setLink("");
+    setPhase("idle");
+    setResult(null);
+  };
+
+  const submit = async () => {
+    if (!row) return;
+    setPhase("sending");
+    setResult(null);
+    try {
+      const res = await submitAlaToErp(row.id, file, link.trim() || null);
+      setPhase("done");
+      setResult({ ok: true, message: res.message ?? "Submitted — the ERP confirmed it." });
+      toast.success("ALA submitted to the ERP portal", { description: res.message });
+      await queryClient.invalidateQueries({ queryKey: qk.assignments });
+      await queryClient.invalidateQueries({ queryKey: qk.dashboard });
+      await queryClient.invalidateQueries({ queryKey: qk.reminders("erp", true) });
+    } catch (e) {
+      setPhase("done");
+      const msg = e instanceof ApiError ? e.message : "Submission failed — try again.";
+      setResult({ ok: false, message: msg });
+      toast.error("The ERP did not accept the submission", { description: msg });
+    }
+  };
+
+  return (
+    <Dialog
+      open={open}
+      onOpenChange={(o) => {
+        if (!o) setTimeout(reset, 150);
+        onOpenChange(o);
+      }}
+    >
+      <DialogContent className="sm:max-w-md">
+        <DialogHeader>
+          <DialogTitle className="flex items-center gap-2 text-base">
+            <Upload className="size-4 text-primary" aria-hidden="true" />
+            Submit to the ERP portal
+          </DialogTitle>
+          <DialogDescription>
+            {row ? (
+              <>
+                <span className="font-medium text-foreground">{row.title}</span>
+                {row.subjectCode && <span className="ml-1 text-muted-foreground">· {row.subjectCode}</span>}
+              </>
+            ) : null}
+          </DialogDescription>
+        </DialogHeader>
+
+        {phase !== "done" ? (
+          <div className="space-y-4">
+            <div className="space-y-1.5">
+              <Label htmlFor="ala-file" className="text-xs font-medium">
+                File (PDF, DOCX, ZIP, XLSX, PPT, CSV, MP4, PNG/JPG…)
+              </Label>
+              <Input
+                id="ala-file"
+                type="file"
+                accept={ALA_FILE_ACCEPT}
+                onChange={(e) => setFile(e.target.files?.[0] ?? null)}
+                className="cursor-pointer file:mr-3 file:rounded-md file:border-0 file:bg-primary/10 file:px-2.5 file:py-1 file:text-xs file:font-semibold file:text-primary"
+              />
+              {file && (
+                <p className="text-[11px] text-muted-foreground">
+                  {file.name} · {(file.size / 1024).toFixed(0)} KB (max 10 MB)
+                </p>
+              )}
+            </div>
+            <div className="relative flex items-center gap-3 text-[10px] uppercase tracking-wider text-muted-foreground">
+              <span className="h-px flex-1 bg-border" /> or <span className="h-px flex-1 bg-border" />
+            </div>
+            <div className="space-y-1.5">
+              <Label htmlFor="ala-link" className="text-xs font-medium">
+                Link (Google Drive, GitHub, …)
+              </Label>
+              <Input
+                id="ala-link"
+                type="url"
+                placeholder="https://…"
+                value={link}
+                onChange={(e) => setLink(e.target.value)}
+              />
+            </div>
+            <p className="flex items-start gap-1.5 rounded-lg bg-amber-500/10 px-2.5 py-2 text-[11px] leading-snug text-amber-700 dark:text-amber-400">
+              <Lock className="mt-0.5 size-3 shrink-0" aria-hidden="true" />
+              This uploads directly to erp.gmiu.edu.in with your stored session and cannot be undone
+              by this app. The ERP&apos;s own confirmation is required before the row flips to
+              &quot;Submitted&quot;.
+            </p>
+            <div className="flex justify-end gap-2">
+              <Button variant="ghost" size="sm" onClick={() => onOpenChange(false)}>
+                Cancel
+              </Button>
+              <Button size="sm" disabled={!canSend} onClick={submit}>
+                {phase === "sending" ? (
+                  <>
+                    <Loader2 className="size-3.5 animate-spin" aria-hidden="true" /> Submitting…
+                  </>
+                ) : (
+                  <>
+                    <Upload className="size-3.5" aria-hidden="true" /> Submit now
+                  </>
+                )}
+              </Button>
+            </div>
+          </div>
+        ) : (
+          <div className="space-y-4">
+            <div
+              className={cn(
+                "flex items-start gap-2.5 rounded-lg border p-3 text-sm",
+                result?.ok
+                  ? "border-emerald-500/30 bg-emerald-500/[0.06] text-emerald-700 dark:text-emerald-400"
+                  : "border-red-500/30 bg-red-500/[0.06] text-red-700 dark:text-red-400"
+              )}
+              role="status"
+            >
+              {result?.ok ? (
+                <CheckCircle2 className="mt-0.5 size-4 shrink-0" aria-hidden="true" />
+              ) : (
+                <XCircle className="mt-0.5 size-4 shrink-0" aria-hidden="true" />
+              )}
+              <p className="leading-snug">{result?.message}</p>
+            </div>
+            <div className="flex justify-end gap-2">
+              {!result?.ok && (
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => {
+                    setPhase("idle");
+                    setResult(null);
+                  }}
+                >
+                  Try again
+                </Button>
+              )}
+              <Button
+                size="sm"
+                onClick={() => {
+                  onOpenChange(false);
+                  setTimeout(reset, 150);
+                }}
+              >
+                Close
+              </Button>
+            </div>
+          </div>
+        )}
+      </DialogContent>
+    </Dialog>
+  );
+}
+
 function AlaSubjectGroup({
   group,
   open,
@@ -638,6 +827,7 @@ function AlaSubjectGroup({
   onOpenChange: (o: boolean) => void;
 }) {
   const now = useNow();
+  const [submitRow, setSubmitRow] = useState<Reminder | null>(null);
   const total = group.items.length;
   const pending = total - group.submitted;
   const pct = total > 0 ? Math.round((group.submitted / total) * 100) : 0;
@@ -814,21 +1004,49 @@ function AlaSubjectGroup({
                       )}
                     </p>
                   </div>
+                  {!done && (
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      className="h-7 shrink-0 gap-1 px-2 text-[11px]"
+                      onClick={() => setSubmitRow(a)}
+                      aria-label={`Submit ${a.title} to the ERP portal`}
+                    >
+                      <Upload className="size-3" aria-hidden="true" />
+                      Submit
+                    </Button>
+                  )}
+                  {erpAssignmentUrl(a.externalId) && (
+                    <a
+                      href={erpAssignmentUrl(a.externalId) as string}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      onClick={(e) => e.stopPropagation()}
+                      aria-label={`Open ${a.title} in the ERP portal (new tab)`}
+                      title="Open in the ERP portal — check the official status there"
+                      className="mt-0.5 flex size-7 shrink-0 items-center justify-center rounded-lg border border-border/50 text-muted-foreground transition-all hover:border-primary/40 hover:bg-primary/10 hover:text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                    >
+                      <ExternalLink className="size-3.5" aria-hidden="true" />
+                    </a>
+                  )}
                 </motion.li>
               );
             })}
           </ul>
         </CollapsibleContent>
       </div>
+      <AlaSubmitDialog row={submitRow} open={!!submitRow} onOpenChange={(o) => !o && setSubmitRow(null)} />
     </Collapsible>
   );
 }
 
 /**
  * Subject-wise ALA & assignments list, synced from the ERP's Assignments page
- * (spec #6: ERP truth only; the local list is a read-only mirror — #14).
- * Every row shows whether it is complete ("Submitted") or not ("Pending" /
- * "Overdue") and the ERP End Date — the last date to submit.
+ * (spec #6: ERP truth only). Every row shows whether it is complete
+ * ("Submitted") or not ("Pending" / "Overdue") and the ERP End Date — the
+ * last date to submit. Pending rows carry an explicit, per-row "Submit"
+ * action that uploads to the portal with the student's own session (never
+ * automatic; the ERP's own page must confirm before the row flips).
  * Includes search, status filter, sorting, expand/collapse-all and a
  * one-click .ics export of every not-yet-submitted deadline.
  */
@@ -1173,6 +1391,22 @@ function AlaSection() {
               title="Export all open deadlines as .ics"
             >
               <Download className="size-4" aria-hidden="true" />
+            </Button>
+            <Button
+              variant="ghost"
+              size="icon"
+              className="size-8 text-muted-foreground"
+              asChild
+            >
+              <a
+                href={`${ERP_BASE}/student/assignment`}
+                target="_blank"
+                rel="noopener noreferrer"
+                aria-label="Open the ALA & Assignments page in the ERP portal (new tab)"
+                title="Open the ERP Assignments page — submit there, then sync to update this list"
+              >
+                <ExternalLink className="size-4" aria-hidden="true" />
+              </a>
             </Button>
           </div>
         )}

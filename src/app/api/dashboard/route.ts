@@ -90,6 +90,7 @@ export async function GET() {
         ? (alaNameByCode.get(r.subjectCode) ?? courseNames[r.subjectCode] ?? null)
         : null,
       dueAt: r.dueAt.toISOString(),
+      externalId: r.externalId,
     }));
 
     const notifications = await db.notification.findMany({

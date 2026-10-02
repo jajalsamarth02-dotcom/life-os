@@ -11,6 +11,7 @@ import {
   CalendarClock,
   CheckCircle2,
   ChevronRight,
+  ExternalLink,
   FlaskConical,
   CalendarRange,
   GraduationCap,
@@ -37,6 +38,8 @@ import {
   ago,
   dueGroup,
   EmptyHero,
+  ERP_BASE,
+  erpAssignmentUrl,
   fmtDT,
   hueColors,
   CustomTargetChip,
@@ -155,46 +158,60 @@ function AlaDeadlinePanel({
               transition={{ delay: 0.05 * i, duration: 0.18 }}
               className="list-none border-b border-border/40 last:border-b-0"
             >
-              <button
-                type="button"
-                onClick={onOpenReminders}
-                aria-label={`Open the subject-wise ALA list — ${row.title}`}
-                title="Open the subject-wise list in the Reminders tab"
-                className="group/ala flex w-full items-center gap-2.5 px-3 py-2.5 text-left transition-colors hover:bg-muted/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring"
-              >
-                {hue ? (
-                  <span
-                    className="shrink-0 rounded-md px-1.5 py-0.5 font-mono text-[10px] font-semibold"
-                    style={{ backgroundColor: hue.bg, color: hue.fg }}
-                  >
-                    {row.subjectCode}
-                  </span>
-                ) : (
-                  <ClipboardList className="size-3.5 shrink-0 text-muted-foreground" aria-hidden="true" />
-                )}
-                <span className="min-w-0 flex-1">
-                  <span className="block truncate text-sm font-medium leading-snug">{row.title}</span>
-                  {row.subjectName && (
-                    <span className="block truncate text-[11px] text-muted-foreground">{row.subjectName}</span>
+              <div className="flex items-stretch">
+                <button
+                  type="button"
+                  onClick={onOpenReminders}
+                  aria-label={`Open the subject-wise ALA list — ${row.title}`}
+                  title="Open the subject-wise list in the Reminders tab"
+                  className="group/ala flex min-w-0 flex-1 items-center gap-2.5 px-3 py-2.5 text-left transition-colors hover:bg-muted/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring"
+                >
+                  {hue ? (
+                    <span
+                      className="shrink-0 rounded-md px-1.5 py-0.5 font-mono text-[10px] font-semibold"
+                      style={{ backgroundColor: hue.bg, color: hue.fg }}
+                    >
+                      {row.subjectCode}
+                    </span>
+                  ) : (
+                    <ClipboardList className="size-3.5 shrink-0 text-muted-foreground" aria-hidden="true" />
                   )}
-                </span>
-                <span className="shrink-0 text-right">
-                  <span
-                    className={cn(
-                      "block rounded-full px-2 py-0.5 text-[10px] font-semibold tabular-nums transition-colors",
-                      pill.className,
-                      overdue && "group-hover/ala:bg-red-500/20"
+                  <span className="min-w-0 flex-1">
+                    <span className="block truncate text-sm font-medium leading-snug">{row.title}</span>
+                    {row.subjectName && (
+                      <span className="block truncate text-[11px] text-muted-foreground">{row.subjectName}</span>
                     )}
-                  >
-                    {pill.label}
                   </span>
-                  <span className="mt-0.5 block text-[10px] text-muted-foreground">{fmtDT(row.dueAt)}</span>
-                </span>
-                <ChevronRight
-                  className="size-3.5 shrink-0 text-muted-foreground/40 transition-transform group-hover/ala:translate-x-0.5 group-hover/ala:text-foreground"
-                  aria-hidden="true"
-                />
-              </button>
+                  <span className="shrink-0 text-right">
+                    <span
+                      className={cn(
+                        "block rounded-full px-2 py-0.5 text-[10px] font-semibold tabular-nums transition-colors",
+                        pill.className,
+                        overdue && "group-hover/ala:bg-red-500/20"
+                      )}
+                    >
+                      {pill.label}
+                    </span>
+                    <span className="mt-0.5 block text-[10px] text-muted-foreground">{fmtDT(row.dueAt)}</span>
+                  </span>
+                  <ChevronRight
+                    className="size-3.5 shrink-0 text-muted-foreground/40 transition-transform group-hover/ala:translate-x-0.5 group-hover/ala:text-foreground"
+                    aria-hidden="true"
+                  />
+                </button>
+                {erpAssignmentUrl(row.externalId) && (
+                  <a
+                    href={erpAssignmentUrl(row.externalId) as string}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    aria-label={`Open ${row.title} in the ERP portal (new tab)`}
+                    title="Open in the ERP portal — submissions happen there (this app is a read-only mirror)"
+                    className="flex w-9 shrink-0 items-center justify-center border-l border-border/40 text-muted-foreground/70 transition-all hover:bg-primary/10 hover:text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring"
+                  >
+                    <ExternalLink className="size-3.5" aria-hidden="true" />
+                  </a>
+                )}
+              </div>
             </motion.li>
           );
         })}

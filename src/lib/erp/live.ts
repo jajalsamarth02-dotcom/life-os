@@ -701,3 +701,185 @@ function buildSnapshot(out: CollectedSnapshot): ErpSnapshot {
     currentSemester: out.currentSemester ?? null,
   };
 }
+
+/* ------------------------------------------------------------------ */
+/* ALA write-back (explicit, per-row, user-initiated)                  */
+/* ------------------------------------------------------------------ */
+
+export interface AlaSubmitInput {
+  /** Numeric ERP assignment id (the list row's /student/assignment/{id}). */
+  externalId: string;
+  /** File the student picked in the app (forwarded as multipart `attach`). */
+  file?: { name: string; type: string; data: Buffer };
+  /** Optional link submission (the form's `link` text input). */
+  link?: string;
+}
+
+export interface AlaSubmitResult {
+  ok: boolean;
+  message: string;
+  /** True only when the ERP page after the POST shows "Submission Status: Submitted". */
+  confirmedSubmitted: boolean;
+  /** Refreshed session cookie to persist (may rotate during the flow). */
+  sessionCookie?: string;
+}
+
+/** ERP-accepted file extensions (mirrors the form's accept attribute). */
+export const ALA_ACCEPT = [
+  ".pdf", ".docx", ".zip", ".xlsx", ".ppt", ".csv", ".mp4", ".png", ".jpg", ".jpeg", ".pptx", ".odp",
+] as const;
+
+function extractSubmissionForm(html: string): { action: string; token: string } | null {
+  const m = html.match(
+    /<form[^>]*action="([^"]*\/student\/assignment\/\d+\/update[^"]*)"[^>]*method="post"[^>]*>([\s\S]*?)<\/form>/i
+  );
+  if (!m) return null;
+  const t = m[2].match(/name="_token"\s+value="([^"]+)"/);
+  if (!t) return null;
+  return { action: new URL(m[1], BASE).toString(), token: t[1] };
+}
+
+function pageShowsSubmitted(html: string): boolean {
+  return /Submission Status\s*:?\s*<\/[^>]+>?\s*Submitted/i.test(html) ||
+    /Submission Status\s*:?\s*Submitted/i.test(html.replace(/<[^>]+>/g, " "));
+}
+
+function pageFlashError(html: string): string | null {
+  const alert = html.match(/class="[^"]*alert-danger[^"]*"[^>]*>([\s\S]*?)<\/div>/i);
+  if (alert) {
+    const text = stripTags(alert[1]);
+    if (text) return text.slice(0, 240);
+  }
+  const invalid = html.match(/The (?:attach|link|[\w ]+) field is required/i);
+  if (invalid) return invalid[0];
+  return null;
+}
+
+/**
+ * Submit ONE ALA/assignment on the student's behalf. NEVER called
+ * automatically — only from the explicit per-row user action:
+ *   1. open the detail page (fresh session) → extract CSRF _token + action
+ *   2. POST multipart/form-data { _token, attach?, link? }
+ *   3. re-fetch the detail page and only report success when the ERP itself
+ *      shows "Submission Status: Submitted" — we never fabricate confirmation.
+ * Rate-limit friendly: 3 requests total per submission, politely paced.
+ */
+export async function submitAssignment(
+  username: string,
+  password: string,
+  savedCookie: string | null | undefined,
+  input: AlaSubmitInput
+): Promise<AlaSubmitResult> {
+  if (!/^\d+$/.test(input.externalId)) {
+    throw new SyncError("PARSE_FAILED", "Refusing to submit: not a numeric ERP assignment id.");
+  }
+  if (!input.file && !input.link?.trim()) {
+    throw new SyncError("PARSE_FAILED", "Nothing to submit — attach a file or provide a link.");
+  }
+
+  const detailPath = `/student/assignment/${input.externalId}`;
+
+  // 1) session: try saved cookie → full login fallback
+  let cookies = new Map<string, string>();
+  if (savedCookie) {
+    for (const pair of savedCookie.split(";")) {
+      const i = pair.indexOf("=");
+      if (i > 0) cookies.set(pair.slice(0, i).trim(), pair.slice(i + 1).trim());
+    }
+  }
+  let page = await fetchWithSession(detailPath, cookies);
+  if (!page.html) {
+    const fresh = await login(username, password);
+    cookies = fresh.cookies;
+    page = await fetchWithSession(detailPath, cookies);
+    if (!page.html) {
+      throw new SyncError("AUTH_FAILED", "Could not open the assignment page with a fresh session.");
+    }
+  }
+  cookies = page.cookies;
+
+  // Idempotency: ERP already marks it submitted → nothing to do.
+  if (pageShowsSubmitted(page.html)) {
+    return {
+      ok: true,
+      confirmedSubmitted: true,
+      message: "The ERP already shows this ALA as Submitted — nothing sent.",
+      sessionCookie: cookieHeader(cookies),
+    };
+  }
+
+  const form = extractSubmissionForm(page.html);
+  if (!form) {
+    throw new SyncError(
+      "PARSE_FAILED",
+      "No submission form found on the ERP page (this ALA may be faculty-managed or closed).",
+      stripTags(page.html).slice(0, 300)
+    );
+  }
+
+  // 2) build the multipart body exactly like the ERP's own form
+  const fd = new FormData();
+  fd.set("_token", form.token);
+  if (input.file) {
+    fd.set(
+      "attach",
+      new File([new Uint8Array(input.file.data)], input.file.name, { type: input.file.type || "application/octet-stream" })
+    );
+  }
+  if (input.link?.trim()) fd.set("link", input.link.trim());
+  // the real form has no other fields; Laravel ignores absent optional ones
+
+  const postRes = await fetch(form.action, {
+    method: "POST",
+    redirect: "manual",
+    headers: { "User-Agent": UA, Cookie: cookieHeader(cookies), Referer: `${BASE}${detailPath}` },
+    body: fd,
+    signal: AbortSignal.timeout(30_000),
+  });
+  const postCookies = collectCookies(postRes, cookies);
+  cookies = postCookies;
+  await new Promise((r) => setTimeout(r, 400)); // polite pacing
+
+  // 3) confirm from the ERP's own page (follow Laravel's post-redirect)
+  let confirmHtml: string | null = null;
+  if (postRes.status >= 300 && postRes.status < 400) {
+    const loc = postRes.headers.get("location") ?? "";
+    const back = await fetchWithSession(
+      loc.startsWith("http") ? loc.replace(BASE, "") || DASHBOARD_PATH : loc || detailPath,
+      cookies
+    );
+    cookies = back.cookies;
+    confirmHtml = back.html;
+  } else {
+    confirmHtml = await postRes.text().catch(() => null);
+  }
+  if (!confirmHtml) {
+    confirmHtml = (await fetchWithSession(detailPath, cookies)).html;
+  }
+
+  const errText = confirmHtml ? pageFlashError(confirmHtml) : "ERP response was empty";
+  if (confirmHtml && pageShowsSubmitted(confirmHtml)) {
+    return {
+      ok: true,
+      confirmedSubmitted: true,
+      message: "Submitted — the ERP now shows Submission Status: Submitted.",
+      sessionCookie: cookieHeader(cookies),
+    };
+  }
+  if (postRes.status >= 200 && postRes.status < 300 && !errText) {
+    // Laravel returned 200 without a danger flash, but we could not positively
+    // confirm → report honestly instead of claiming success.
+    return {
+      ok: false,
+      confirmedSubmitted: false,
+      message: "The ERP accepted the request but did not confirm the submission — check on the next sync.",
+      sessionCookie: cookieHeader(cookies),
+    };
+  }
+  return {
+    ok: false,
+    confirmedSubmitted: false,
+    message: `ERP did not accept the submission${errText ? `: ${errText}` : ` (HTTP ${postRes.status})`}.`,
+    sessionCookie: cookieHeader(cookies),
+  };
+}

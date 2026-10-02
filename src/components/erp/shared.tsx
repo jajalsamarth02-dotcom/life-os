@@ -122,6 +122,28 @@ export function isOverdue(iso: string, now: number = Date.now()): boolean {
 }
 
 /* ------------------------------------------------------------------ */
+/* ERP portal deep links (read-only hand-off — the app never writes)   */
+/* ------------------------------------------------------------------ */
+
+/**
+ * Base URL of the student portal. Deep links are built from the SAME ids the
+ * live parser scraped, so every link points at a real ERP page.
+ */
+export const ERP_BASE = "https://erp.gmiu.edu.in";
+
+/**
+ * URL of the ERP assignment detail page for an ALA row, derived from its
+ * externalId (`erp:assign:{numericId}` — the id the parser scraped from the
+ * row's own link). Returns null for anything that is not a verifiably real
+ * ERP assignment row (personal reminders, malformed ids) — no guessed links.
+ */
+export function erpAssignmentUrl(externalId: string | null | undefined): string | null {
+  if (!externalId?.startsWith("erp:assign:")) return null;
+  const id = externalId.slice("erp:assign:".length);
+  return /^\d+$/.test(id) ? `${ERP_BASE}/student/assignment/${id}` : null;
+}
+
+/* ------------------------------------------------------------------ */
 /* Status colors (emerald / amber / red — never blue)                  */
 /* ------------------------------------------------------------------ */
 

@@ -14,6 +14,7 @@ import { fetchLiveSnapshot, isSubmissionComplete } from "@/lib/erp/live";
 import { ERROR_COPY, ErpSnapshot, SyncError, SyncErrorCode } from "@/lib/erp/types";
 import { decryptSecret, encryptSecret } from "@/lib/crypto";
 import { pruneSnapshots, recordSnapshots } from "@/lib/sync/history";
+import { maybeAutoNotify } from "@/lib/notify/whatsapp";
 
 /**
  * SYNC ENGINE
@@ -228,6 +229,10 @@ export async function runSync(
     });
 
     // refresh notifications badge etc. — nothing else to do
+    // (WhatsApp auto-digest: only after scheduled syncs, throttled inside.)
+    if (trigger === "scheduled") {
+      void maybeAutoNotify();
+    }
     return { ok: true, mode, changes, message: `Sync complete — ${changes} change${changes === 1 ? "" : "s"}.` };
   } catch (err) {
     const syncErr =
