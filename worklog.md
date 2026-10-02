@@ -1200,3 +1200,28 @@ Unresolved issues / risks & next-phase priorities:
 2. next.config.ts still carries the unrecognized turbopack.memoryLimit key — harmless warning; remove during a quiet window.
 3. User-facing guidance: preview errors = server was reaped; wait ~15s, refresh; keeper/watchdog restores automatically.
 4. All app data safe (SQLite integrity ok, WhatsApp config intact, sync state clean).
+
+---
+Task ID: 17
+Agent: Z.ai Code (main orchestrator)
+Task: Round task 21:45+08 — full crash-mode diagnosis (promised after user's "not working pls help"), QA via agent-browser, stability engineering + one small app increment (freeze eased ONLY for a single client-side feature per round mandate).
+
+Current project status / assessment:
+- Server was found DOWN at round start (13:45:59Z, curl 000, zero bun/next processes) after serving clean 200s seconds earlier — the silent-kill pattern again. The platform auto-resurrected it at ~13:46:54Z (harness-spawned, no keeper fire due until 13:48:34Z — so resurrection ≈ 2.5 min after death, FASTER than the keeper's 5-min cadence; two independent respawn layers now confirmed).
+- CONTROLLED EXPERIMENT (definitive): spawned two setsid+nohup detached processes from an agent Bash call — scripts/watchdog.sh (heartbeat+resurrector) and scripts/canary-sleep.sh (control). BOTH were killed within ~20s of the spawning tool call completing (each managed exactly 1 heartbeat). Meanwhile the harness-spawned dev server survived 25+ min across many tool calls. CONCLUSION: the sandbox reaps ALL agent-session-spawned background processes regardless of size/name; only harness/keeper/cron-spawned processes persist. => Local watchdogs are IMPOSSIBLE on this platform; do not retry scripts/watchdog.sh, dev-watchdog.sh, dev-keepalive.sh, ensure-dev.sh — they all die on spawn-session tool-call end.
+- Kill taxonomy (consolidated with Task 16-OPS): (a) kernel/cgroup OOM — logged in dmesg (only ONE event, 21:07 era); (b) supervisor SIGTERM of next-server at pressure-dependent RSS line 1.24-1.64GB (observed "Terminated" in stderr, SyncLog row "Server process killed mid-sync (sandbox memory pressure)"); (c) agent-session spawn reaping (proven by experiment). Today's 21:18-21:44 deaths = mechanism (b); my watchdog deaths = mechanism (c).
+- Live data healthy: /api/dashboard 200 (live mode, 8 subjects, 66.67% danger as expected); SyncLog latest row = scheduled LIVE sync success at 13:50:21Z; scheduler ticking normally.
+
+Completed modifications / verified:
+1. package.json dev script now bakes the heap cap into EVERY restart path (keeper, harness auto-respawn, manual): `"dev": "NODE_OPTIONS=--max-old-space-size=900 next dev -p 3000 2>&1 | tee dev.log"`. 900 (not my initial 1536) aligned with Task 16-OPS's empirically-safe observation (capped instance RSS steady 1.27-1.29GB, below the observed kill line). Takes effect on the NEXT natural respawn; current pre-cap instance may still be killed once — its replacement will be capped. This is the single highest-value stability fix available without app changes.
+2. App increment (round-mandated, client-side only, 1 file): dashboard-tab.tsx — new "Copy summary" pill chip next to "This week" in the Overall attendance card: copies a plain-text report (timestamp IST, overall %/classes/status/target, per-subject %/target/status/custom-target flags) via navigator.clipboard, with Copied-state icon feedback (2s) and inert fallback if clipboard is unavailable. Styling pass: Copy + This week chips unified (rounded-full, border-border/40, bg-background/40, hover:bg-accent) with aria-labels/tooltips.
+3. QA: agent-browser single-page pass — HMR connected, ZERO console/page errors, Copy button present in a11y tree, screenshot /tmp/qa-copy-btn.png visually verified (ring 66.67%, chips render, LIVE badge, next-up strip intact). Browser CLOSED immediately after (protocol). Memory before/after QA: 2184MB available, no degradation. Server 200 throughout and after.
+
+Unresolved issues / risks & next-phase priorities:
+1. Current (pre-cap) instance may be SIGTERM-ed once more before a capped one takes over — expected, self-healing ≤3 min via harness/keeper. Do NOT manual-restart from agent sessions (spawn gets reaped — mechanism (c)).
+2. .next Turbopack cache regrows over days and re-inflates boot RSS: if crash frequency rises again, `rm -rf .next` during a quiet minute, then let keeper respawn.
+3. next.config.ts still carries the unrecognized turbopack.memoryLimit key — remove during a quiet window WITH a controlled restart (editing it triggers a dev-server reload).
+4. User decisions still pending: free 2nd notification channel (Telegram ⭐ / ntfy / Discord / email) and optional fixed daily WhatsApp digest time (WhatsApp enabled; digestTime unset — DO NOT send test/digest messages to the real phone during QA).
+5. User-facing guidance stands: if preview shows "Application error", the server was reaped — wait ~15-30s, hard-refresh; auto-recovery ≤3 min.
+6. Backlog unchanged: L/H/E columns folding into totals, SMTP email digest, TZ anchor cosmetic, per-semester slot scoping (needs schema + controlled restart).
+7. Keeper cron 430680 must stay alive; worklog protocol: append-only, three-section handover.

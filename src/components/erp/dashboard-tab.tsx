@@ -1,7 +1,7 @@
 "use client";
 
 import { useQuery } from "@tanstack/react-query";
-import { useMemo, useState } from "react";
+import { useMemo, useRef, useState } from "react";
 import { isToday } from "date-fns";
 import {
   AlertTriangle,
@@ -18,6 +18,7 @@ import {
   Hourglass,
   Info,
   ClipboardList,
+  Copy,
   Layers,
   WifiOff,
   XCircle,
@@ -694,6 +695,37 @@ export function DashboardTab({
     return { delta: d, spanDays, fullWeek: spanDays >= 6.5 };
   }, [history.data]);
 
+  const [copied, setCopied] = useState(false);
+  const copyTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const summaryText = useMemo(() => {
+    if (!data) return "";
+    const lines: string[] = [];
+    lines.push(
+      `Attendance summary — ${new Date().toLocaleString("en-IN", { timeZone: "Asia/Kolkata", dateStyle: "medium", timeStyle: "short" })} IST`
+    );
+    lines.push(
+      `Overall: ${data.overall.percentage.toFixed(2)}% (${data.overall.present}/${data.overall.total} classes, ${data.overall.absent} missed) — target ${data.target}% [${data.overall.status}]`
+    );
+    for (const s of data.subjects) {
+      lines.push(
+        `${s.code} ${s.name}: ${s.percentage.toFixed(2)}% (${s.present}/${s.total}) — target ${s.targetPct}% [${s.status}]${s.hasCustomTarget ? " (custom)" : ""}`
+      );
+    }
+    return lines.join("\n");
+  }, [data]);
+
+  const copySummary = async () => {
+    if (!summaryText) return;
+    try {
+      await navigator.clipboard.writeText(summaryText);
+      setCopied(true);
+      if (copyTimer.current) clearTimeout(copyTimer.current);
+      copyTimer.current = setTimeout(() => setCopied(false), 2000);
+    } catch {
+      // clipboard unavailable (insecure context / permission denied) — keep button inert
+    }
+  };
+
   if (isPending) {
     return (
       <div className="space-y-4">
@@ -786,7 +818,22 @@ export function DashboardTab({
                 <Button
                   variant="ghost"
                   size="sm"
-                  className="ml-auto h-7 gap-1 rounded-full px-2.5 text-xs text-muted-foreground hover:text-foreground"
+                  className="ml-auto h-7 gap-1 rounded-full border border-border/40 bg-background/40 px-2.5 text-xs text-muted-foreground hover:bg-accent hover:text-foreground"
+                  onClick={copySummary}
+                  aria-label="Copy attendance summary to clipboard"
+                  title="Copy a plain-text attendance summary (per-subject %, status, targets)"
+                >
+                  {copied ? (
+                    <CheckCircle2 className="size-3.5 text-emerald-500" aria-hidden="true" />
+                  ) : (
+                    <Copy className="size-3.5" aria-hidden="true" />
+                  )}
+                  {copied ? "Copied" : "Copy"}
+                </Button>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="h-7 gap-1 rounded-full border border-border/40 bg-background/40 px-2.5 text-xs text-muted-foreground hover:bg-accent hover:text-foreground"
                   onClick={() => setDigestOpen(true)}
                   aria-label="Open the weekly attendance report"
                 >
