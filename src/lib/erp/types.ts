@@ -56,6 +56,23 @@ export interface ErpAssignmentSnapshot {
   approvalStatus?: string | null;
 }
 
+/**
+ * One weekly class slot parsed from the ERP's Class Routine page
+ * (/student/class-routine — verified: day-per-column table whose cells hold
+ * `div.class-time` blocks with name / start / end / room / faculty / batch).
+ * Only the four schedule facts the app models are kept; room/faculty/batch
+ * are intentionally dropped for now.
+ */
+export interface ErpRoutineSlot {
+  /** 0 = Sunday … 6 = Saturday (parsed from the table's own day header). */
+  dayOfWeek: number;
+  /** Minutes from midnight, 12-hour ERP times normalized (01:00 PM → 780). */
+  startMin: number;
+  endMin: number;
+  /** Subject code resolved via the cached course-name → code mapping. */
+  subjectCode: string;
+}
+
 export interface ErpSnapshot {
   mode: SnapshotMode;
   fetchedAt: string;
@@ -75,6 +92,10 @@ export interface ErpSnapshot {
   assignmentsComplete: boolean;
   /** Course-code → course-name pairs resolved during this fetch (merged into the app's cache). */
   courseNames?: Record<string, string>;
+  /** Weekly class-routine slots parsed from /student/class-routine; omitted when the page is unavailable or unrecognized. */
+  routine?: ErpRoutineSlot[];
+  /** Routine subject names that could not be matched to a known course code (skipped, never invented). */
+  routineUnknown?: string[];
   /** Current semester detected on the ERP pages (1–8); null = not found. */
   currentSemester?: number | null;
   note?: string;

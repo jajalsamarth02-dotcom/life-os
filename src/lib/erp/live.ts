@@ -1,5 +1,6 @@
 import {
   ErpAssignmentSnapshot,
+  ErpRoutineSlot,
   ErpSnapshot,
   ErpSubjectSnapshot,
   SyncError,
@@ -37,6 +38,8 @@ const ATTENDANCE_PATHS = [
 const PROFILE_PATHS = ["/student/profile"];
 /** ALA / coursework list (verified: table with per-subject rows + deadlines). */
 const ASSIGNMENT_PATH = "/student/assignment";
+/** Weekly class routine (verified: day-per-column table, `div.class-time` blocks). */
+const ROUTINE_PATH = "/student/class-routine";
 const REQUEST_TIMEOUT_MS = 15000;
 const UA =
   "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36 ERPStudentSync/1.0";
@@ -410,6 +413,109 @@ function guessType(title: string): ReminderType {
   return "OTHER";
 }
 
+/* ------------------------------------------------------------------ */
+/* Class routine (weekly timetable)                                    */
+/* ------------------------------------------------------------------ */
+
+const ROUTINE_DAY_INDEX: Record<string, number> = {
+  sunday: 0,
+  monday: 1,
+  tuesday: 2,
+  wednesday: 3,
+  thursday: 4,
+  friday: 5,
+  saturday: 6,
+};
+
+/** "11:00 AM" / "01:00 PM" → minutes from midnight (12 AM → 0, 12 PM → 720). */
+function routineTime12ToMin(text: string): number | null {
+  const m = text.match(/(\d{1,2}):(\d{2})\s*(AM|PM)/i);
+  if (!m) return null;
+  let h = parseInt(m[1], 10) % 12;
+  if (m[3].toUpperCase() === "PM") h += 12;
+  return h * 60 + parseInt(m[2], 10);
+}
+
+/**
+ * Derive the Subject.code exactly the way the attendance parser does —
+ * explicit "ABC-123" style codes pass through, otherwise the name is
+ * upper-cased, truncated to 24 chars and non-alphanumerics become dashes.
+ * Shared with the class-routine parser so both produce the SAME namespace.
+ */
+export function deriveSubjectCode(name: string): string {
+  const explicit = (name.match(/\b[A-Z]{2,4}[-\s]?\d{2,4}\b/) ?? [])[0]?.replace(/\s+/g, "-");
+  if (explicit) return explicit;
+  return name
+    .slice(0, 24)
+    .toUpperCase()
+    .replace(/[^A-Z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "");
+}
+
+/**
+ * Parse the Class Routine page (/student/class-routine).
+ * Verified structure: ONE table; header row = day names (Sat…Fri order at
+ * GMIU); second row = one cell per day holding zero or more
+ * `<div class="class-time">` blocks:
+ *   SUBJECT NAME <br> 11:00 AM <br> 01:00 PM <br> Room: … <br> Faculty <br> Batch: …
+ * Parallel batches repeat the same subject+time with different rooms — all
+ * blocks are kept (they are real schedule facts; batch filtering can come
+ * later). Course names are resolved to subject codes via `resolve` (defaults
+ * to deriveSubjectCode — the same namespace the attendance parser produces);
+ * names the resolver rejects are counted in `unknownNames`, never invented.
+ * Returns null when the page doesn't match the expected shape at all.
+ */
+export function parseGmiuClassRoutine(
+  html: string,
+  resolve: (name: string) => string | null = deriveSubjectCode
+): { slots: ErpRoutineSlot[]; unknownNames: string[] } | null {
+  const table = (html.match(/<table[\s\S]*?<\/table>/i) ?? [])[0];
+  if (!table) return null;
+  const rows = table.match(/<tr[\s\S]*?<\/tr>/gi) ?? [];
+  const headerRow = rows[0];
+  const bodyRow = rows[1];
+  if (!headerRow || !bodyRow) return null;
+
+  const headerCells = [...headerRow.matchAll(/<t[hd][^>]*>([\s\S]*?)<\/t[hd]>/gi)].map((c) =>
+    stripTags(c[1]).toLowerCase().trim()
+  );
+  const dayCols = headerCells.map((t) => ROUTINE_DAY_INDEX[t] ?? null);
+  if (!dayCols.some((d) => d !== null)) return null; // not a day-header table
+
+  const bodyCells = [...bodyRow.matchAll(/<td[^>]*>([\s\S]*?)<\/td>/gi)].map((c) => c[1]);
+  const slots: ErpRoutineSlot[] = [];
+  const unknownNames = new Set<string>();
+
+  bodyCells.forEach((cellHtml, col) => {
+    const day = dayCols[col];
+    if (day == null) return;
+    const blocks = cellHtml.match(/<div[^>]*class="[^"]*class-time[^"]*"[^>]*>[\s\S]*?<\/div>/gi) ?? [];
+    for (const block of blocks) {
+      const lines = block
+        .split(/<br\s*\/?>/i)
+        .map((l) => stripTags(l).replace(/\s+/g, " ").trim())
+        .filter(Boolean);
+      if (lines.length < 3) continue;
+      const times = lines.map(routineTime12ToMin).filter((t): t is number => t !== null);
+      if (times.length < 2) continue;
+      const [startMin, endMin] = times;
+      if (endMin <= startMin) continue;
+      const name = lines.find(
+        (l) => routineTime12ToMin(l) === null && !/^room:/i.test(l) && !/^batch:/i.test(l)
+      );
+      if (!name) continue;
+      const code = resolve(name);
+      if (!code) {
+        unknownNames.add(name);
+        continue;
+      }
+      slots.push({ dayOfWeek: day, startMin, endMin, subjectCode: code });
+    }
+  });
+
+  return { slots, unknownNames: [...unknownNames] };
+}
+
 /** A submission counts as complete only when the ERP clearly says so. */
 export function isSubmissionComplete(
   submissionStatus: string | null | undefined,
@@ -556,6 +662,8 @@ interface CollectedSnapshot {
   assignments: ErpAssignmentSnapshot[];
   assignmentsComplete: boolean;
   courseNames: Record<string, string>;
+  routine?: ErpRoutineSlot[];
+  routineUnknown?: string[];
 }
 
 /**
@@ -637,6 +745,24 @@ async function collectSnapshot(
     }
   }
 
+  // --- Class routine (weekly timetable) ---
+  // Additive and best-effort: an unavailable/unrecognized page leaves the
+  // routine undefined and the sync proceeds normally. Only a NON-EMPTY parse
+  // is returned so the engine never wipes stored slots on a structure change.
+  // Codes resolve through deriveSubjectCode — the same derivation the
+  // attendance parser uses — so routine slots land in the SAME code
+  // namespace as the Subject rows (validated against the DB by the engine).
+  let routine: ErpRoutineSlot[] | undefined;
+  let routineUnknown: string[] | undefined;
+  const rt = await fetchWithSession(ROUTINE_PATH, dash.cookies);
+  if (rt.html && !rt.html.includes('name="password"')) {
+    const parsedRoutine = parseGmiuClassRoutine(rt.html, deriveSubjectCode);
+    if (parsedRoutine && parsedRoutine.slots.length > 0) {
+      routine = parsedRoutine.slots;
+      routineUnknown = parsedRoutine.unknownNames;
+    }
+  }
+
   return {
     subjects,
     complete,
@@ -645,6 +771,8 @@ async function collectSnapshot(
     assignments,
     assignmentsComplete,
     courseNames,
+    routine,
+    routineUnknown,
   };
 }
 
@@ -699,6 +827,7 @@ function buildSnapshot(out: CollectedSnapshot): ErpSnapshot {
     assignmentsComplete: out.assignmentsComplete,
     courseNames: out.courseNames,
     currentSemester: out.currentSemester ?? null,
+    ...(out.routine ? { routine: out.routine, routineUnknown: out.routineUnknown ?? [] } : {}),
   };
 }
 

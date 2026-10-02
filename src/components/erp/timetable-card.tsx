@@ -9,6 +9,7 @@ import {
   ChevronDown,
   CircleDot,
   Clock,
+  CloudCog,
   Download,
   Loader2,
   Play,
@@ -206,7 +207,7 @@ function ManageTimetableDialog({
           </DialogTitle>
           <DialogDescription className="text-xs">
             {mode === "live"
-              ? "The ERP does not publish a timetable page, so add your real weekly classes here yourself. Personal slots persist independently of synchronization."
+              ? "Your weekly classes sync automatically from the ERP's Class Routine page — ERP rows refresh on every sync (marked ERP). Personal slots you add persist independently."
               : "The demo ERP seeded a sample schedule — adjust it to match your real classes. Personal slots persist independently of synchronization."}
           </DialogDescription>
         </DialogHeader>
@@ -264,6 +265,7 @@ function ManageTimetableDialog({
                     <span className="font-mono font-semibold">{c.subjectCode}</span>
                     <span className="tabular-nums">{c.start}–{c.end}</span>
                     {c.source === "demo" && <span className="text-amber-700/60 dark:text-amber-400/50">· demo</span>}
+                    {c.source === "erp" && <span className="text-indigo-600/70 dark:text-indigo-400/70">· ERP</span>}
                   </li>
                 ))}
               </ul>
@@ -318,14 +320,29 @@ function ManageTimetableDialog({
                       <span className="font-mono text-xs font-semibold">{s.subjectCode}</span>
                       <span className="text-xs tabular-nums text-muted-foreground">{hhmm(s.startMin)}–{hhmm(s.endMin)}</span>
                       {s.source === "demo" && <Badge variant="outline" className="ml-1 px-1.5 py-0 text-[10px]">demo</Badge>}
-                      <button
-                        type="button"
-                        onClick={() => remove.mutate(s.id)}
-                        className="ml-auto rounded-md p-1 text-muted-foreground transition-colors hover:bg-red-500/10 hover:text-red-600 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-                        aria-label={`Remove ${s.subjectCode} on ${DAY_NAMES[d]} at ${hhmm(s.startMin)}`}
-                      >
-                        {remove.isPending ? <Loader2 className="size-3.5 animate-spin" aria-hidden="true" /> : <Trash2 className="size-3.5" aria-hidden="true" />}
-                      </button>
+                      {s.source === "erp" && (
+                        <Badge variant="outline" className="ml-1 border-indigo-500/40 px-1.5 py-0 text-[10px] text-indigo-600 dark:text-indigo-400">
+                          ERP
+                        </Badge>
+                      )}
+                      {s.source === "erp" ? (
+                        <span
+                          className="ml-auto flex items-center gap-1 rounded-md px-1.5 py-1 text-[10px] font-medium text-indigo-500/80 dark:text-indigo-400/80"
+                          title="Synced from the ERP Class Routine — managed automatically, edits happen on the ERP"
+                        >
+                          <CloudCog className="size-3.5 shrink-0" aria-hidden="true" />
+                          managed
+                        </span>
+                      ) : (
+                        <button
+                          type="button"
+                          onClick={() => remove.mutate(s.id)}
+                          className="ml-auto rounded-md p-1 text-muted-foreground transition-colors hover:bg-red-500/10 hover:text-red-600 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                          aria-label={`Remove ${s.subjectCode} on ${DAY_NAMES[d]} at ${hhmm(s.startMin)}`}
+                        >
+                          {remove.isPending ? <Loader2 className="size-3.5 animate-spin" aria-hidden="true" /> : <Trash2 className="size-3.5" aria-hidden="true" />}
+                        </button>
+                      )}
                     </li>
                   ))}
                 </ul>
@@ -481,6 +498,7 @@ export function TimetableCard({
                         <p className="text-xs tabular-nums text-muted-foreground">
                           {hhmm(s.startMin)} – {hhmm(s.endMin)}
                           {s.source === "demo" && " · demo"}
+                          {s.source === "erp" && " · synced from ERP"}
                         </p>
                       </div>
                       {st.key === "ongoing" ? (

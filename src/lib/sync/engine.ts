@@ -1,4 +1,5 @@
 import { db } from "@/lib/db";
+import { createHash } from "crypto";
 import {
   getSettings,
   getRawSetting,
@@ -32,6 +33,8 @@ const LOCK_KEY = "sync.lock";
 const LOCK_STALE_MS = 3 * 60 * 1000;
 /** Setting key holding the cached ERP course-code → course-name map (JSON). */
 const COURSE_NAMES_KEY = "erp.courseNames";
+/** Signature of the last applied class-routine slot set (avoids write churn). */
+const ROUTINE_SIG_KEY = "erp.routineSig";
 /** ExternalId prefix for ERP-synced ALA/assignment reminders. */
 export const ASSIGNMENT_EXT_PREFIX = "erp:assign:";
 
@@ -547,6 +550,60 @@ async function applySnapshot(snapshot: ErpSnapshot, settings: AppSettings): Prom
           await changeEvent("REMINDER_REMOVED", null, `${e.title} — no longer on the ERP Assignments page`);
           changes++;
         }
+      }
+    }
+  }
+
+  // --- Class routine (weekly timetable from the ERP's Class Routine page) ---
+  // The ERP routine is the authoritative schedule: replace every sync-owned
+  // slot (source "erp" AND legacy stale "demo" rows) with the parsed set,
+  // but only when the applied set actually changed — so a stable week costs
+  // zero writes on the 15-minute cadence. PERSONAL slots the student added
+  // themselves are never touched. Safety rails: slots whose subject has no
+  // ACTIVE Subject row are held back (the attendance sync will create the
+  // subject, then the next sync applies them — nothing is invented); an
+  // empty filtered set (page down / structure change) skips the whole block
+  // and keeps existing slots.
+  if (snapshot.routine && snapshot.routine.length > 0) {
+    const activeCodes = new Set(
+      (
+        await db.subject.findMany({
+          where: { active: true },
+          select: { code: true },
+        })
+      ).map((s) => s.code)
+    );
+    const applied = snapshot.routine.filter((s) => activeCodes.has(s.subjectCode));
+    if (applied.length > 0) {
+      const sorted = [...applied].sort(
+        (a, b) =>
+          a.dayOfWeek - b.dayOfWeek ||
+          a.startMin - b.startMin ||
+          a.endMin - b.endMin ||
+          a.subjectCode.localeCompare(b.subjectCode)
+      );
+      const sig = createHash("sha256").update(JSON.stringify(sorted)).digest("hex").slice(0, 16);
+      const storedSig = await getRawSetting(ROUTINE_SIG_KEY);
+      const syncOwned = await db.timetableSlot.count({ where: { source: { in: ["demo", "erp"] } } });
+      if (sig !== storedSig || syncOwned !== sorted.length) {
+        await db.timetableSlot.deleteMany({ where: { source: { in: ["demo", "erp"] } } });
+        await db.timetableSlot.createMany({
+          data: sorted.map((s) => ({
+            dayOfWeek: s.dayOfWeek,
+            startMin: s.startMin,
+            endMin: s.endMin,
+            subjectCode: s.subjectCode,
+            source: "erp",
+          })),
+        });
+        await setRawSetting(ROUTINE_SIG_KEY, sig);
+        changes += sorted.length;
+        const held = snapshot.routine.length - applied.length;
+        const unknown = snapshot.routineUnknown ?? [];
+        const notes: string[] = [];
+        if (held > 0) notes.push(`${held} slot(s) held back — subject not in the active list yet`);
+        if (unknown.length > 0) notes.push(`unresolved course name(s): ${unknown.join("; ")}`);
+        if (notes.length > 0) console.log(`[erp-sync] routine: ${sorted.length} slots synced (${notes.join(" · ")})`);
       }
     }
   }
