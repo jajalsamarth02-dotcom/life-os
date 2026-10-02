@@ -6,6 +6,7 @@ import { motion } from "framer-motion";
 import {
   AlertTriangle,
   ArrowDownUp,
+  BarChart3,
   BellRing,
   BookOpen,
   CalendarClock,
@@ -14,6 +15,8 @@ import {
   Check,
   CheckCircle2,
   ChevronDown,
+  ChevronLeft,
+  ChevronRight,
   ChevronsDownUp,
   ChevronsUpDown,
   Circle,
@@ -1421,6 +1424,431 @@ function AlaDeadlineRadar({
   );
 }
 
+/* ------------------------------------------------------------------ */
+
+/** One day cell inside the deadline month calendar. */
+interface CalDay {
+  /** Day offset from today (negative = past). */
+  offset: number;
+  /** Local midnight timestamp. */
+  ms: number;
+  /** Day of week (0 = Sunday) — weekends get a faint tint. */
+  dow: number;
+  /** Belongs to the viewed month (false = leading/trailing filler). */
+  inMonth: boolean;
+  /** ACTIVE rows due this day. */
+  count: number;
+  /** Of which overdue (due before now). */
+  overdue: number;
+  /** Of which due within 7 days (not overdue). */
+  soon: number;
+  /** Up to 3 sample titles for the hover tooltip. */
+  titles: string[];
+}
+
+const CAL_DOW = ["Su", "Mo", "Tu", "We", "Th", "Fr", "Sa"] as const;
+
+/**
+ * Deadline month calendar — the spatial twin of the 35-day radar. Unlike the
+ * radar (today → +34d) it reaches into PAST months, where the overdue wall
+ * actually lives: navigate back, see which days piled up, and click any day —
+ * past or future — to filter the list below to that calendar day. It drives
+ * the exact same dayOffset drill-down as the radar bars, amber pill included.
+ */
+function AlaDeadlineCalendar({
+  assignments,
+  now,
+  selectedOffset,
+  onPickDay,
+  viewMonth,
+  onViewMonthChange,
+}: {
+  assignments: Reminder[];
+  now: number;
+  selectedOffset: number | null;
+  onPickDay: (offset: number | null) => void;
+  viewMonth: Date;
+  onViewMonthChange: (d: Date) => void;
+}) {
+  const todayMid = useMemo(() => {
+    const d = new Date(now);
+    d.setHours(0, 0, 0, 0);
+    return d.getTime();
+  }, [now]);
+
+  /* 6×7 = 42 cells → constant height regardless of month shape. Adjacent-month
+     days render dimmed but stay interactive (they can carry deadlines too). */
+  const cells = useMemo<CalDay[]>(() => {
+    const y = viewMonth.getFullYear();
+    const m = viewMonth.getMonth();
+    const firstDow = new Date(y, m, 1).getDay(); // 0 = Sunday
+    const gridStart = new Date(y, m, 1 - firstDow);
+    const byMs = new Map<number, CalDay>();
+    const arr: CalDay[] = [];
+    for (let i = 0; i < 42; i++) {
+      const d = new Date(gridStart.getFullYear(), gridStart.getMonth(), gridStart.getDate() + i);
+      d.setHours(0, 0, 0, 0);
+      const cell: CalDay = {
+        offset: Math.round((d.getTime() - todayMid) / 86_400_000),
+        ms: d.getTime(),
+        dow: d.getDay(),
+        inMonth: d.getMonth() === m,
+        count: 0,
+        overdue: 0,
+        soon: 0,
+        titles: [],
+      };
+      arr.push(cell);
+      byMs.set(d.getTime(), cell);
+    }
+    for (const a of assignments) {
+      if (a.status !== "ACTIVE") continue;
+      const d = new Date(a.dueAt);
+      d.setHours(0, 0, 0, 0);
+      const c = byMs.get(d.getTime());
+      if (!c) continue;
+      c.count += 1;
+      const dueMs = new Date(a.dueAt).getTime();
+      if (dueMs < now) c.overdue += 1;
+      else if (dueMs - now <= 7 * 86_400_000) c.soon += 1;
+      if (c.titles.length < 3) c.titles.push(a.title);
+    }
+    return arr;
+  }, [assignments, now, viewMonth, todayMid]);
+
+  const monthCount = cells.reduce((n, c) => n + (c.inMonth ? c.count : 0), 0);
+  const monthOverdue = cells.reduce((n, c) => n + (c.inMonth ? c.overdue : 0), 0);
+  const isCurrentMonth =
+    viewMonth.getFullYear() === new Date(now).getFullYear() &&
+    viewMonth.getMonth() === new Date(now).getMonth();
+  const monthLabel = viewMonth.toLocaleDateString("en-GB", { month: "long", year: "numeric" });
+  const monthShort = viewMonth.toLocaleDateString("en-GB", { month: "short" });
+  const dayLabel = (ms: number) =>
+    new Date(ms).toLocaleDateString("en-GB", { weekday: "short", day: "numeric", month: "short" });
+  const shiftMonth = (delta: number) =>
+    onViewMonthChange(new Date(viewMonth.getFullYear(), viewMonth.getMonth() + delta, 1));
+
+  return (
+    <div className="rounded-xl border border-border/60 bg-muted/20 p-3">
+      <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-1">
+        <div className="flex items-center gap-0.5">
+          <Button
+            variant="ghost"
+            size="icon"
+            className="size-6.5 text-muted-foreground hover:text-foreground"
+            onClick={() => shiftMonth(-1)}
+            aria-label={`Show ${new Date(viewMonth.getFullYear(), viewMonth.getMonth() - 1, 1).toLocaleDateString("en-GB", { month: "long", year: "numeric" })}`}
+          >
+            <ChevronLeft className="size-3.5" aria-hidden="true" />
+          </Button>
+          <p className="min-w-[7.75rem] text-center text-xs font-semibold tracking-tight" aria-live="polite">
+            {monthLabel}
+          </p>
+          <Button
+            variant="ghost"
+            size="icon"
+            className="size-6.5 text-muted-foreground hover:text-foreground"
+            onClick={() => shiftMonth(1)}
+            aria-label={`Show ${new Date(viewMonth.getFullYear(), viewMonth.getMonth() + 1, 1).toLocaleDateString("en-GB", { month: "long", year: "numeric" })}`}
+          >
+            <ChevronRight className="size-3.5" aria-hidden="true" />
+          </Button>
+          {!isCurrentMonth && (
+            <button
+              type="button"
+              onClick={() => onViewMonthChange(new Date(new Date(now).getFullYear(), new Date(now).getMonth(), 1))}
+              className="ml-1 rounded-full border border-border/70 px-2 py-0.5 text-[10px] font-semibold text-muted-foreground transition-colors hover:bg-muted/60 hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+            >
+              Today
+            </button>
+          )}
+        </div>
+        <p className="text-[11px] tabular-nums text-muted-foreground">
+          {monthCount > 0 ? (
+            <>
+              <span className="font-semibold text-foreground/80">{monthCount}</span> open in {monthShort}
+              {monthOverdue > 0 && (
+                <>
+                  {" · "}
+                  <span className="font-semibold text-red-600 dark:text-red-400">{monthOverdue}</span> overdue
+                </>
+              )}
+            </>
+          ) : (
+            "no deadlines this month"
+          )}
+        </p>
+      </div>
+      <div
+        role="group"
+        aria-label={`Deadline calendar for ${monthLabel}. Days with deadlines are clickable filters.`}
+        className="mt-2"
+      >
+        <div className="grid grid-cols-7 gap-1">
+          {CAL_DOW.map((d, i) => (
+            <p
+              key={d}
+              className={cn(
+                "pb-0.5 text-center text-[9px] font-semibold uppercase tracking-wider",
+                i === 0 || i === 6 ? "text-muted-foreground/50" : "text-muted-foreground/80"
+              )}
+            >
+              {d}
+            </p>
+          ))}
+          {cells.map((c) => {
+            const isToday = c.offset === 0;
+            const selected = selectedOffset === c.offset;
+            const clickable = c.count > 0;
+            const weekend = c.dow === 0 || c.dow === 6;
+            const later = c.count - c.overdue - c.soon;
+            const title =
+              c.count === 0
+                ? `${dayLabel(c.ms)} — nothing due`
+                : `${dayLabel(c.ms)} — ${c.count} due: ${c.titles.join(", ")}${c.count > c.titles.length ? `, +${c.count - c.titles.length} more` : ""}${clickable ? " — click to filter" : ""}`;
+            const body = (
+              <>
+                <span
+                  className={cn(
+                    "flex size-4.5 items-center justify-center rounded-full text-[11px] leading-none tabular-nums",
+                    isToday && "bg-primary font-bold text-primary-foreground",
+                    !isToday && selected && "font-bold text-primary"
+                  )}
+                >
+                  {new Date(c.ms).getDate()}
+                </span>
+                {c.count > 0 && (
+                  <span className="mt-0.5 flex min-h-1.5 items-center gap-0.5">
+                    {c.overdue > 0 && <span className="size-1.5 rounded-full bg-red-500" aria-hidden="true" />}
+                    {c.soon > 0 && <span className="size-1.5 rounded-full bg-amber-500" aria-hidden="true" />}
+                    {later > 0 && <span className="size-1.5 rounded-full bg-slate-400 dark:bg-slate-500" aria-hidden="true" />}
+                    {c.count > 1 && (
+                      <span className="text-[8.5px] font-bold leading-none tabular-nums text-muted-foreground">
+                        {c.count}
+                      </span>
+                    )}
+                  </span>
+                )}
+              </>
+            );
+            const shell = cn(
+              "relative flex min-w-0 flex-col items-center rounded-lg border pt-1 pb-0.5 transition-all",
+              weekend && !selected && "bg-black/[0.025] dark:bg-white/[0.03]",
+              !c.inMonth && "opacity-40",
+              selected
+                ? "z-10 border-primary/60 ring-2 ring-primary/80 bg-primary/[0.06]"
+                : "border-transparent"
+            );
+            if (!clickable) {
+              return (
+                <div key={c.ms} title={title} className={cn(shell, "cursor-default")}>
+                  {body}
+                </div>
+              );
+            }
+            return (
+              <button
+                key={c.ms}
+                type="button"
+                title={title}
+                aria-pressed={selected}
+                aria-label={`Filter the list to ${isToday ? "today" : dayLabel(c.ms)} — ${c.count} deadline${c.count === 1 ? "" : "s"} due`}
+                onClick={() => onPickDay(selected ? null : c.offset)}
+                className={cn(
+                  shell,
+                  "cursor-pointer outline-none hover:border-border/80 hover:bg-muted/50 focus-visible:ring-2 focus-visible:ring-ring"
+                )}
+              >
+                {body}
+              </button>
+            );
+          })}
+        </div>
+      </div>
+      {selectedOffset == null ? (
+        <p className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-0.5 text-[10px] text-muted-foreground/70">
+          <span>Click a day to see its deadlines — past months included.</span>
+          <span className="ml-auto flex items-center gap-3" aria-hidden="true">
+            <span className="flex items-center gap-1">
+              <span className="size-1.5 rounded-full bg-red-500" />
+              overdue
+            </span>
+            <span className="flex items-center gap-1">
+              <span className="size-1.5 rounded-full bg-amber-500" />
+              due ≤7d
+            </span>
+            <span className="flex items-center gap-1">
+              <span className="size-1.5 rounded-full bg-slate-400 dark:bg-slate-500" />
+              later
+            </span>
+            <span className="flex items-center gap-1">
+              <span className="flex size-3 items-center justify-center rounded-full bg-primary text-[7px] font-bold text-primary-foreground">
+                {new Date(now).getDate()}
+              </span>
+              today
+            </span>
+          </span>
+        </p>
+      ) : null}
+    </div>
+  );
+}
+
+type AlaDeadlineMode = "radar" | "calendar";
+
+/**
+ * Segmented switch between the two deadline overviews (35-day radar strip vs
+ * month calendar) plus month jump chips. Owns the visible month; when the user
+ * arrives from a radar drill (or any other day pick) the calendar snaps to the
+ * selected day's month so the ringed cell is always on screen.
+ */
+function AlaDeadlineViews({
+  assignments,
+  now,
+  selectedOffset,
+  onPickDay,
+}: {
+  assignments: Reminder[];
+  now: number;
+  selectedOffset: number | null;
+  onPickDay: (offset: number | null) => void;
+}) {
+  const [mode, setMode] = useState<AlaDeadlineMode>("radar");
+  const [viewMonth, setViewMonth] = useState<Date>(() => {
+    const d = new Date();
+    return new Date(d.getFullYear(), d.getMonth(), 1);
+  });
+
+  const todayMid = useMemo(() => {
+    const d = new Date(now);
+    d.setHours(0, 0, 0, 0);
+    return d.getTime();
+  }, [now]);
+
+  const switchMode = (m: AlaDeadlineMode) => {
+    setMode(m);
+    if (m === "calendar" && selectedOffset != null) {
+      const t = new Date(todayMid + selectedOffset * 86_400_000);
+      setViewMonth(new Date(t.getFullYear(), t.getMonth(), 1));
+    }
+  };
+
+  /* Months (ascending) that hold at least one ACTIVE deadline — one-click
+     navigation to the overdue past or the busy future. */
+  const monthChips = useMemo(() => {
+    const map = new Map<string, { first: Date; label: string; count: number }>();
+    for (const a of assignments) {
+      if (a.status !== "ACTIVE") continue;
+      const d = new Date(a.dueAt);
+      const key = `${d.getFullYear()}-${String(d.getMonth()).padStart(2, "0")}`;
+      const e = map.get(key);
+      if (e) e.count += 1;
+      else
+        map.set(key, {
+          first: new Date(d.getFullYear(), d.getMonth(), 1),
+          label: d.toLocaleDateString("en-GB", { month: "short", year: "2-digit" }),
+          count: 1,
+        });
+    }
+    return [...map.values()].sort((x, y) => x.first.getTime() - y.first.getTime());
+  }, [assignments]);
+
+  return (
+    <div className="space-y-2">
+      <div className="flex flex-wrap items-center gap-2">
+        <div
+          role="group"
+          aria-label="Deadline overview style"
+          className="flex items-center gap-0.5 rounded-full border border-border/60 bg-muted/40 p-0.5"
+        >
+          <button
+            type="button"
+            aria-pressed={mode === "radar"}
+            onClick={() => switchMode("radar")}
+            className={cn(
+              "flex h-6 items-center gap-1 rounded-full px-2.5 text-[11px] font-semibold transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+              mode === "radar" ? "bg-background text-foreground shadow-sm" : "text-muted-foreground hover:text-foreground"
+            )}
+          >
+            <BarChart3 className="size-3" aria-hidden="true" />
+            Radar
+          </button>
+          <button
+            type="button"
+            aria-pressed={mode === "calendar"}
+            onClick={() => switchMode("calendar")}
+            className={cn(
+              "flex h-6 items-center gap-1 rounded-full px-2.5 text-[11px] font-semibold transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+              mode === "calendar" ? "bg-background text-foreground shadow-sm" : "text-muted-foreground hover:text-foreground"
+            )}
+          >
+            <CalendarDays className="size-3" aria-hidden="true" />
+            Month
+          </button>
+        </div>
+        <span className="ml-auto text-[10px] text-muted-foreground/70">
+          {mode === "radar" ? "Today → +34d" : "Past months included"}
+        </span>
+      </div>
+      {mode === "calendar" && monthChips.length > 1 && (
+        <div className="flex flex-wrap items-center gap-1.5" role="group" aria-label="Jump to a month with deadlines">
+          {monthChips.map((chip) => {
+            const monthEnd = new Date(chip.first.getFullYear(), chip.first.getMonth() + 1, 1).getTime();
+            const past = monthEnd <= now;
+            const active = viewMonth.getTime() === chip.first.getTime();
+            return (
+              <button
+                key={chip.label}
+                type="button"
+                aria-pressed={active}
+                onClick={() => setViewMonth(chip.first)}
+                title={`${chip.count} open deadline${chip.count === 1 ? "" : "s"} in ${chip.first.toLocaleDateString("en-GB", { month: "long", year: "numeric" })}${past ? " — all overdue by now" : ""}`}
+                className={cn(
+                  "flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-xs font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+                  active
+                    ? "border-primary/60 bg-primary/10 text-primary shadow-sm"
+                    : "border-border/70 bg-background text-muted-foreground hover:bg-muted/60 hover:text-foreground"
+                )}
+              >
+                {chip.label}
+                <span
+                  className={cn(
+                    "rounded-full px-1.5 text-[10px] font-bold tabular-nums",
+                    active
+                      ? "bg-primary/15 text-primary"
+                      : past
+                        ? "bg-red-500/15 text-red-600 dark:text-red-400"
+                        : "bg-muted"
+                  )}
+                >
+                  {chip.count}
+                </span>
+              </button>
+            );
+          })}
+        </div>
+      )}
+      {mode === "radar" ? (
+        <AlaDeadlineRadar
+          assignments={assignments}
+          now={now}
+          selectedOffset={selectedOffset}
+          onPickDay={onPickDay}
+        />
+      ) : (
+        <AlaDeadlineCalendar
+          assignments={assignments}
+          now={now}
+          selectedOffset={selectedOffset}
+          onPickDay={onPickDay}
+          viewMonth={viewMonth}
+          onViewMonthChange={setViewMonth}
+        />
+      )}
+    </div>
+  );
+}
+
 function AlaSection() {
   const { data, isPending, isError, error } = useQuery({
     queryKey: qk.assignments,
@@ -1972,9 +2400,9 @@ function AlaSection() {
               <AlaOverdueDigest groups={groups} onViewOverdue={() => setStatus("overdue")} />
             )}
 
-            {/* Deadline radar — 35-day density strip; stays visible for the selected day */}
+            {/* Deadline overviews — radar ↔ month calendar toggle; stays visible for the selected day */}
             {!searching && data && (
-              <AlaDeadlineRadar
+              <AlaDeadlineViews
                 assignments={data.assignments}
                 now={now}
                 selectedOffset={dayOffset}
