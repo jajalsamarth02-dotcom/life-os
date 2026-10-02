@@ -83,3 +83,33 @@ Unresolved issues / risks & next-phase recommendations:
 1. Live scrape parser still generic (needs one real login to fine-tune against actual dashboard HTML) — demo mode covers UX meanwhile. PRIORITY if user provides credentials.
 2. Trend chart shows demo-era backfill once live mode activates; acceptable (labeled), but could filter by snapshot.source if desired.
 3. Ideas backlog: timetable support ("now" highlight), notification per-type preferences, PWA install + push reminders, weekly attendance email digest.
+
+---
+Task ID: R3 (webDevReview round 3)
+Agent: Z.ai Code (autonomous review & feature round)
+Task: QA + weekly timetable feature + PWA + fixes
+
+Work Log / Current status assessment:
+- QA: app healthy (server up, 0 console/page errors), scheduler syncing autonomously. No blocking bugs.
+
+Completed modifications:
+1. WEEKLY TIMETABLE (new feature, spec §2 "timetable changed if available" groundwork):
+   - Model TimetableSlot (dayOfWeek 0-6, startMin/endMin, subjectCode, source demo|personal). db:push applied.
+   - src/lib/timetable.ts: ensureDemoTimetable() seeds a realistic Mon–Sat schedule once (flag-gated, Mon–Fri 4-5 periods + short Saturday); classifySlot() for ongoing/upcoming/done; HHMM helpers.
+   - API: GET/POST /api/timetable (validated: day 0-6, HH:MM range, known subject), DELETE /api/timetable/:id. Verified: 26 demo slots seeded, personal slot created via API and via UI dialog.
+   - UI: TimetableCard on dashboard — "Today's schedule" with color-coded time chips, LIVE "starts in X min"/"ends in X min" badges (30s tick), ongoing-class hero strip, collapsible Full Week grid (6 columns, today highlighted), Manage dialog (add class form + per-day list with delete + demo badges). Empty state for free days, error state with auto-retry.
+2. Dashboard overall card: 7-day trend chip ("▲ 1.96 pts / 7d") computed from /api/history snapshots (green/red by sign).
+3. PWA: public/manifest.json + generated icon-192/512 + apple-touch-icon (sharp, emerald graduation-cap design); layout metadata (manifest, icons, appleWebApp, viewport themeColor #10b981, viewportFit cover).
+4. BUG FIXES:
+   - TimetableCard/ManageDialog: fetchTimetable already returns the slots array — `data?.slots` was always undefined → silent "No classes today". Fixed both occurrences; added explicit error state with retry messaging and faster refetch (60s).
+   - db.ts: EXPECTED_MODELS probe list extended (all 10 models) — note: after db:push a dev-server restart is STILL required (bundler caches generated client); documented.
+
+Verification results:
+- bun run lint: clean. agent-browser: 0 console errors across desktop + mobile (390px).
+- E2E: added "MA-305 Sat 16:00–16:50" via curl POST (source=personal persisted), added "CS-302 Mon 17:00–17:50" through the UI dialog (verified server-side). Full-week grid + today-highlight + live countdowns render correctly.
+- Note: automated `select` on the dialog raced with its render in agent-browser (test-harness quirk, not an app bug) — values persisted correctly when set after render.
+
+Unresolved issues / risks & next-phase recommendations:
+1. Live ERP timetable scraping: once dashboard HTML is known, upsert TimetableSlot(source="live") inside the live connector; UI already supports the source label.
+2. Demo timetable was seeded once; new subjects added later by the simulator are NOT auto-added to the timetable (acceptable; Manage dialog covers it).
+3. Backlog: notification per-type preferences, weekly digest, timetable "next class" chip in the header, install-prompt UI for PWA.

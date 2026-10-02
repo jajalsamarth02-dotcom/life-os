@@ -153,6 +153,19 @@ export interface HistoryResponse {
   subjectsMeta: { code: string; name: string }[];
 }
 
+export interface TimetableSlotRow {
+  id: string;
+  dayOfWeek: number;
+  startMin: number;
+  endMin: number;
+  subjectCode: string;
+  source: string;
+}
+
+export interface TimetableResponse {
+  slots: TimetableSlotRow[];
+}
+
 export interface AppSettings {
   targetPercentage: number;
   syncIntervalMinutes: number;

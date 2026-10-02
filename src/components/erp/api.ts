@@ -14,6 +14,7 @@ import type {
   SyncEventsResponse,
   SyncLogsResponse,
   SyncResponse,
+  TimetableResponse,
 } from "./types";
 
 export class ApiError extends Error {
@@ -66,6 +67,7 @@ export const qk = {
   dashboard: ["dashboard"] as const,
   attendance: ["attendance"] as const,
   history: ["history"] as const,
+  timetable: ["timetable"] as const,
   reminders: (filter: RemindersFilter, includeDone: boolean) =>
     ["reminders", filter, includeDone] as const,
   settings: ["settings"] as const,
@@ -78,6 +80,10 @@ export const qk = {
 export const fetchDashboard = () => api<DashboardResponse>("/api/dashboard");
 export const fetchAttendance = () => api<AttendanceResponse>("/api/attendance");
 export const fetchHistory = () => api<HistoryResponse>("/api/history");
+export const fetchTimetable = () => api<TimetableResponse>("/api/timetable").then((r) => r.slots);
+export const createSlot = (payload: { dayOfWeek: number; start: string; end: string; subjectCode: string }) =>
+  api<{ slot: unknown }>("/api/timetable", { method: "POST", body: JSON.stringify(payload) });
+export const deleteSlot = (id: string) => api<{ ok: boolean }>(`/api/timetable/${id}`, { method: "DELETE" });
 export const fetchReminders = (filter: RemindersFilter, includeDone: boolean) =>
   api<{ reminders: Reminder[] }>(
     `/api/reminders?filter=${encodeURIComponent(filter)}&includeDone=${includeDone}`

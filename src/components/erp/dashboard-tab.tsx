@@ -1,7 +1,7 @@
 "use client";
 
 import { useQuery } from "@tanstack/react-query";
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { isToday } from "date-fns";
 import {
   AlertTriangle,
@@ -24,7 +24,8 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Separator } from "@/components/ui/separator";
 import { cn } from "@/lib/utils";
-import { fetchDashboard, qk } from "./api";
+import { fetchDashboard, fetchHistory, qk } from "./api";
+import { TimetableCard } from "./timetable-card";
 import {
   ago,
   dueGroup,
@@ -412,6 +413,21 @@ export function DashboardTab({
     queryFn: fetchDashboard,
     refetchInterval: 20_000,
   });
+  const history = useQuery({
+    queryKey: qk.history,
+    queryFn: fetchHistory,
+    refetchInterval: 60_000,
+  });
+
+  const weekDelta = useMemo(() => {
+    const pts = history.data?.overall ?? [];
+    if (pts.length < 2) return null;
+    const cutoff = Date.now() - 7 * 24 * 3600 * 1000;
+    const first = pts.find((p) => new Date(p.t).getTime() >= cutoff) ?? pts[0];
+    const last = pts[pts.length - 1];
+    const d = last.percentage - first.percentage;
+    return Math.abs(d) < 0.005 ? null : d;
+  }, [history.data]);
 
   if (isPending) {
     return (
@@ -470,6 +486,19 @@ export function DashboardTab({
               <div className="flex flex-wrap items-center justify-center gap-2 sm:justify-start">
                 <h2 className="text-lg font-semibold tracking-tight">Overall attendance</h2>
                 <StatusChip status={overall.status} target={target} />
+                {weekDelta !== null && (
+                  <span
+                    className={cn(
+                      "rounded-full px-2 py-0.5 text-[11px] font-semibold tabular-nums",
+                      weekDelta >= 0
+                        ? "bg-emerald-500/10 text-emerald-600 dark:text-emerald-400"
+                        : "bg-red-500/10 text-red-600 dark:text-red-400"
+                    )}
+                    title="Change over the last 7 days"
+                  >
+                    {weekDelta >= 0 ? "▲" : "▼"} {Math.abs(weekDelta).toFixed(2)} pts / 7d
+                  </span>
+                )}
               </div>
               <p className="text-sm text-muted-foreground tabular-nums">
                 <span className="font-semibold text-foreground">{overall.present}</span> present of{" "}
@@ -552,6 +581,9 @@ export function DashboardTab({
           )}
         </CardContent>
       </Card>
+
+      {/* Row 2.5 — today's schedule / weekly timetable */}
+      {subjects.length > 0 && <TimetableCard subjects={subjects} />}
 
       {/* Row 3 — reminders preview + ERP status */}
       <div className="grid gap-4 lg:grid-cols-2">

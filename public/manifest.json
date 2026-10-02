@@ -1,0 +1,29 @@
+{
+  "name": "ERP Sync — Automatic ERP-Sync Student System",
+  "short_name": "ERP Sync",
+  "description": "Personal attendance tracker for Gyanmanjari Innovative University. Automatically synchronizes attendance and academic reminders from the college ERP (read-only).",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#0d1512",
+  "theme_color": "#10b981",
+  "icons": [
+    {
+      "src": "/icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "/icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "/icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "maskable"
+    }
+  ]
+}

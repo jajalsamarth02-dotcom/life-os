@@ -114,3 +114,16 @@ model AttendanceSnapshot {
   @@index([subjectCode, capturedAt])
   @@index([capturedAt])
 }
+
+// Weekly class timetable. Seeded once by the demo ERP (source="demo");
+// students can add/remove their own slots (source="personal").
+model TimetableSlot {
+  id          String @id @default(cuid())
+  dayOfWeek   Int // 0 = Sunday ... 6 = Saturday
+  startMin    Int // minutes from midnight, e.g. 630 for 10:30
+  endMin      Int
+  subjectCode String
+  source      String @default("personal") // demo | personal
+
+  @@index([dayOfWeek, startMin])
+}
