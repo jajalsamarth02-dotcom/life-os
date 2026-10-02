@@ -701,7 +701,7 @@ function SubjectRow({
                   ? `Skip budget: you could miss ${s.canSkip} more ${
                       s.canSkip === 1 ? "class" : "classes"
                     } and stay at/above ${s.targetPct}% (${s.present}/${s.total} now)`
-                  : `Exactly on target — missing even 1 class drops you below ${s.targetPct}%`
+                  : `No skip buffer — missing even 1 class would drop you below ${s.targetPct}%`
               }
               className="hidden sm:inline-flex"
             />
@@ -1314,18 +1314,34 @@ export function DashboardTab({
                 : "No subjects synchronized yet"}
             </p>
           ) : (
-            <div className="max-h-96 space-y-2 overflow-y-auto pr-1">
-              {sorted.map((s) => (
-                <SubjectRow
-                  key={s.id}
-                  s={s}
-                  onOpen={() => setSelectedCode(s.code)}
-                  shimmer={data.erp.sync.status === "syncing"}
-                  spark={history.data?.subjects[s.code]}
-                  alaStat={alaStats.get(s.name.trim().toLowerCase())}
-                />
-              ))}
-            </div>
+            <>
+              <div className="max-h-96 space-y-2 overflow-y-auto pr-1">
+                {sorted.map((s) => (
+                  <SubjectRow
+                    key={s.id}
+                    s={s}
+                    onOpen={() => setSelectedCode(s.code)}
+                    shimmer={data.erp.sync.status === "syncing"}
+                    spark={history.data?.subjects[s.code]}
+                    alaStat={alaStats.get(s.name.trim().toLowerCase())}
+                  />
+                ))}
+              </div>
+              {/* Pip legend — the skip-budget dots on each row, decoded once here */}
+              <div
+                className="mt-2.5 flex flex-wrap items-center gap-x-4 gap-y-1 px-1 text-[10px] text-muted-foreground/85"
+                aria-hidden="true"
+              >
+                <span className="inline-flex items-center gap-1.5">
+                  <span className="size-1.5 rounded-full bg-emerald-500" />
+                  dot = one class you could still miss
+                </span>
+                <span className="inline-flex items-center gap-1.5">
+                  <span className="size-1.5 rounded-full border border-amber-500/70 bg-amber-500/15" />
+                  hollow = none left
+                </span>
+              </div>
+            </>
           )}
         </CardContent>
       </Card>

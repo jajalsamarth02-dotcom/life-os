@@ -328,7 +328,7 @@ export function CustomTargetChip({
  * still miss while staying at/above the target (classesCanSkip). Counts above
  * `max` collapse to `max` dots plus an exact "×N" suffix, so a fat budget
  * (e.g. 23) never blows up a row layout. `count === 0` renders a single hollow
- * amber pip: the subject is exactly on target, so ANY miss drops it below.
+ * amber pip: the subject has zero slack, so ANY miss drops it below target.
  *
  * Callers decide visibility by status — only render for `safe` subjects whose
  * status is known (non-safe rows already carry a "needs N classes" hint, and

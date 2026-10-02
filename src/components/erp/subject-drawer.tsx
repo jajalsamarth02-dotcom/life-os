@@ -46,7 +46,7 @@ import { cn } from "@/lib/utils";
 import { classesCanSkip, classesToReachTarget } from "@/lib/attendance";
 import { ApiError, createSlot, fetchAssignments, fetchDashboard, fetchHistory, fetchTimetable, putSubjectTarget, qk, type SlotConflict } from "./api";
 import { AnimatedNumber } from "./trend-chart";
-import { CustomTargetChip, erpAssignmentUrl, fmtDT, MiniBar, statusColors, StatusChip, useNow, ago } from "./shared";
+import { CustomTargetChip, erpAssignmentUrl, fmtDT, MiniBar, SkipPips, statusColors, StatusChip, useNow, ago } from "./shared";
 import type { AssignmentRow, AttendanceStatus, HistoryResponse, SubjectView, TimetableSlotRow } from "./types";
 
 const DAY_SHORT = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
@@ -910,6 +910,25 @@ export function SubjectDrawer({
             </div>
           </div>
           <MiniBar percentage={subject.percentage} status={subject.status} target={subject.targetPct} className="relative mt-3.5 h-2.5" />
+          {subject.status === "safe" && (
+            <div className="mt-2 flex items-center justify-end gap-2">
+              <SkipPips
+                count={subject.canSkip}
+                title={
+                  subject.canSkip > 0
+                    ? `Skip budget: you could miss ${subject.canSkip} more ${
+                        subject.canSkip === 1 ? "class" : "classes"
+                      } and stay at/above ${subject.targetPct}% (${subject.present}/${subject.total} now)`
+                    : `No skip buffer — missing even 1 class would drop you below ${subject.targetPct}%`
+                }
+              />
+              <span className="text-[11px] text-muted-foreground">
+                {subject.canSkip > 0
+                  ? `can miss ${subject.canSkip} more ${subject.canSkip === 1 ? "class" : "classes"}`
+                  : "no skip buffer"}
+              </span>
+            </div>
+          )}
         </div>
 
         <div className="space-y-4 p-5">

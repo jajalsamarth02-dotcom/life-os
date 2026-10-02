@@ -288,9 +288,9 @@ function SubjectCard({
                 <Badge variant="outline" className="gap-1.5 border-emerald-500/30 text-emerald-700 dark:text-emerald-400">
                   <SkipPips
                     count={0}
-                    title={`Exactly on target — missing even 1 class drops you below ${s.targetPct}%`}
+                    title={`No skip buffer — missing even 1 class would drop you below ${s.targetPct}%`}
                   />
-                  Exactly on target
+                  No skip buffer
                 </Badge>
               )
             ) : s.status === "none" ? (

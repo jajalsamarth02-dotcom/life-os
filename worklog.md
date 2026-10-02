@@ -1727,3 +1727,32 @@ Unresolved issues / risks & next-phase priorities:
 4. User decisions still pending: 2nd free notification channel (Telegram ⭐ / ntfy / Discord / email) and optional fixed daily WhatsApp digest time (digestTime unset — never send test/digest to the real phone during QA).
 5. Feature seeds not yet built: local notes/priority overlay on ALA rows (needs new table + sync-preserving upserts — biggest remaining seed); weekly bunk-budget (timetable slots still empty); per-semester scoping (schema); backup restore (needs user consent for a write endpoint); L/H/E columns folding (needs user consent); SMTP digest (needs credentials).
 6. Keeper cron 430680 must stay alive; worklog protocol: append-only, three-section handover; tsc at most ONCE per round and only while no next-server competes for memory.
+
+---
+Task ID: 38
+Agent: Z.ai Code (main orchestrator)
+Task: Round task 03:15+08 — cold-load QA of Round 37 features (was infra-blocked last round), QA-driven wording fix, skip-budget pips extended to subject drawer + dashboard legend, full persistence verification. Crash loop STILL active but with longer surviving windows (15–60s → up to ~3 min), enabling a full QA pass via warm-cache + burst strategy.
+
+Current project status / assessment:
+- Crash loop round 3: next-server reaped ~6 more times this round, BUT windows lengthened (one instance survived 60s of probes; later ones ~2–3 min) — consistent with "host pressure easing". Root+API compiles now cached in .next, so fresh instances serve everything fast once alive.
+- QA STRATEGY THAT WORKED (for future rounds): (1) relaunch via keeper one-liner; (2) immediately `curl /api/dashboard` etc. to trigger route compiles while .next is cold (retry loop, ~25s max-time each) — compile artifacts persist across reaps; (3) once APIs return 200, open the browser and run the ENTIRE QA as ONE chained bash burst (open-with-retries → press 1–4 for tabs → evals → screenshots); (4) verify persistence WRITE via localStorage reads, READ via reload+aria checks. Do NOT probe idly — spend every window on evidence.
+- App state at handover: LIVE mode, sync fresh ("11–12 min ago" during QA), overall 66.67% (2/3, target 75%, At risk), 8 subjects (2 at target, 1 below, 5 no classes yet), 3 active reminders, 41 open ALAs, next deadline "Submit project report" in 23 hrs. Server DOWN at handover (reaped right after QA); keeper cron 430680 restores.
+
+Completed modifications / verified:
+1. QA PASS — Round 37 features all verified LIVE (browser + console):
+   - SkipPips render on dashboard rows: AI (100%, 1/1) and COMPUTER NETWORKS (100%, 1/1) show the hollow amber zero-buffer pip with correct aria-labels (role=img). Matches the data (canSkip=0 for 1/1 vs 75% target: 1/(1+1)=50% < 75%).
+   - Attendance-tab badges: "○ No skip buffer" badge renders with the pip INSIDE the badge (screenshot /tmp/qa-r37-badge.png).
+   - Persistence VERIFIED BOTH WAYS: clicking "Month" → localStorage erp:alaDeadlineMode="calendar"; clicking "Personal" → erp:remindersPrefs={"filter":"personal","view":"timeline"}; after full reload → active-view=Month (aria-pressed) and filter-selected=true (aria-selected). Sort persistence not exercised via the Radix dropdown (automation-hostile) but is the identical pattern, tsc-verified.
+   - Dark mode: pips/badges/what-if planner render cleanly (screenshot /tmp/qa-r37-dark.png). 390px: no horizontal overflow (scrollWidth check) (screenshot /tmp/qa-r37-narrow.png). Console: 0 errors across the session (only HMR/devtools info).
+2. QA-FOUND BUG + FIX — "Exactly on target" wording was wrong for ABOVE-target subjects with zero slack (e.g. 1/1 = 100% vs 75% target: not "exactly on target", just no buffer because totals are tiny). Renamed to "No skip buffer" everywhere: dashboard tooltip, attendance badge text + tooltip, shared.tsx doc. Tooltip now "No skip buffer — missing even 1 class would drop you below 75%". Verified live in both tabs post-fix.
+3. NEW — skip-budget pips + caption in the SUBJECT DRAWER header (subject-drawer.tsx): right-aligned row under the header MiniBar — SkipPips + 11px muted caption ("can miss N more classes" / "no skip buffer"), safe subjects only, same tooltip sentences as the rows. Verified live: drawer for AI shows pip + "no skip buffer" caption (programmatically checked; screenshot /tmp/qa-r37-drawer.png shows the drawer with deadlines + planner).
+4. NEW — pip LEGEND under the dashboard subject list (dashboard-tab.tsx): 10px muted row "● dot = one class you could still miss · ○ hollow = none left", aria-hidden (the dots carry their own labels), rendered only when subjects exist (wrapped the list+legend in a fragment). Verified live ("legend-visible").
+5. tsc --noEmit run ONCE this round: 0 errors under src/ (only the pre-existing unrelated skills/stock-analysis-skill error).
+
+Unresolved issues / risks & next-phase priorities:
+1. Crash loop continues (round 3). The burst-QA strategy (see assessment) is the way to work through it. If windows keep lengthening, normal QA cadence resumes soon. Watch for the first instance that survives a full 5-minute round — then heavy interactive QA (drawer deep-dive, print preview) becomes viable again.
+2. MilestoneCelebration target-crossing still pending live data (needs 1 attended class → 3/4 = 75%). Next ERP sync may trigger it — watch for the overlay next round.
+3. Sort-persistence UX note: the Radix Select trigger is hard for agent-browser to click (data-slot/aria-label selectors did not match; text lookup failed too). Consider adding data-testid or aria-label to the trigger in a future styling pass — purely for testability, no user impact.
+4. User decisions still pending: 2nd free notification channel (Telegram ⭐ / ntfy / Discord / email) and optional fixed daily WhatsApp digest time (digestTime unset — never send test/digest to the real phone during QA).
+5. Feature seeds not yet built: local notes/priority overlay on ALA rows (needs new table + sync-preserving upserts — biggest remaining); weekly bunk-budget (timetable slots still empty); per-semester scoping (schema); backup restore (needs user consent for a write endpoint); L/H/E columns folding (needs user consent); SMTP digest (needs credentials).
+6. Keeper cron 430680 must stay alive; worklog protocol: append-only, three-section handover; tsc at most ONCE per round.
