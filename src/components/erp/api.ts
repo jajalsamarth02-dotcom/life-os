@@ -134,6 +134,31 @@ export const saveAlaNote = (payload: {
     method: "POST",
     body: JSON.stringify(payload),
   });
+
+/** Aggregate result of a batch restore (Settings → Data & backups). */
+export interface AlaNotesRestoreResult {
+  ok: boolean;
+  created: number;
+  updated: number;
+  /** Entries whose backup state was empty — the overlay row was removed. */
+  cleared: number;
+  /** Valid rows with no matching local ERP row (older semester, deleted ALA). */
+  skipped: number;
+  skippedIds: string[];
+  /** Rows rejected outright (bad externalId shape). */
+  invalid: number;
+  total: number;
+}
+
+/**
+ * Restore a batch of noted ALAs from a parsed backup file. Merge-only:
+ * matching rows are overwritten, nothing is wiped implicitly.
+ */
+export const restoreAlaNotes = (notes: { externalId: string; note?: string; priority?: number }[]) =>
+  api<AlaNotesRestoreResult>("/api/ala-notes/restore", {
+    method: "POST",
+    body: JSON.stringify({ notes }),
+  });
 export const fetchSettings = () => api<AppSettings>("/api/settings");
 export const fetchSemesters = () => api<SemestersResponse>("/api/semesters");
 export const fetchSyncLogs = () => api<SyncLogsResponse>("/api/sync");

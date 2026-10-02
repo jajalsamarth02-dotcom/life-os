@@ -15,7 +15,7 @@ export const dynamic = "force-dynamic";
  */
 export async function GET() {
   try {
-    const [subjects, reminders, slots, syncLogs, changeEvents, notifications, settings, connections] =
+    const [subjects, reminders, slots, syncLogs, changeEvents, notifications, settings, connections, alaNotes] =
       await Promise.all([
         db.subject.findMany({ orderBy: { code: "asc" } }),
         db.reminder.findMany({ orderBy: { dueAt: "asc" } }),
@@ -25,6 +25,7 @@ export async function GET() {
         db.notification.findMany({ orderBy: { createdAt: "desc" }, take: 300 }),
         db.setting.findMany({ orderBy: { key: "asc" } }),
         db.erpConnection.findMany(),
+        db.alaNote.findMany({ orderBy: { updatedAt: "desc" } }),
       ]);
 
     const conn = connections[0];
@@ -87,6 +88,15 @@ export async function GET() {
         severity: n.severity,
         read: n.read,
         createdAt: n.createdAt,
+      })),
+      // The user's own authored data — private ALA notes & triage priorities.
+      // Restorable via Settings → Data & backups → "Restore noted ALAs".
+      alaNotes: alaNotes.map((a) => ({
+        externalId: a.externalId,
+        note: a.note,
+        priority: a.priority,
+        createdAt: a.createdAt,
+        updatedAt: a.updatedAt,
       })),
       settings: settings
         .filter((s) => !s.key.startsWith("demo.") && !s.key.endsWith(".enc"))

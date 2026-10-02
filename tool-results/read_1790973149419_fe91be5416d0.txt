@@ -1,0 +1,1732 @@
+     1→"use client";
+     2→
+     3→import * as React from "react";
+     4→import { useState } from "react";
+     5→import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+     6→import {
+     7→  AlertCircle,
+     8→  Bell,
+     9→  BellOff,
+    10→  BellRing,
+    11→  CalendarClock,
+    12→  CheckCircle2,
+    13→  Database,
+    14→  Download,
+    15→  FileSpreadsheet,
+    16→  FlaskConical,
+    17→  GraduationCap,
+    18→  Info,
+    19→  KeyRound,
+    20→  Loader2,
+    21→  Lock,
+    22→  LogOut,
+    23→  MessageCircle,
+    24→  MonitorSmartphone,
+    25→  RefreshCw,
+    26→  RotateCcw,
+    27→  Save,
+    28→  ShieldCheck,
+    29→  Sparkles,
+    30→  Target,
+    31→  Timer,
+    32→  TriangleAlert,
+    33→  X,
+    34→} from "lucide-react";
+    35→import { toast } from "sonner";
+    36→import { isIOS, promptInstall, useCanInstall, useIsInstalled } from "./install-prompt";
+    37→import { compactErrorText } from "@/lib/compact-error";
+    38→import {
+    39→  AlertDialog,
+    40→  AlertDialogAction,
+    41→  AlertDialogCancel,
+    42→  AlertDialogContent,
+    43→  AlertDialogDescription,
+    44→  AlertDialogFooter,
+    45→  AlertDialogHeader,
+    46→  AlertDialogTitle,
+    47→  AlertDialogTrigger,
+    48→} from "@/components/ui/alert-dialog";
+    49→import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
+    50→import { Badge } from "@/components/ui/badge";
+    51→import { Button } from "@/components/ui/button";
+    52→import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+    53→import { Input } from "@/components/ui/input";
+    54→import { Label } from "@/components/ui/label";
+    55→import {
+    56→  Select,
+    57→  SelectContent,
+    58→  SelectItem,
+    59→  SelectTrigger,
+    60→  SelectValue,
+    61→} from "@/components/ui/select";
+    62→import { Separator } from "@/components/ui/separator";
+    63→import { Skeleton } from "@/components/ui/skeleton";
+    64→import { Slider } from "@/components/ui/slider";
+    65→import { Switch } from "@/components/ui/switch";
+    66→import {
+    67→  Table,
+    68→  TableBody,
+    69→  TableCell,
+    70→  TableHead,
+    71→  TableHeader,
+    72→  TableRow,
+    73→} from "@/components/ui/table";
+    74→import {
+    75→  Tooltip,
+    76→  TooltipContent,
+    77→  TooltipTrigger,
+    78→} from "@/components/ui/tooltip";
+    79→import { cn } from "@/lib/utils";
+    80→import {
+    81→  isEnabled as browserRemindersEnabled,
+    82→  permissionState as browserRemindersPermission,
+    83→  requestPermission as requestNotificationPermission,
+    84→  sendTestNotification,
+    85→  setEnabled as setBrowserRemindersEnabled,
+    86→  type PermissionState,
+    87→} from "@/lib/browser-reminders";
+    88→import {
+    89→  connectErp,
+    90→  disconnectErp,
+    91→  downloadBackup,
+    92→  fetchAttendance,
+    93→  fetchErpStatus,
+    94→  fetchSemesters,
+    95→  fetchSettings,
+    96→  fetchSyncLogs,
+    97→  fetchWaStatus,
+    98→  postDemoEvolve,
+    99→  postDemoReset,
+   100→  putSelectedSemester,
+   101→  putSettings,
+   102→  putSubjectTarget,
+   103→  postWaAction,
+   104→  ApiError,
+   105→  qk,
+   106→} from "./api";
+   107→import { CustomTargetChip, fmtDT, syncLogIcon } from "./shared";
+   108→import { TextSizeCard } from "./text-size-card";
+   109→import { downloadCsv } from "./trend-chart";
+   110→import type { AppSettings, ErpConnectFailure, SubjectView } from "./types";
+   111→
+   112→/* ------------------------------------------------------------------ */
+   113→/* ERP connection card                                                 */
+   114→/* ------------------------------------------------------------------ */
+   115→
+   116→function ErpConnectionCard() {
+   117→  const qc = useQueryClient();
+   118→  const { data: erp, isPending } = useQuery({
+   119→    queryKey: qk.erpStatus,
+   120→    queryFn: fetchErpStatus,
+   121→    refetchInterval: 20_000,
+   122→  });
+   123→
+   124→  const [username, setUsername] = useState("");
+   125→  const [password, setPassword] = useState("");
+   126→  const [connectError, setConnectError] = useState<ErpConnectFailure | null>(null);
+   127→  const [confirmDisconnect, setConfirmDisconnect] = useState(false);
+   128→
+   129→  const invalidateAll = () => qc.invalidateQueries();
+   130→
+   131→  const connect = useMutation({
+   132→    mutationFn: () => connectErp(username.trim(), password),
+   133→    onSuccess: (res) => {
+   134→      setConnectError(null);
+   135→      setPassword("");
+   136→      invalidateAll();
+   137→      toast.success(`Connected as ${res.username}`, {
+   138→        description: `Initial sync fetched ${res.snapshotSubjects} subject(s).`,
+   139→      });
+   140→    },
+   141→    onError: (e) => {
+   142→      const body: ErpConnectFailure =
+   143→        e instanceof ApiError
+   144→          ? { ok: false, errorCode: e.errorCode ?? "UNKNOWN", error: e.message, details: e.details }
+   145→          : { ok: false, errorCode: "NETWORK", error: e.message };
+   146→      setConnectError(body);
+   147→    },
+   148→  });
+   149→
+   150→  const disconnect = useMutation({
+   151→    mutationFn: disconnectErp,
+   152→    onSuccess: () => {
+   153→      invalidateAll();
+   154→      toast.success("ERP account disconnected");
+   155→    },
+   156→    onError: (e) => toast.error("Disconnect failed", { description: e.message }),
+   157→  });
+   158→
+   159→  if (isPending || !erp) {
+   160→    return (
+   161→      <Card className="rounded-xl border-border/60">
+   162→        <CardHeader className="pb-3">
+   163→          <Skeleton className="h-5 w-40" />
+   164→          <Skeleton className="h-3 w-64" />
+   165→        </CardHeader>
+   166→        <CardContent className="space-y-3">
+   167→          <Skeleton className="h-10 w-full" />
+   168→          <Skeleton className="h-10 w-full" />
+   169→          <Skeleton className="h-10 w-28" />
+   170→        </CardContent>
+   171→      </Card>
+   172→    );
+   173→  }
+   174→
+   175→  return (
+   176→    <Card className="rounded-xl border-border/60">
+   177→      <CardHeader className="pb-3">
+   178→        <CardTitle className="flex items-center gap-2 text-base tracking-tight">
+   179→          <KeyRound className="size-4 text-primary" aria-hidden="true" />
+   180→          ERP connection
+   181→        </CardTitle>
+   182→        <CardDescription>
+   183→          Connect with your own student credentials from erp.gmiu.edu.in.
+   184→        </CardDescription>
+   185→      </CardHeader>
+   186→      <CardContent className="space-y-4">
+   187→        {erp.connected ? (
+   188→          <div className="space-y-3">
+   189→            <div className="flex flex-wrap items-center gap-3 rounded-lg border border-emerald-500/30 bg-emerald-500/10 p-4">
+   190→              <CheckCircle2 className="size-6 shrink-0 text-emerald-600 dark:text-emerald-400" aria-hidden="true" />
+   191→              <div className="min-w-0 flex-1">
+   192→                <p className="text-sm font-semibold text-emerald-700 dark:text-emerald-400">
+   193→                  Connected as {erp.username}
+   194→                </p>
+   195→                <p className="text-xs text-muted-foreground">
+   196→                  Status: {erp.connectionStatus ?? "ok"} · Last verified: {fmtDT(erp.lastVerifiedAt)}
+   197→                </p>
+   198→              </div>
+   199→              {erp.liveAvailable !== "unknown" && (
+   200→                <Badge variant="outline" className="shrink-0">
+   201→                  live sync: {erp.liveAvailable}
+   202→                </Badge>
+   203→              )}
+   204→            </div>
+   205→
+   206→            <AlertDialog open={confirmDisconnect} onOpenChange={setConfirmDisconnect}>
+   207→              <AlertDialogTrigger asChild>
+   208→                <Button variant="outline" className="gap-1.5 text-red-600 hover:bg-red-500/10 hover:text-red-700 dark:text-red-400" aria-label="Disconnect ERP account">
+   209→                  <LogOut className="size-4" aria-hidden="true" />
+   210→                  Disconnect
+   211→                </Button>
+   212→              </AlertDialogTrigger>
+   213→              <AlertDialogContent>
+   214→                <AlertDialogHeader>
+   215→                  <AlertDialogTitle>Disconnect ERP account?</AlertDialogTitle>
+   216→                  <AlertDialogDescription>
+   217→                    Your stored credentials will be deleted from the server. Synchronized attendance data stays
+   218→                    available until the next sync, but nothing new will be fetched until you reconnect.
+   219→                  </AlertDialogDescription>
+   220→                </AlertDialogHeader>
+   221→                <AlertDialogFooter>
+   222→                  <AlertDialogCancel>Cancel</AlertDialogCancel>
+   223→                  <AlertDialogAction
+   224→                    className="bg-red-600 text-white hover:bg-red-700"
+   225→                    onClick={() => disconnect.mutate()}
+   226→                  >
+   227→                    Disconnect
+   228→                  </AlertDialogAction>
+   229→                </AlertDialogFooter>
+   230→              </AlertDialogContent>
+   231→            </AlertDialog>
+   232→          </div>
+   233→        ) : (
+   234→          <form
+   235→            className="space-y-3"
+   236→            onSubmit={(e) => {
+   237→              e.preventDefault();
+   238→              if (username.trim() && password) connect.mutate();
+   239→            }}
+   240→          >
+   241→            <div className="space-y-1.5">
+   242→              <Label htmlFor="erp-email">ERP email / username</Label>
+   243→              <Input
+   244→                id="erp-email"
+   245→                type="text"
+   246→                inputMode="email"
+   247→                autoComplete="username"
+   248→                value={username}
+   249→                onChange={(e) => setUsername(e.target.value)}
+   250→                placeholder="student@gyanmanjari.com"
+   251→                required
+   252→              />
+   253→            </div>
+   254→            <div className="space-y-1.5">
+   255→              <Label htmlFor="erp-password">ERP password</Label>
+   256→              <Input
+   257→                id="erp-password"
+   258→                type="password"
+   259→                autoComplete="current-password"
+   260→                value={password}
+   261→                onChange={(e) => setPassword(e.target.value)}
+   262→                placeholder="••••••••"
+   263→                required
+   264→              />
+   265→            </div>
+   266→
+   267→            {connectError && (
+   268→              <Alert variant="destructive" className="border-red-500/40">
+   269→                <AlertCircle className="size-4" />
+   270→                <AlertTitle>
+   271→                  {connectError.error}
+   272→                  {connectError.errorCode && (
+   273→                    <Badge variant="outline" className="ml-2 border-red-500/40 font-mono text-[10px] text-red-600 dark:text-red-400">
+   274→                      {connectError.errorCode}
+   275→                    </Badge>
+   276→                  )}
+   277→                </AlertTitle>
+   278→                {connectError.details && (
+   279→                  <AlertDescription className="mt-1 break-all font-mono text-[11px] leading-relaxed">
+   280→                    {connectError.details}
+   281→                  </AlertDescription>
+   282→                )}
+   283→              </Alert>
+   284→            )}
+   285→
+   286→            <Button type="submit" disabled={connect.isPending || !username.trim() || !password} className="gap-1.5">
+   287→              {connect.isPending ? (
+   288→                <>
+   289→                  <Loader2 className="size-4 animate-spin" aria-hidden="true" />
+   290→                  Connecting…
+   291→                </>
+   292→              ) : (
+   293→                <>
+   294→                  <Lock className="size-4" aria-hidden="true" />
+   295→                  Connect
+   296→                </>
+   297→              )}
+   298→            </Button>
+   299→          </form>
+   300→        )}
+   301→
+   302→        <Separator />
+   303→
+   304→        <div className="flex gap-3 rounded-lg bg-muted/60 p-3.5">
+   305→          <ShieldCheck className="size-5 shrink-0 text-emerald-600 dark:text-emerald-400" aria-hidden="true" />
+   306→          <p className="text-xs leading-relaxed text-muted-foreground">
+   307→            The ERP does not offer an official API. The app uses an authorized server-side session with your own
+   308→            credentials. Credentials are AES-256-GCM encrypted, never exposed to the browser. If the ERP blocks
+   309→            automation (CAPTCHA etc.), synchronization will be reported as unavailable — it is never bypassed.
+   310→          </p>
+   311→        </div>
+   312→      </CardContent>
+   313→    </Card>
+   314→  );
+   315→}
+   316→
+   317→/* ------------------------------------------------------------------ */
+   318→/* Sync settings card                                                  */
+   319→/* ------------------------------------------------------------------ */
+   320→
+   321→function SyncSettingsForm({ initial }: { initial: AppSettings }) {
+   322→  const qc = useQueryClient();
+   323→  const [target, setTarget] = useState<number>(initial.targetPercentage);
+   324→  const [interval, setIntervalMin] = useState<number>(initial.syncIntervalMinutes);
+   325→  const [autoSync, setAutoSync] = useState<boolean>(initial.autoSyncEnabled);
+   326→
+   327→  const save = useMutation({
+   328→    mutationFn: () =>
+   329→      putSettings({ targetPercentage: target, syncIntervalMinutes: interval, autoSyncEnabled: autoSync }),
+   330→    onSuccess: () => {
+   331→      qc.invalidateQueries();
+   332→      toast.success("Settings saved", {
+   333→        description: `Target ${target}% · sync every ${interval} min${autoSync ? " · auto-sync on" : " · auto-sync off"}`,
+   334→      });
+   335→    },
+   336→    onError: (e) => toast.error("Could not save settings", { description: e.message }),
+   337→  });
+   338→
+   339→  return (
+   340→    <CardContent className="space-y-5">
+   341→        <div className="space-y-2">
+   342→          <div className="flex items-center justify-between">
+   343→            <Label htmlFor="target-slider">Attendance target</Label>
+   344→            <span className="rounded-md bg-muted px-2 py-0.5 text-sm font-semibold tabular-nums">{target}%</span>
+   345→          </div>
+   346→          <Slider
+   347→            id="target-slider"
+   348→            value={[target]}
+   349→            min={50}
+   350→            max={95}
+   351→            step={1}
+   352→            aria-label="Attendance target percentage"
+   353→            onValueChange={(v) => setTarget(v[0] ?? 75)}
+   354→          />
+   355→          <p className="text-[11px] text-muted-foreground">Between 50% and 95%. Warnings are recalculated immediately.</p>
+   356→        </div>
+   357→
+   358→        <div className="space-y-2">
+   359→          <div className="flex items-center justify-between">
+   360→            <Label htmlFor="interval-slider">Sync interval</Label>
+   361→            <span className="rounded-md bg-muted px-2 py-0.5 text-sm font-semibold tabular-nums">
+   362→              {interval} min
+   363→            </span>
+   364→          </div>
+   365→          <Slider
+   366→            id="interval-slider"
+   367→            value={[interval]}
+   368→            min={5}
+   369→            max={120}
+   370→            step={5}
+   371→            aria-label="Automatic sync interval in minutes"
+   372→            onValueChange={(v) => setIntervalMin(v[0] ?? 15)}
+   373→          />
+   374→          <p className="text-[11px] text-muted-foreground">How often the engine checks the ERP for changes (5–120 minutes).</p>
+   375→        </div>
+   376→
+   377→        <div className="flex items-center justify-between gap-3 rounded-lg border border-border/50 p-3">
+   378→          <div>
+   379→            <Label htmlFor="auto-sync" className="text-sm">Automatic background sync</Label>
+   380→            <p className="text-[11px] text-muted-foreground">Run scheduled syncs without opening the app</p>
+   381→          </div>
+   382→          <Switch id="auto-sync" checked={autoSync} onCheckedChange={setAutoSync} />
+   383→        </div>
+   384→
+   385→        <Button onClick={() => save.mutate()} disabled={save.isPending} className="gap-1.5" aria-label="Save sync settings">
+   386→          {save.isPending ? <Loader2 className="size-4 animate-spin" aria-hidden="true" /> : <Save className="size-4" aria-hidden="true" />}
+   387→          Save settings
+   388→        </Button>
+   389→      </CardContent>
+   390→  );
+   391→}
+   392→
+   393→function SyncSettingsCard() {
+   394→  const { data: settings } = useQuery({ queryKey: qk.settings, queryFn: fetchSettings });
+   395→  const { data: erp } = useQuery({ queryKey: qk.erpStatus, queryFn: fetchErpStatus });
+   396→
+   397→  return (
+   398→    <Card className="rounded-xl border-border/60">
+   399→      <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-3">
+   400→        <div>
+   401→          <CardTitle className="flex items-center gap-2 text-base tracking-tight">
+   402→            <Save className="size-4 text-primary" aria-hidden="true" />
+   403→            Sync settings
+   404→          </CardTitle>
+   405→          <CardDescription>Attendance target and synchronization cadence</CardDescription>
+   406→        </div>
+   407→        {erp?.sync.nextScheduledSyncAt && (
+   408→          <Badge variant="secondary" className="text-[11px]">
+   409→            next sync {fmtDT(erp.sync.nextScheduledSyncAt)}
+   410→          </Badge>
+   411→        )}
+   412→      </CardHeader>
+   413→      {settings ? (
+   414→        <SyncSettingsForm initial={settings} />
+   415→      ) : (
+   416→        <CardContent className="space-y-3">
+   417→          <Skeleton className="h-5 w-40" />
+   418→          <Skeleton className="h-5 w-full" />
+   419→          <Skeleton className="h-5 w-full" />
+   420→          <Skeleton className="h-9 w-28" />
+   421→        </CardContent>
+   422→      )}
+   423→    </Card>
+   424→  );
+   425→}
+   426→
+   427→/* ------------------------------------------------------------------ */
+   428→/* Notification preferences                                            */
+   429→/* ------------------------------------------------------------------ */
+   430→
+   431→const NOTIFY_META: { key: string; label: string; description: string; icon: React.ElementType; className: string }[] = [
+   432→  {
+   433→    key: "ATTENDANCE_WARNING",
+   434→    label: "Attendance warnings",
+   435→    description: "A subject drops below your target — the most important alert",
+   436→    icon: TriangleAlert,
+   437→    className: "text-amber-500",
+   438→  },
+   439→  {
+   440→    key: "REMINDER_CHANGE",
+   441→    label: "Deadline updates",
+   442→    description: "The ERP moved an exam or submission date",
+   443→    icon: CalendarClock,
+   444→    className: "text-primary",
+   445→  },
+   446→  {
+   447→    key: "ERP_CHANGE",
+   448→    label: "ERP data changes",
+   449→    description: "Every sync that applies changes to your mirror",
+   450→    icon: RefreshCw,
+   451→    className: "text-emerald-500",
+   452→  },
+   453→  {
+   454→    key: "SYNC_FAILURE",
+   455→    label: "Sync failures",
+   456→    description: "Recommended: know when data may be stale",
+   457→    icon: AlertCircle,
+   458→    className: "text-red-500",
+   459→  },
+   460→  {
+   461→    key: "SYNC_SUCCESS",
+   462→    label: "Connection restored",
+   463→    description: "When a failing ERP connection works again",
+   464→    icon: CheckCircle2,
+   465→    className: "text-emerald-500",
+   466→  },
+   467→];
+   468→
+   469→function NotificationPrefsCard() {
+   470→  const qc = useQueryClient();
+   471→  const { data: settings } = useQuery({ queryKey: qk.settings, queryFn: fetchSettings });
+   472→  const [draft, setDraft] = useState<Record<string, boolean> | null>(null);
+   473→
+   474→  const prefs = draft ?? settings?.notifyPrefs ?? {};
+   475→  const enabledCount = NOTIFY_META.filter((m) => prefs[m.key] !== false).length;
+   476→
+   477→  const save = useMutation({
+   478→    mutationFn: (next: Record<string, boolean>) => putSettings({ notifyPrefs: next }),
+   479→    onSuccess: (_s, next) => {
+   480→      setDraft(null);
+   481→      qc.invalidateQueries({ queryKey: qk.settings });
+   482→      const off = Object.entries(next).filter(([, v]) => !v).length;
+   483→      toast.success(
+   484→        off > 0 ? `Notifications updated — ${off} type${off === 1 ? "" : "s"} muted` : "All notifications enabled"
+   485→      );
+   486→    },
+   487→    onError: (e) => toast.error("Could not save notification preferences", { description: e.message }),
+   488→  });
+   489→
+   490→  const setPref = (key: string, value: boolean) => {
+   491→    setDraft({ ...prefs, [key]: value });
+   492→  };
+   493→
+   494→  const dirty =
+   495→    draft !== null &&
+   496→    NOTIFY_META.some((m) => (draft[m.key] ?? true) !== (settings?.notifyPrefs?.[m.key] ?? true));
+   497→
+   498→  return (
+   499→    <Card className="rounded-xl border-border/60">
+   500→      <CardHeader className="flex flex-row items-start justify-between space-y-0 pb-3">
+   501→        <div>
+   502→          <CardTitle className="flex items-center gap-2 text-base tracking-tight">
+   503→            <Bell className="size-4 text-primary" aria-hidden="true" />
+   504→            Notifications
+   505→          </CardTitle>
+   506→          <CardDescription>Choose which events create a notification</CardDescription>
+   507→        </div>
+   508→        <Badge variant="secondary" className="text-[11px] tabular-nums">
+   509→          {enabledCount}/{NOTIFY_META.length} on
+   510→        </Badge>
+   511→      </CardHeader>
+   512→      <CardContent className="space-y-3">
+   513→        {!settings ? (
+   514→          <div className="space-y-2">
+   515→            {Array.from({ length: 3 }).map((_, i) => (
+   516→              <Skeleton key={i} className="h-11 w-full rounded-lg" />
+   517→            ))}
+   518→          </div>
+   519→        ) : (
+   520→          <div className="grid gap-2 sm:grid-cols-2">
+   521→            {NOTIFY_META.map((m) => {
+   522→              const on = prefs[m.key] !== false;
+   523→              const Icon = on ? m.icon : BellOff;
+   524→              return (
+   525→                <div
+   526→                  key={m.key}
+   527→                  className={cn(
+   528→                    "flex items-center gap-3 rounded-lg border p-3 transition-colors",
+   529→                    on ? "border-border/50 bg-card" : "border-border/40 bg-muted/40"
+   530→                  )}
+   531→                >
+   532→                  <span
+   533→                    className={cn(
+   534→                      "flex size-8 shrink-0 items-center justify-center rounded-lg",
+   535→                      on ? "bg-muted" : "bg-muted/60 opacity-50"
+   536→                    )}
+   537→                    aria-hidden="true"
+   538→                  >
+   539→                    <Icon className={cn("size-4", on ? m.className : "text-muted-foreground")} />
+   540→                  </span>
+   541→                  <div className="min-w-0 flex-1">
+   542→                    <Label htmlFor={`notify-${m.key}`} className={cn("text-sm", !on && "text-muted-foreground")}>
+   543→                      {m.label}
+   544→                    </Label>
+   545→                    <p className="truncate text-[11px] text-muted-foreground">{m.description}</p>
+   546→                  </div>
+   547→                  <Switch
+   548→                    id={`notify-${m.key}`}
+   549→                    checked={on}
+   550→                    onCheckedChange={(v) => setPref(m.key, v)}
+   551→                    disabled={save.isPending}
+   552→                    aria-label={`${on ? "Disable" : "Enable"} ${m.label} notifications`}
+   553→                  />
+   554→                </div>
+   555→              );
+   556→            })}
+   557→          </div>
+   558→        )}
+   559→        <div className="flex items-center justify-between gap-3">
+   560→          <p className="text-[11px] text-muted-foreground">
+   561→            Applies to future events — existing notifications are kept.
+   562→          </p>
+   563→          <Button
+   564→            size="sm"
+   565→            className="h-8 gap-1.5"
+   566→            disabled={!dirty || save.isPending}
+   567→            onClick={() => save.mutate(draft ?? {})}
+   568→            aria-label="Save notification preferences"
+   569→          >
+   570→            {save.isPending ? <Loader2 className="size-3.5 animate-spin" aria-hidden="true" /> : <Save className="size-3.5" aria-hidden="true" />}
+   571→            Save
+   572→          </Button>
+   573→        </div>
+   574→      </CardContent>
+   575→    </Card>
+   576→  );
+   577→}
+   578→
+   579→/* ------------------------------------------------------------------ */
+   580→/* Semester partition (Sem 1–8)                                        */
+   581→/* ------------------------------------------------------------------ */
+   582→
+   583→const SEMESTER_OPTIONS = [
+   584→  { value: "all", label: "All" },
+   585→  ...Array.from({ length: 8 }, (_, i) => ({ value: String(i + 1), label: `Sem ${i + 1}` })),
+   586→];
+   587→
+   588→export function semesterLabel(v: string | undefined | null): string {
+   589→  if (!v || v === "all") return "All semesters";
+   590→  return `Semester ${v}`;
+   591→}
+   592→
+   593→function SemesterCard() {
+   594→  const qc = useQueryClient();
+   595→  const { data, isPending } = useQuery({
+   596→    queryKey: qk.semesters,
+   597→    queryFn: fetchSemesters,
+   598→    refetchInterval: 30_000,
+   599→  });
+   600→
+   601→  const setSem = useMutation({
+   602→    mutationFn: (value: string) => putSelectedSemester(value),
+   603→    onSuccess: (s) => {
+   604→      qc.invalidateQueries(); // subject lists, overall, trend, timetable pickers — everything
+   605→      const count = data?.counts.reduce((a, c) => a + c.count, 0) ?? 0;
+   606→      const scoped =
+   607→        s.selectedSemester === "all"
+   608→          ? count
+   609→          : (data?.counts.find((c) => c.semester === Number(s.selectedSemester))?.count ?? 0);
+   610→      toast.success(`Showing ${semesterLabel(s.selectedSemester)}`, {
+   611→        description:
+   612→          scoped === 0
+   613→            ? "No subjects are synchronized for this semester yet — switch back to All or sync the ERP."
+   614→            : `${scoped} synchronized subject${scoped === 1 ? "" : "s"} from the ERP.`,
+   615→      });
+   616→    },
+   617→    onError: (e) => toast.error("Could not change semester", { description: e.message }),
+   618→  });
+   619→
+   620→  const selected = data?.selected ?? "all";
+   621→  const detected = data?.detected ?? null;
+   622→  const countFor = (sem: number | null) =>
+   623→    data?.counts.find((c) => c.semester === sem)?.count ?? 0;
+   624→  const totalSubjects = data?.counts.reduce((a, c) => a + c.count, 0) ?? 0;
+   625→  const unclassified = countFor(null);
+   626→
+   627→  return (
+   628→    <Card className="rounded-xl border-border/60">
+   629→      <CardHeader className="flex flex-row items-start justify-between space-y-0 gap-2 pb-3">
+   630→        <div>
+   631→          <CardTitle className="flex items-center gap-2 text-base tracking-tight">
+   632→            <GraduationCap className="size-4 text-primary" aria-hidden="true" />
+   633→            Semester
+   634→          </CardTitle>
+   635→          <CardDescription className="text-xs">
+   636→            Partition your subjects — only the selected semester&apos;s ERP-synchronized subjects appear across
+   637→            the app. Semester info is read live from the ERP during sync.
+   638→          </CardDescription>
+   639→        </div>
+   640→        <Badge variant="secondary" className="shrink-0 text-[11px] tabular-nums">
+   641→          {selected === "all" ? `ALL · ${totalSubjects}` : `SEM ${selected} · ${countFor(Number(selected))}`}
+   642→        </Badge>
+   643→      </CardHeader>
+   644→      <CardContent className="space-y-3">
+   645→        {isPending || !data ? (
+   646→          <div className="grid grid-cols-3 gap-2 sm:grid-cols-5">
+   647→            {Array.from({ length: 9 }).map((_, i) => (
+   648→              <Skeleton key={i} className="h-14 rounded-lg" />
+   649→            ))}
+   650→          </div>
+   651→        ) : (
+   652→          <>
+   653→            <div
+   654→              className="grid grid-cols-3 gap-2 sm:grid-cols-5"
+   655→              role="group"
+   656→              aria-label="Semester partition"
+   657→            >
+   658→              {SEMESTER_OPTIONS.map((opt) => {
+   659→                const isSel = selected === opt.value;
+   660→                const count =
+   661→                  opt.value === "all"
+   662→                    ? totalSubjects
+   663→                    : countFor(Number(opt.value));
+   664→                return (
+   665→                  <button
+   666→                    key={opt.value}
+   667→                    type="button"
+   668→                    onClick={() => {
+   669→                      if (!isSel) setSem.mutate(opt.value);
+   670→                    }}
+   671→                    disabled={setSem.isPending}
+   672→                    aria-pressed={isSel}
+   673→                    aria-label={`Show ${opt.value === "all" ? "all semesters" : `semester ${opt.value}`} — ${count} subjects`}
+   674→                    className={cn(
+   675→                      "flex h-14 min-w-0 flex-col items-center justify-center gap-0.5 rounded-lg border px-2 text-xs font-medium transition-all",
+   676→                      "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+   677→                      isSel
+   678→                        ? "border-primary bg-primary text-primary-foreground shadow-sm"
+   679→                        : "border-border/60 bg-card hover:border-primary/40 hover:bg-muted/60",
+   680→                      setSem.isPending && "opacity-70"
+   681→                    )}
+   682→                  >
+   683→                    <span className="truncate">{opt.label}</span>
+   684→                    <span
+   685→                      className={cn(
+   686→                        "text-[10px] tabular-nums",
+   687→                        isSel ? "opacity-80" : "text-muted-foreground"
+   688→                      )}
+   689→                    >
+   690→                      {count} {count === 1 ? "subj" : "subjs"}
+   691→                    </span>
+   692→                  </button>
+   693→                );
+   694→              })}
+   695→            </div>
+   696→
+   697→            {detected !== null && selected !== String(detected) && (
+   698→              <div className="flex flex-wrap items-center gap-2 rounded-lg border border-emerald-500/30 bg-emerald-500/[0.08] px-3 py-2">
+   699→                <CheckCircle2 className="size-4 shrink-0 text-emerald-600 dark:text-emerald-400" aria-hidden="true" />
+   700→                <p className="min-w-0 flex-1 text-xs text-muted-foreground">
+   701→                  The ERP currently reports <span className="font-semibold text-foreground">Semester {detected}</span>.
+   702→                </p>
+   703→                <Button
+   704→                  size="sm"
+   705→                  variant="outline"
+   706→                  className="h-7 gap-1 border-emerald-500/40 px-2 text-xs text-emerald-700 hover:bg-emerald-500/10 hover:text-emerald-800 dark:text-emerald-400"
+   707→                  disabled={setSem.isPending}
+   708→                  onClick={() => setSem.mutate(String(detected))}
+   709→                  aria-label={`Switch to the ERP-reported semester ${detected}`}
+   710→                >
+   711→                  Use Sem {detected}
+   712→                </Button>
+   713→              </div>
+   714→            )}
+   715→
+   716→            {unclassified > 0 && (
+   717→              <p className="flex items-start gap-1.5 text-[11px] leading-relaxed text-muted-foreground">
+   718→                <Info className="mt-0.5 size-3.5 shrink-0" aria-hidden="true" />
+   719→                {unclassified} subject{unclassified === 1 ? " has" : "s have"} no semester from the ERP yet — they only
+   720→                appear under <span className="font-medium text-foreground">All</span> until the next sync classifies
+   721→                them.
+   722→              </p>
+   723→            )}
+   724→          </>
+   725→        )}
+   726→      </CardContent>
+   727→    </Card>
+   728→  );
+   729→}
+   730→
+   731→/* ------------------------------------------------------------------ */
+   732→/* Per-subject attendance targets                                      */
+   733→/* ------------------------------------------------------------------ */
+   734→
+   735→const TARGET_OPTIONS = [60, 65, 70, 75, 80, 85, 90];
+   736→
+   737→function TargetRow({ s }: { s: SubjectView }) {
+   738→  const qc = useQueryClient();
+   739→  const mutation = useMutation({
+   740→    mutationFn: (v: number | null) => putSubjectTarget(s.code, v),
+   741→    onSuccess: (res) => {
+   742→      qc.invalidateQueries({ queryKey: qk.attendance });
+   743→      qc.invalidateQueries({ queryKey: qk.dashboard });
+   744→      qc.invalidateQueries({ queryKey: qk.settings });
+   745→      toast.success(
+   746→        res.hasCustomTarget
+   747→          ? `Target for ${s.code} set to ${res.targetPct}%`
+   748→          : `${s.code} reset to the global target (${res.targetPct}%)`
+   749→      );
+   750→    },
+   751→    onError: (e) => toast.error(e instanceof Error ? e.message : "Could not save the target"),
+   752→  });
+   753→
+   754→  return (
+   755→    <TableRow className={cn("transition-colors", mutation.isPending && "opacity-60")}>
+   756→      <TableCell className="py-2.5">
+   757→        <div className="flex min-w-0 items-center gap-2.5">
+   758→          <span className="shrink-0 rounded-md bg-muted px-1.5 py-0.5 font-mono text-[10px] font-semibold text-muted-foreground">
+   759→            {s.code}
+   760→          </span>
+   761→          <span className="min-w-0 truncate text-sm">{s.name}</span>
+   762→        </div>
+   763→      </TableCell>
+   764→      <TableCell className="py-2.5 text-right">
+   765→        <div className="flex items-center justify-end gap-2">
+   766→          {s.hasCustomTarget ? (
+   767→            <CustomTargetChip target={s.targetPct} />
+   768→          ) : (
+   769→            <span className="text-[11px] text-muted-foreground">global</span>
+   770→          )}
+   771→        </div>
+   772→      </TableCell>
+   773→      <TableCell className="py-2.5 text-right">
+   774→        <div className="flex items-center justify-end gap-1.5">
+   775→          <Select
+   776→            value={s.hasCustomTarget ? String(s.targetPct) : "default"}
+   777→            onValueChange={(v) => {
+   778→              if (v === "default") {
+   779→                if (s.hasCustomTarget) mutation.mutate(null);
+   780→              } else {
+   781→                const n = Number(v);
+   782→                if (n !== s.targetPct) mutation.mutate(n);
+   783→              }
+   784→            }}
+   785→          >
+   786→            <SelectTrigger
+   787→              className="h-8 w-[122px] gap-1 text-xs"
+   788→              aria-label={`Attendance target for ${s.name}`}
+   789→            >
+   790→              <SelectValue />
+   791→            </SelectTrigger>
+   792→            <SelectContent>
+   793→              <SelectItem value="default" className="text-xs">
+   794→                Default
+   795→              </SelectItem>
+   796→              {TARGET_OPTIONS.map((p) => (
+   797→                <SelectItem key={p} value={String(p)} className="text-xs">
+   798→                  {p}%
+   799→                </SelectItem>
+   800→              ))}
+   801→            </SelectContent>
+   802→          </Select>
+   803→          {s.hasCustomTarget && (
+   804→            <Tooltip>
+   805→              <TooltipTrigger asChild>
+   806→                <Button
+   807→                  variant="ghost"
+   808→                  size="icon"
+   809→                  className="size-7 text-muted-foreground"
+   810→                  disabled={mutation.isPending}
+   811→                  onClick={() => mutation.mutate(null)}
+   812→                  aria-label={`Reset ${s.name} to the global target`}
+   813→                >
+   814→                  <RotateCcw className="size-3.5" aria-hidden="true" />
+   815→                </Button>
+   816→              </TooltipTrigger>
+   817→              <TooltipContent>Back to the global target</TooltipContent>
+   818→            </Tooltip>
+   819→          )}
+   820→        </div>
+   821→      </TableCell>
+   822→    </TableRow>
+   823→  );
+   824→}
+   825→
+   826→function SubjectTargetsCard() {
+   827→  const { data, isPending, isError, error } = useQuery({
+   828→    queryKey: qk.attendance,
+   829→    queryFn: fetchAttendance,
+   830→  });
+   831→
+   832→  const customCount = data?.subjects.filter((s) => s.hasCustomTarget).length ?? 0;
+   833→
+   834→  return (
+   835→    <Card className="rounded-xl border-border/60">
+   836→      <CardHeader className="flex flex-row items-start justify-between space-y-0 gap-2 pb-3">
+   837→        <div>
+   838→          <CardTitle className="flex items-center gap-2 text-base tracking-tight">
+   839→            <Target className="size-4 text-emerald-600 dark:text-emerald-400" aria-hidden="true" />
+   840→            Per-subject targets
+   841→          </CardTitle>
+   842→          <CardDescription className="text-xs">
+   843→            Different papers can require different attendance. Each subject&apos;s target drives its status,
+   844→            warnings and what-if planning; the overall figure keeps the global target.
+   845→          </CardDescription>
+   846→        </div>
+   847→        <Badge variant="outline" className="shrink-0 tabular-nums">
+   848→          {customCount}/{data?.subjects.length ?? 0} custom
+   849→        </Badge>
+   850→      </CardHeader>
+   851→      <CardContent>
+   852→        {isPending ? (
+   853→          <div className="space-y-2">
+   854→            {Array.from({ length: 4 }).map((_, i) => (
+   855→              <Skeleton key={i} className="h-10 w-full" />
+   856→            ))}
+   857→          </div>
+   858→        ) : isError || !data ? (
+   859→          <p className="flex items-center gap-2 text-sm text-red-600 dark:text-red-400">
+   860→            <AlertCircle className="size-4 shrink-0" aria-hidden="true" />
+   861→            Could not load subjects: {error?.message ?? "unknown error"}
+   862→          </p>
+   863→        ) : data.subjects.length === 0 ? (
+   864→          <p className="py-4 text-center text-sm text-muted-foreground">
+   865→            {data.semester !== "all"
+   866→              ? `No subjects synchronized for Semester ${data.semester} — targets can be set once the ERP syncs them.`
+   867→              : "No subjects synchronized yet — targets can be set after the first sync."}
+   868→          </p>
+   869→        ) : (
+   870→          <div className="max-h-96 overflow-x-auto overflow-y-auto rounded-lg border border-border/50">
+   871→            <Table>
+   872→              <TableHeader className="sticky top-0 z-10 bg-card">
+   873→                <TableRow>
+   874→                  <TableHead className="text-xs">Subject</TableHead>
+   875→                  <TableHead className="text-right text-xs">Current</TableHead>
+   876→                  <TableHead className="text-right text-xs">Target</TableHead>
+   877→                </TableRow>
+   878→              </TableHeader>
+   879→              <TableBody>
+   880→                {data.subjects.map((s) => (
+   881→                  <TargetRow key={s.id} s={s} />
+   882→                ))}
+   883→              </TableBody>
+   884→            </Table>
+   885→          </div>
+   886→        )}
+   887→        <p className="mt-3 flex items-start gap-1.5 text-[11px] leading-relaxed text-muted-foreground">
+   888→          <Info className="mt-0.5 size-3.5 shrink-0" aria-hidden="true" />
+   889→          Targets are stored locally and never sent to the ERP. Changing one recomputes that subject&apos;s
+   890→          warning immediately — no sync needed.
+   891→        </p>
+   892→      </CardContent>
+   893→    </Card>
+   894→  );
+   895→}
+   896→
+   897→/* ------------------------------------------------------------------ */
+   898→/* Browser reminders (system notifications when something is due)      */
+   899→/* ------------------------------------------------------------------ */
+   900→
+   901→function BrowserRemindersCard() {
+   902→  const [permission, setPermission] = React.useState<PermissionState>("default");
+   903→  const [enabled, setEnabled] = React.useState(false);
+   904→  const [requesting, setRequesting] = React.useState(false);
+   905→
+   906→  React.useEffect(() => {
+   907→    const read = () => {
+   908→      setPermission(browserRemindersPermission());
+   909→      setEnabled(browserRemindersEnabled());
+   910→    };
+   911→    read();
+   912→    window.addEventListener("erp:browser-reminders-changed", read);
+   913→    return () => window.removeEventListener("erp:browser-reminders-changed", read);
+   914→  }, []);
+   915→
+   916→  const enable = async () => {
+   917→    setRequesting(true);
+   918→    const result = await requestNotificationPermission();
+   919→    setRequesting(false);
+   920→    if (result === "granted") {
+   921→      setBrowserRemindersEnabled(true);
+   922→      toast.success("Browser reminders on", {
+   923→        description: "You'll get a system alert when a reminder becomes due.",
+   924→      });
+   925→    } else if (result === "denied") {
+   926→      toast.error("Permission denied", {
+   927→        description: "Allow notifications for this site in your browser settings to use reminders.",
+   928→      });
+   929→    }
+   930→  };
+   931→
+   932→  const supported = permission !== "unsupported";
+   933→
+   934→  return (
+   935→    <Card className="rounded-xl border-border/60">
+   936→      <CardHeader className="flex flex-row items-start justify-between space-y-0 pb-3">
+   937→        <div>
+   938→          <CardTitle className="flex items-center gap-2 text-base tracking-tight">
+   939→            <BellRing className="size-4 text-primary" aria-hidden="true" />
+   940→            Browser reminders
+   941→          </CardTitle>
+   942→          <CardDescription>System alerts when a reminder becomes due</CardDescription>
+   943→        </div>
+   944→        <Badge
+   945→          variant="outline"
+   946→          className={cn(
+   947→            "text-[10px]",
+   948→            enabled && permission === "granted"
+   949→              ? "border-emerald-500/40 text-emerald-700 dark:text-emerald-400"
+   950→              : "text-muted-foreground"
+   951→          )}
+   952→        >
+   953→          {permission === "unsupported"
+   954→            ? "NOT SUPPORTED"
+   955→            : enabled && permission === "granted"
+   956→              ? "ON"
+   957→              : permission === "denied"
+   958→                ? "BLOCKED"
+   959→                : "OFF"}
+   960→        </Badge>
+   961→      </CardHeader>
+   962→      <CardContent className="space-y-3">
+   963→        {!supported ? (
+   964→          <p className="flex items-center gap-2 text-sm text-muted-foreground">
+   965→            <Info className="size-4 shrink-0" aria-hidden="true" />
+   966→            This browser does not support system notifications. In-app toasts still work.
+   967→          </p>
+   968→        ) : permission === "denied" ? (
+   969→          <p className="flex items-start gap-2 text-sm text-muted-foreground">
+   970→            <AlertCircle className="mt-0.5 size-4 shrink-0 text-amber-500" aria-hidden="true" />
+   971→            Notifications are blocked for this site. Re-enable them in your browser's site settings, then reload.
+   972→          </p>
+   973→        ) : permission === "granted" ? (
+   974→          <>
+   975→            <div className="flex items-center justify-between gap-3 rounded-lg border border-border/50 p-3">
+   976→              <div>
+   977→                <Label htmlFor="browser-reminders" className="text-sm">Notify me when a reminder is due</Label>
+   978→                <p className="text-[11px] text-muted-foreground">
+   979→                  Fires once per reminder on this device; auto-managed attendance warnings are excluded.
+   980→                </p>
+   981→              </div>
+   982→              <Switch
+   983→                id="browser-reminders"
+   984→                checked={enabled}
+   985→                onCheckedChange={(v) => setBrowserRemindersEnabled(v)}
+   986→                aria-label="Toggle browser due-reminder notifications"
+   987→              />
+   988→            </div>
+   989→            <Button
+   990→              variant="outline"
+   991→              size="sm"
+   992→              className="h-8 gap-1.5"
+   993→              disabled={!enabled}
+   994→              onClick={() => {
+   995→                const ok = sendTestNotification();
+   996→                if (ok) toast.success("Test notification sent");
+   997→                else toast.error("Could not show a notification");
+   998→              }}
+   999→            >
+  1000→              <BellRing className="size-3.5" aria-hidden="true" />
+  1001→              Send a test
+  1002→            </Button>
+  1003→          </>
+  1004→        ) : (
+  1005→          <div className="space-y-3">
+  1006→            <p className="text-sm text-muted-foreground">
+  1007→              Get a system-level alert the moment a deadline becomes due — even when this tab is in the
+  1008→              background. Permission is asked once, per device.
+  1009→            </p>
+  1010→            <Button size="sm" className="h-8 gap-1.5" onClick={enable} disabled={requesting}>
+  1011→              {requesting ? <Loader2 className="size-3.5 animate-spin" aria-hidden="true" /> : <BellRing className="size-3.5" aria-hidden="true" />}
+  1012→              Enable browser reminders
+  1013→            </Button>
+  1014→          </div>
+  1015→        )}
+  1016→      </CardContent>
+  1017→    </Card>
+  1018→  );
+  1019→}
+  1020→
+  1021→/* ------------------------------------------------------------------ */
+  1022→/* Install app (PWA)                                                   */
+  1023→/* ------------------------------------------------------------------ */
+  1024→
+  1025→function InstallAppCard() {
+  1026→  const canInstall = useCanInstall();
+  1027→  const installed = useIsInstalled();
+  1028→  const [pending, setPending] = useState(false);
+  1029→  const ios = isIOS();
+  1030→
+  1031→  const install = async () => {
+  1032→    setPending(true);
+  1033→    const outcome = await promptInstall();
+  1034→    setPending(false);
+  1035→    if (outcome === "accepted") toast.success("App installed 🎉", { description: "Launch it from your home screen." });
+  1036→    else if (outcome === "dismissed") toast.info("Install dismissed", { description: "You can install any time from Settings." });
+  1037→  };
+  1038→
+  1039→  return (
+  1040→    <Card className="rounded-xl border-border/60">
+  1041→      <CardHeader className="flex flex-row items-start justify-between space-y-0 pb-3">
+  1042→        <div>
+  1043→          <CardTitle className="flex items-center gap-2 text-base tracking-tight">
+  1044→            <MonitorSmartphone className="size-4 text-primary" aria-hidden="true" />
+  1045→            Install the app
+  1046→          </CardTitle>
+  1047→          <CardDescription>Full-screen, offline-friendly home-screen app (PWA)</CardDescription>
+  1048→        </div>
+  1049→        {installed && (
+  1050→          <Badge variant="outline" className="border-emerald-500/40 text-[10px] text-emerald-700 dark:text-emerald-400">
+  1051→            INSTALLED
+  1052→          </Badge>
+  1053→        )}
+  1054→      </CardHeader>
+  1055→      <CardContent className="space-y-3">
+  1056→        {installed ? (
+  1057→          <p className="flex items-center gap-2 text-sm text-emerald-600 dark:text-emerald-400">
+  1058→            <CheckCircle2 className="size-4 shrink-0" aria-hidden="true" />
+  1059→            You're running the installed app. Data still syncs from the ERP whenever a connection is available.
+  1060→          </p>
+  1061→        ) : canInstall ? (
+  1062→          <div className="space-y-3">
+  1063→            <p className="text-sm text-muted-foreground">
+  1064→              Install ERP Sync as an app — own window, home-screen icon, faster launches.
+  1065→            </p>
+  1066→            <Button size="sm" className="h-8 gap-1.5" onClick={install} disabled={pending}>
+  1067→              {pending ? <Loader2 className="size-3.5 animate-spin" aria-hidden="true" /> : <MonitorSmartphone className="size-3.5" aria-hidden="true" />}
+  1068→              Install now
+  1069→            </Button>
+  1070→          </div>
+  1071→        ) : ios ? (
+  1072→          <ol className="list-inside list-decimal space-y-1 text-sm text-muted-foreground">
+  1073→            <li>Open this page in Safari</li>
+  1074→            <li>Tap the <span className="font-medium text-foreground">Share</span> button</li>
+  1075→            <li>Choose <span className="font-medium text-foreground">Add to Home Screen</span></li>
+  1076→          </ol>
+  1077→        ) : (
+  1078→          <p className="flex items-center gap-2 text-sm text-muted-foreground">
+  1079→            <Info className="size-4 shrink-0" aria-hidden="true" />
+  1080→            Use your browser menu → <span className="font-medium text-foreground">Install app / Add to Home screen</span> when
+  1081→            offered. The button appears here automatically when your browser supports it.
+  1082→          </p>
+  1083→        )}
+  1084→      </CardContent>
+  1085→    </Card>
+  1086→  );
+  1087→}
+  1088→
+  1089→/* ------------------------------------------------------------------ */
+  1090→/* Demo mode card                                                      */
+  1091→/* ------------------------------------------------------------------ */
+  1092→
+  1093→function DemoModeCard({ liveConnected }: { liveConnected: boolean }) {
+  1094→  const qc = useQueryClient();
+  1095→  const { data: settings } = useQuery({ queryKey: qk.settings, queryFn: fetchSettings });
+  1096→  const [confirmReset, setConfirmReset] = React.useState(false);
+  1097→
+  1098→  const toggle = useMutation({
+  1099→    mutationFn: (demoMode: boolean) => putSettings({ demoMode }),
+  1100→    onSuccess: (s) => {
+  1101→      qc.invalidateQueries();
+  1102→      toast.success(s.demoMode ? "Demo ERP simulator enabled" : "Demo ERP simulator disabled");
+  1103→    },
+  1104→    onError: (e) => toast.error("Could not change demo mode", { description: e.message }),
+  1105→  });
+  1106→
+  1107→  const evolve = useMutation({
+  1108→    mutationFn: postDemoEvolve,
+  1109→    onSuccess: (res) => {
+  1110→      qc.invalidateQueries();
+  1111→      toast.success(res.message ?? "ERP change simulated and synced", {
+  1112→        description: "Watch the dashboard, warnings and reminders update automatically.",
+  1113→      });
+  1114→    },
+  1115→    onError: (e) => toast.error("Simulation failed", { description: e.message }),
+  1116→  });
+  1117→
+  1118→  const reset = useMutation({
+  1119→    mutationFn: postDemoReset,
+  1120→    onSuccess: (res) => {
+  1121→      qc.invalidateQueries();
+  1122→      setConfirmReset(false);
+  1123→      const w = res.wiped;
+  1124→      (res.ok ? toast.success : toast.error)(res.message, {
+  1125→        description: `Wiped ${w.subjects} subjects, ${w.timetableSlots} slots, ${w.snapshots} snapshots, ${w.notifications} notifications — then re-synced from a fresh simulated ERP.`,
+  1126→      });
+  1127→    },
+  1128→    onError: (e) => toast.error("Reset failed", { description: e.message }),
+  1129→  });
+  1130→
+  1131→  if (liveConnected) return null;
+  1132→  const demoOn = settings?.demoMode ?? false;
+  1133→
+  1134→  return (
+  1135→    <Card className="rounded-xl border-amber-500/40">
+  1136→      <CardHeader className="pb-3">
+  1137→        <CardTitle className="flex items-center gap-2 text-base tracking-tight">
+  1138→          <FlaskConical className="size-4 text-amber-500" aria-hidden="true" />
+  1139→          Demo mode
+  1140→          <Badge variant="outline" className="border-amber-500/40 text-[10px] text-amber-700 dark:text-amber-400">
+  1141→            SIMULATED
+  1142→          </Badge>
+  1143→        </CardTitle>
+  1144→        <CardDescription>
+  1145→          Explore the full sync pipeline with a simulated ERP that changes over time — no real credentials needed.
+  1146→        </CardDescription>
+  1147→      </CardHeader>
+  1148→      <CardContent className="space-y-4">
+  1149→        <div className="flex items-center justify-between gap-3 rounded-lg border border-border/50 p-3">
+  1150→          <div>
+  1151→            <Label htmlFor="demo-switch" className="text-sm">Use demo ERP simulator</Label>
+  1152→            <p className="text-[11px] text-muted-foreground">
+  1153→              Turn off once you connect your real ERP account (connecting live disables demo automatically).
+  1154→            </p>
+  1155→          </div>
+  1156→          {settings ? (
+  1157→            <Switch
+  1158→              id="demo-switch"
+  1159→              checked={demoOn}
+  1160→              onCheckedChange={(v) => toggle.mutate(v)}
+  1161→              disabled={toggle.isPending}
+  1162→            />
+  1163→          ) : (
+  1164→            <Skeleton className="h-5 w-9" />
+  1165→          )}
+  1166→        </div>
+  1167→
+  1168→        <Button
+  1169→          variant="outline"
+  1170→          className="w-full gap-1.5 border-amber-500/40 text-amber-700 hover:bg-amber-500/10 hover:text-amber-800 dark:text-amber-400"
+  1171→          onClick={() => evolve.mutate()}
+  1172→          disabled={!demoOn || evolve.isPending}
+  1173→          aria-label="Simulate an ERP-side change and sync it"
+  1174→        >
+  1175→          {evolve.isPending ? (
+  1176→            <Loader2 className="size-4 animate-spin" aria-hidden="true" />
+  1177→          ) : (
+  1178→            <Sparkles className="size-4" aria-hidden="true" />
+  1179→          )}
+  1180→          Simulate ERP change (demo)
+  1181→        </Button>
+  1182→        <p className="text-[11px] text-muted-foreground">
+  1183→          Creates a realistic change on the simulated ERP (new classes, moved deadlines, added subjects) and runs an
+  1184→          immediate sync, so you can watch detection → recalculation → notifications happen end-to-end.
+  1185→        </p>
+  1186→
+  1187→        <AlertDialog open={confirmReset} onOpenChange={setConfirmReset}>
+  1188→          <AlertDialogTrigger asChild>
+  1189→            <Button
+  1190→              variant="ghost"
+  1191→              className="h-8 w-full gap-1.5 text-xs text-muted-foreground hover:text-foreground"
+  1192→              disabled={!demoOn || reset.isPending}
+  1193→              aria-label="Reset demo data to the pristine baseline"
+  1194→            >
+  1195→              {reset.isPending ? (
+  1196→                <Loader2 className="size-3.5 animate-spin" aria-hidden="true" />
+  1197→              ) : (
+  1198→                <RotateCcw className="size-3.5" aria-hidden="true" />
+  1199→              )}
+  1200→              Reset demo data
+  1201→            </Button>
+  1202→          </AlertDialogTrigger>
+  1203→          <AlertDialogContent>
+  1204→            <AlertDialogHeader>
+  1205→              <AlertDialogTitle>Reset demo data?</AlertDialogTitle>
+  1206→              <AlertDialogDescription>
+  1207→                This wipes everything the demo has generated — subjects, attendance counts, the weekly timetable,
+  1208→                snapshots, history, ERP reminders and notifications — then immediately re-syncs a freshly seeded
+  1209→                simulated ERP. Your settings (targets, cadence, notification prefs) and personal reminders are kept.
+  1210→              </AlertDialogDescription>
+  1211→            </AlertDialogHeader>
+  1212→            <AlertDialogFooter>
+  1213→              <AlertDialogCancel>Cancel</AlertDialogCancel>
+  1214→              <AlertDialogAction
+  1215→                className="bg-red-600 text-white hover:bg-red-700 focus-visible:ring-red-500/40"
+  1216→                onClick={(e) => {
+  1217→                  e.preventDefault();
+  1218→                  reset.mutate();
+  1219→                }}
+  1220→              >
+  1221→                {reset.isPending && <Loader2 className="size-4 animate-spin" aria-hidden="true" />}
+  1222→                Reset &amp; re-sync
+  1223→              </AlertDialogAction>
+  1224→            </AlertDialogFooter>
+  1225→          </AlertDialogContent>
+  1226→        </AlertDialog>
+  1227→      </CardContent>
+  1228→    </Card>
+  1229→  );
+  1230→}
+  1231→
+  1232→/* ------------------------------------------------------------------ */
+  1233→/* Sync history                                                        */
+  1234→/* ------------------------------------------------------------------ */
+  1235→
+  1236→function SyncHistoryCard() {
+  1237→  const { data, isPending } = useQuery({
+  1238→    queryKey: qk.sync,
+  1239→    queryFn: fetchSyncLogs,
+  1240→    refetchInterval: 20_000,
+  1241→  });
+  1242→
+  1243→  return (
+  1244→    <Card className="rounded-xl border-border/60">
+  1245→      <CardHeader className="pb-3">
+  1246→        <CardTitle className="text-base tracking-tight">Sync history</CardTitle>
+  1247→        <CardDescription>Last synchronization runs of the background engine</CardDescription>
+  1248→      </CardHeader>
+  1249→      <CardContent>
+  1250→        {isPending || !data ? (
+  1251→          <div className="space-y-2">
+  1252→            {Array.from({ length: 3 }).map((_, i) => (
+  1253→              <Skeleton key={i} className="h-9 w-full" />
+  1254→            ))}
+  1255→          </div>
+  1256→        ) : data.logs.length === 0 ? (
+  1257→          <p className="py-6 text-center text-sm text-muted-foreground">No sync runs recorded yet</p>
+  1258→        ) : (
+  1259→          <div className="max-h-96 overflow-x-auto overflow-y-auto rounded-lg border border-border/50">
+  1260→            <Table>
+  1261→              <TableHeader className="sticky top-0 bg-card">
+  1262→                <TableRow>
+  1263→                  <TableHead className="w-10"><span className="sr-only">Status</span></TableHead>
+  1264→                  <TableHead>Trigger</TableHead>
+  1265→                  <TableHead>Mode</TableHead>
+  1266→                  <TableHead className="text-right">Changes</TableHead>
+  1267→                  <TableHead className="text-right">Duration</TableHead>
+  1268→                  <TableHead>When</TableHead>
+  1269→                  <TableHead><span className="sr-only">Error details</span></TableHead>
+  1270→                </TableRow>
+  1271→              </TableHeader>
+  1272→              <TableBody>
+  1273→                {data.logs.map((l) => {
+  1274→                  const Icon = syncLogIcon(l.status);
+  1275→                  return (
+  1276→                    <TableRow key={l.id}>
+  1277→                      <TableCell>
+  1278→                        <Icon
+  1279→                          className={cn(
+  1280→                            "size-4",
+  1281→                            l.status === "success" && "text-emerald-500",
+  1282→                            l.status === "failed" && "text-red-500",
+  1283→                            l.status === "running" && "animate-spin text-amber-500",
+  1284→                            l.status === "skipped" && "text-muted-foreground"
+  1285→                          )}
+  1286→                          aria-label={`Sync ${l.status}`}
+  1287→                        />
+  1288→                      </TableCell>
+  1289→                      <TableCell className="text-xs capitalize">{l.trigger}</TableCell>
+  1290→                      <TableCell className="text-xs uppercase">{l.mode}</TableCell>
+  1291→                      <TableCell className="text-right text-xs tabular-nums">{l.changes}</TableCell>
+  1292→                      <TableCell className="text-right text-xs tabular-nums">{l.durationMs} ms</TableCell>
+  1293→                      <TableCell className="whitespace-nowrap text-xs text-muted-foreground">{fmtDT(l.startedAt)}</TableCell>
+  1294→                      <TableCell>
+  1295→                        {l.errorDetails ? (
+  1296→                          <Tooltip>
+  1297→                            <TooltipTrigger asChild>
+  1298→                              <span className="block max-w-32 cursor-default truncate font-mono text-[11px] text-red-600 dark:text-red-400">
+  1299→                                {compactErrorText(l.errorDetails, 120)}
+  1300→                              </span>
+  1301→                            </TooltipTrigger>
+  1302→                            <TooltipContent className="max-w-72 break-all">
+  1303→                              <p className="font-mono text-[11px]">{compactErrorText(l.errorDetails)}</p>
+  1304→                            </TooltipContent>
+  1305→                          </Tooltip>
+  1306→                        ) : (
+  1307→                          <span className="text-xs text-muted-foreground/60">—</span>
+  1308→                        )}
+  1309→                      </TableCell>
+  1310→                    </TableRow>
+  1311→                  );
+  1312→                })}
+  1313→              </TableBody>
+  1314→            </Table>
+  1315→          </div>
+  1316→        )}
+  1317→      </CardContent>
+  1318→    </Card>
+  1319→  );
+  1320→}
+  1321→
+  1322→/* ------------------------------------------------------------------ */
+  1323→/* Data & backups card                                                 */
+  1324→/* ------------------------------------------------------------------ */
+  1325→
+  1326→function DataBackupCard() {
+  1327→  const { data: att } = useQuery({ queryKey: qk.attendance, queryFn: fetchAttendance });
+  1328→  const [busy, setBusy] = useState<null | "backup" | "csv">(null);
+  1329→
+  1330→  /* Full JSON backup via GET /api/export — the portable copy of everything the
+  1331→     local mirror knows. Encrypted credentials are excluded server-side. */
+  1332→  const runBackup = async () => {
+  1333→    setBusy("backup");
+  1334→    try {
+  1335→      const filename = await downloadBackup();
+  1336→      toast.success("Backup downloaded", { description: filename });
+  1337→    } catch (e) {
+  1338→      toast.error("Backup failed", {
+  1339→        description: e instanceof Error ? e.message : "Could not build the backup",
+  1340→      });
+  1341→    } finally {
+  1342→      setBusy(null);
+  1343→    }
+  1344→  };
+  1345→
+  1346→  /* One-row-per-subject CSV of the live attendance snapshot. */
+  1347→  const runCsv = () => {
+  1348→    if (!att) return;
+  1349→    setBusy("csv");
+  1350→    try {
+  1351→      const stamp = new Date().toISOString().slice(0, 10);
+  1352→      downloadCsv(
+  1353→        `attendance-${stamp}.csv`,
+  1354→        ["Code", "Subject", "Present", "Held", "Attendance %", "Target %", "Status", "Custom target"],
+  1355→        att.subjects.map((s) => [
+  1356→          s.code,
+  1357→          s.name,
+  1358→          s.present,
+  1359→          s.total,
+  1360→          s.percentage.toFixed(2),
+  1361→          s.targetPct,
+  1362→          s.status,
+  1363→          s.hasCustomTarget ? "yes" : "no",
+  1364→        ])
+  1365→      );
+  1366→      toast.success("Subjects CSV exported", {
+  1367→        description: `${att.subjects.length} subjects · overall ${att.overall.percentage.toFixed(2)}%`,
+  1368→      });
+  1369→    } finally {
+  1370→      setBusy(null);
+  1371→    }
+  1372→  };
+  1373→
+  1374→  return (
+  1375→    <Card className="rounded-xl border-border/60">
+  1376→      <CardHeader className="pb-3">
+  1377→        <CardTitle className="flex items-center gap-2 text-base tracking-tight">
+  1378→          <Database className="size-4 text-primary" aria-hidden="true" />
+  1379→          Data &amp; backups
+  1380→        </CardTitle>
+  1381→        <CardDescription>Your data is yours — take a portable copy any time</CardDescription>
+  1382→      </CardHeader>
+  1383→      <CardContent className="space-y-3">
+  1384→        <div className="flex items-start justify-between gap-3 rounded-lg border border-border/50 p-3 transition-colors hover:bg-muted/40">
+  1385→          <div className="min-w-0 space-y-0.5">
+  1386→            <p className="text-sm font-medium">Full backup (JSON)</p>
+  1387→            <p className="text-xs leading-relaxed text-muted-foreground">
+  1388→              Subjects, ALAs &amp; reminders, timetable, sync logs, change events, notifications and settings
+  1389→              — one portable file.
+  1390→            </p>
+  1391→          </div>
+  1392→          <Button
+  1393→            variant="outline"
+  1394→            size="sm"
+  1395→            className="h-8 shrink-0 gap-1.5"
+  1396→            onClick={runBackup}
+  1397→            disabled={busy !== null}
+  1398→            aria-label="Download the full JSON backup"
+  1399→          >
+  1400→            {busy === "backup" ? (
+  1401→              <Loader2 className="size-3.5 animate-spin" aria-hidden="true" />
+  1402→            ) : (
+  1403→              <Download className="size-3.5" aria-hidden="true" />
+  1404→            )}
+  1405→            Download
+  1406→          </Button>
+  1407→        </div>
+  1408→
+  1409→        <div className="flex items-start justify-between gap-3 rounded-lg border border-border/50 p-3 transition-colors hover:bg-muted/40">
+  1410→          <div className="min-w-0 space-y-0.5">
+  1411→            <p className="text-sm font-medium">Subjects (CSV)</p>
+  1412→            <p className="text-xs leading-relaxed text-muted-foreground">
+  1413→              One row per subject with attendance, target and status — opens in Excel or Sheets.
+  1414→            </p>
+  1415→          </div>
+  1416→          <Button
+  1417→            variant="outline"
+  1418→            size="sm"
+  1419→            className="h-8 shrink-0 gap-1.5"
+  1420→            onClick={runCsv}
+  1421→            disabled={busy !== null || !att}
+  1422→            aria-label="Export the subject attendance table as CSV"
+  1423→          >
+  1424→            {busy === "csv" ? (
+  1425→              <Loader2 className="size-3.5 animate-spin" aria-hidden="true" />
+  1426→            ) : (
+  1427→              <FileSpreadsheet className="size-3.5" aria-hidden="true" />
+  1428→            )}
+  1429→            Export
+  1430→          </Button>
+  1431→        </div>
+  1432→
+  1433→        <p className="flex items-start gap-1.5 text-xs leading-relaxed text-muted-foreground/80">
+  1434→          <ShieldCheck className="mt-0.5 size-3.5 shrink-0 text-emerald-500" aria-hidden="true" />
+  1435→          <span>Encrypted ERP credentials and WhatsApp keys are never included in any export.</span>
+  1436→        </p>
+  1437→      </CardContent>
+  1438→    </Card>
+  1439→  );
+  1440→}
+  1441→
+  1442→/* ------------------------------------------------------------------ */
+  1443→/* WhatsApp alerts card (CallMeBot)                                    */
+  1444→/* ------------------------------------------------------------------ */
+  1445→
+  1446→function WhatsAppCard() {
+  1447→  const qc = useQueryClient();
+  1448→  const { data: status } = useQuery({ queryKey: qk.waStatus, queryFn: fetchWaStatus });
+  1449→  const [phone, setPhone] = useState("");
+  1450→  const [apikey, setApikey] = useState("");
+  1451→  const [digestTime, setDigestTime] = useState("");
+  1452→  const [busy, setBusy] = useState<null | "save" | "test" | "digest" | "time" | "clearTime">(null);
+  1453→
+  1454→  const refresh = () => qc.invalidateQueries({ queryKey: qk.waStatus });
+  1455→
+  1456→  const run = async (action: "save" | "test" | "digest") => {
+  1457→    setBusy(action);
+  1458→    try {
+  1459→      if (action === "save") {
+  1460→        if (!phone.trim() || !apikey.trim()) {
+  1461→          toast.error("Phone and apikey are both required.");
+  1462→          return;
+  1463→        }
+  1464→        await postWaAction("save", { phone: phone.trim(), apikey: apikey.trim() });
+  1465→        toast.success("WhatsApp settings saved", { description: "The apikey is stored AES-256-GCM encrypted." });
+  1466→        setApikey("");
+  1467→        refresh();
+  1468→      } else if (action === "test") {
+  1469→        const res = await postWaAction("test");
+  1470→        (res.ok ? toast.success : toast.error)(res.ok ? "Test message sent — check WhatsApp" : "The provider did not accept the test", {
+  1471→          description: res.snippet,
+  1472→        });
+  1473→        refresh();
+  1474→      } else {
+  1475→        const res = await postWaAction("digest");
+  1476→        (res.ok ? toast.success : toast.error)(res.ok ? "Digest sent — check WhatsApp" : "The provider did not accept the digest", {
+  1477→          description: res.snippet,
+  1478→        });
+  1479→        refresh();
+  1480→      }
+  1481→    } catch (e) {
+  1482→      toast.error("WhatsApp action failed", { description: e instanceof ApiError ? e.message : "Try again." });
+  1483→    } finally {
+  1484→      setBusy(null);
+  1485→    }
+  1486→  };
+  1487→
+  1488→  const toggle = async (enabled: boolean) => {
+  1489→    try {
+  1490→      await postWaAction("enable", { enabled });
+  1491→      toast[enabled ? "success" : "info"](enabled ? "WhatsApp alerts enabled" : "WhatsApp alerts disabled", {
+  1492→        description: enabled
+  1493→          ? status?.digestTime
+  1494→            ? `A pending-work digest arrives daily at ${status.digestTime} IST, plus sync-triggered alerts when something changed.`
+  1495→            : "A short pending-work digest is sent at most once a day, right after a scheduled sync, when something changed."
+  1496→          : undefined,
+  1497→      });
+  1498→      refresh();
+  1499→    } catch (e) {
+  1500→      toast.error("Could not update the setting", { description: e instanceof ApiError ? e.message : "Try again." });
+  1501→    }
+  1502→  };
+  1503→
+  1504→  const saveDigestTime = async (time: string | null) => {
+  1505→    setBusy(time ? "time" : "clearTime");
+  1506→    try {
+  1507→      await postWaAction("setDigestTime", { time });
+  1508→      toast.success(
+  1509→        time ? `Daily digest scheduled for ${time} IST` : "Fixed daily digest removed",
+  1510→        {
+  1511→          description: time
+  1512→            ? "Sent every day at that IST time, even if nothing changed since the last sync."
+  1513→            : "Auto digests now fire only after scheduled syncs when something changed.",
+  1514→        }
+  1515→      );
+  1516→      refresh();
+  1517→    } catch (e) {
+  1518→      toast.error("Could not save the digest time", { description: e instanceof ApiError ? e.message : "Try again." });
+  1519→    } finally {
+  1520→      setBusy(null);
+  1521→    }
+  1522→  };
+  1523→
+  1524→  const enabled = status?.enabled ?? false;
+  1525→  const configured = status?.configured ?? false;
+  1526→  const savedTime = status?.digestTime ?? null;
+  1527→
+  1528→  return (
+  1529→    <Card className="rounded-xl border-border/60">
+  1530→      <CardHeader className="flex flex-row items-start justify-between space-y-0 pb-3">
+  1531→        <div>
+  1532→          <CardTitle className="flex items-center gap-2 text-base tracking-tight">
+  1533→            <MessageCircle className="size-4 text-emerald-500" aria-hidden="true" />
+  1534→            WhatsApp alerts
+  1535→            <Badge variant="outline" className="text-[9px] font-bold uppercase tracking-wider text-emerald-700 dark:text-emerald-400">
+  1536→              Beta
+  1537→            </Badge>
+  1538→          </CardTitle>
+  1539→          <CardDescription>Pending ALA/assignment digests straight to your WhatsApp</CardDescription>
+  1540→        </div>
+  1541→        <Switch
+  1542→          checked={enabled}
+  1543→          disabled={!configured}
+  1544→          onCheckedChange={toggle}
+  1545→          aria-label="Enable WhatsApp alerts"
+  1546→        />
+  1547→      </CardHeader>
+  1548→      <CardContent className="space-y-3">
+  1549→        {!configured ? (
+  1550→          <ol className="list-inside list-decimal space-y-1 text-sm text-muted-foreground">
+  1551→            <li>
+  1552→              Get a free apikey at{" "}
+  1553→              <a
+  1554→                href="https://www.callmebot.com/blog/free-api-for-send-whatsapp-messages/"
+  1555→                target="_blank"
+  1556→                rel="noopener noreferrer"
+  1557→                className="font-medium text-primary underline-offset-2 hover:underline"
+  1558→              >
+  1559→                callmebot.com
+  1560→              </a>{" "}
+  1561→              (one WhatsApp message from your phone to their bot)
+  1562→            </li>
+  1563→            <li>Paste your number and the apikey below — stored encrypted, never exported</li>
+  1564→            <li>Send a test, then flip the switch on</li>
+  1565→          </ol>
+  1566→        ) : (
+  1567→          <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
+  1568→            <Badge variant="secondary" className="font-mono text-[10px]">{status?.phoneMasked}</Badge>
+  1569→            {enabled ? (
+  1570→              <span className="flex items-center gap-1 text-emerald-600 dark:text-emerald-400">
+  1571→                <BellRing className="size-3" aria-hidden="true" />
+  1572→                {savedTime
+  1573→                  ? `auto-digest on — daily at ${savedTime} IST, plus after syncs when something changed`
+  1574→                  : "auto-digest on (max 1/day, after scheduled syncs when something changed)"}
+  1575→              </span>
+  1576→            ) : (
+  1577→              <span>Sending is off — flip the switch to enable auto digests.</span>
+  1578→            )}
+  1579→          </div>
+  1580→        )}
+  1581→
+  1582→        <div className="grid gap-2 sm:grid-cols-[1fr_1fr_auto]">
+  1583→          <Input
+  1584→            inputMode="tel"
+  1585→            placeholder={configured ? status?.phoneMasked ?? "Phone" : "Phone (e.g. 91 98XXXXXXXX)"}
+  1586→            value={phone}
+  1587→            onChange={(e) => setPhone(e.target.value)}
+  1588→            aria-label="WhatsApp phone number with country code"
+  1589→          />
+  1590→          <Input
+  1591→            type="password"
+  1592→            placeholder={configured ? "apikey saved — paste to replace" : "CallMeBot apikey"}
+  1593→            value={apikey}
+  1594→            onChange={(e) => setApikey(e.target.value)}
+  1595→            aria-label="CallMeBot apikey"
+  1596→          />
+  1597→          <Button size="sm" variant="outline" className="h-9 gap-1.5" disabled={busy !== null} onClick={() => run("save")}>
+  1598→            {busy === "save" ? <Loader2 className="size-3.5 animate-spin" aria-hidden="true" /> : <Save className="size-3.5" aria-hidden="true" />}
+  1599→            Save
+  1600→          </Button>
+  1601→        </div>
+  1602→
+  1603→        <div className="flex flex-wrap gap-2">
+  1604→          <Button size="sm" variant="secondary" className="h-8 gap-1.5" disabled={!configured || busy !== null} onClick={() => run("test")}>
+  1605→            {busy === "test" ? <Loader2 className="size-3.5 animate-spin" aria-hidden="true" /> : <MessageCircle className="size-3.5" aria-hidden="true" />}
+  1606→            Send test
+  1607→          </Button>
+  1608→          <Button size="sm" variant="secondary" className="h-8 gap-1.5" disabled={!configured || busy !== null} onClick={() => run("digest")}>
+  1609→            {busy === "digest" ? <Loader2 className="size-3.5 animate-spin" aria-hidden="true" /> : <CalendarClock className="size-3.5" aria-hidden="true" />}
+  1610→            Send pending-work digest now
+  1611→          </Button>
+  1612→        </div>
+  1613→
+  1614→        <div className="rounded-lg border border-border/60 bg-muted/40 p-3">
+  1615→          <div className="flex items-center justify-between gap-2">
+  1616→            <span className="flex items-center gap-1.5 text-xs font-medium">
+  1617→              <Timer className="size-3.5 text-primary" aria-hidden="true" />
+  1618→              Daily digest time (IST)
+  1619→              {savedTime && (
+  1620→                <Badge variant="outline" className="border-primary/40 font-mono text-[10px] text-primary">
+  1621→                  {savedTime}
+  1622→                </Badge>
+  1623→              )}
+  1624→            </span>
+  1625→            <span className="text-[10px] text-muted-foreground">optional</span>
+  1626→          </div>
+  1627→          <p className="mt-1 text-[11px] leading-snug text-muted-foreground">
+  1628→            Schedule one guaranteed digest per day at a fixed IST time — sent even when nothing changed
+  1629→            since the last sync. Leave empty to only notify after scheduled syncs.
+  1630→          </p>
+  1631→          <div className="mt-2 flex flex-wrap items-center gap-2">
+  1632→            <Input
+  1633→              type="time"
+  1634→              step={60}
+  1635→              className="h-9 w-32 font-mono text-xs"
+  1636→              value={digestTime}
+  1637→              onChange={(e) => setDigestTime(e.target.value)}
+  1638→              placeholder={savedTime ?? "20:30"}
+  1639→              aria-label="Daily digest time in IST, 24-hour"
+  1640→            />
+  1641→            <Button
+  1642→              size="sm"
+  1643→              variant="outline"
+  1644→              className="h-9 gap-1.5"
+  1645→              disabled={!configured || busy !== null || !digestTime}
+  1646→              onClick={() => saveDigestTime(digestTime)}
+  1647→              aria-label="Save daily digest time"
+  1648→            >
+  1649→              {busy === "time" ? <Loader2 className="size-3.5 animate-spin" aria-hidden="true" /> : <Timer className="size-3.5" aria-hidden="true" />}
+  1650→              Schedule
+  1651→            </Button>
+  1652→            {savedTime && (
+  1653→              <Button
+  1654→                size="sm"
+  1655→                variant="ghost"
+  1656→                className="h-9 gap-1.5 text-muted-foreground hover:text-destructive"
+  1657→                disabled={busy !== null}
+  1658→                onClick={() => {
+  1659→                  setDigestTime("");
+  1660→                  void saveDigestTime(null);
+  1661→                }}
+  1662→                aria-label="Remove daily digest schedule"
+  1663→              >
+  1664→                {busy === "clearTime" ? <Loader2 className="size-3.5 animate-spin" aria-hidden="true" /> : <X className="size-3.5" aria-hidden="true" />}
+  1665→                Remove
+  1666→              </Button>
+  1667→            )}
+  1668→          </div>
+  1669→        </div>
+  1670→
+  1671→        {status?.lastResult && (
+  1672→          <p className="truncate rounded-lg bg-muted/60 px-2.5 py-1.5 font-mono text-[10px] text-muted-foreground" title={status.lastResult}>
+  1673→            last: {status.lastResult}
+  1674→          </p>
+  1675→        )}
+  1676→
+  1677→        <p className="flex items-start gap-1.5 text-[11px] leading-snug text-muted-foreground">
+  1678→          <ShieldCheck className="mt-0.5 size-3.5 shrink-0" aria-hidden="true" />
+  1679→          Uses the free CallMeBot relay with YOUR paired phone. Nothing is sent while disabled or unconfigured;
+  1680→          messages are generated only from real synced ERP data.
+  1681→        </p>
+  1682→      </CardContent>
+  1683→    </Card>
+  1684→  );
+  1685→}
+  1686→
+  1687→/* ------------------------------------------------------------------ */
+  1688→
+  1689→export function SettingsTab() {
+  1690→  const { data: erp } = useQuery({ queryKey: qk.erpStatus, queryFn: fetchErpStatus });
+  1691→  const liveConnected = erp?.connected === true;
+  1692→
+  1693→  return (
+  1694→    <div className="space-y-4">
+  1695→      <div className="grid gap-4 lg:grid-cols-2">
+  1696→        <ErpConnectionCard />
+  1697→        <SyncSettingsCard />
+  1698→      </div>
+  1699→      <SemesterCard />
+  1700→      <SubjectTargetsCard />
+  1701→      <NotificationPrefsCard />
+  1702→      <WhatsAppCard />
+  1703→      <div className="grid gap-4 lg:grid-cols-2">
+  1704→        <BrowserRemindersCard />
+  1705→        <InstallAppCard />
+  1706→      </div>
+  1707→      <TextSizeCard />
+  1708→      <DemoModeCard liveConnected={liveConnected} />
+  1709→      <DataBackupCard />
+  1710→      <SyncHistoryCard />
+  1711→
+  1712→      <Card className="rounded-xl border-border/60 bg-muted/40">
+  1713→        <CardContent className="flex gap-3 p-4">
+  1714→          <Info className="size-5 shrink-0 text-muted-foreground" aria-hidden="true" />
+  1715→          <div className="space-y-1 text-xs leading-relaxed text-muted-foreground">
+  1716→            <p className="font-medium text-foreground">Privacy &amp; data flow</p>
+  1717→            <p>
+  1718→              The ERP is the source of truth. This app stores a synchronized copy for fast dashboards,
+  1719→              calculations and reminders. The only write to the ERP is an ALA submission that YOU trigger
+  1720→              explicitly, row by row.
+  1721→            </p>
+  1722→            <p className="text-muted-foreground/70">
+  1723→              erp.gmiu.edu.in · encrypted credential storage (AES-256-GCM) · synchronization status is always
+  1724→              reported honestly — simulated data is clearly labeled as DEMO.
+  1725→            </p>
+  1726→          </div>
+  1727→        </CardContent>
+  1728→      </Card>
+  1729→    </div>
+  1730→  );
+  1731→}
+  1732→

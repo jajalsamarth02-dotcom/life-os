@@ -12,6 +12,7 @@ import {
   CheckCircle2,
   Database,
   Download,
+  FileJson,
   FileSpreadsheet,
   FlaskConical,
   GraduationCap,
@@ -30,6 +31,7 @@ import {
   Target,
   Timer,
   TriangleAlert,
+  Upload,
   X,
 } from "lucide-react";
 import { toast } from "sonner";
@@ -90,6 +92,7 @@ import {
   disconnectErp,
   downloadBackup,
   fetchAttendance,
+  fetchAlaNotes,
   fetchErpStatus,
   fetchSemesters,
   fetchSettings,
@@ -101,6 +104,7 @@ import {
   putSettings,
   putSubjectTarget,
   postWaAction,
+  restoreAlaNotes,
   ApiError,
   qk,
 } from "./api";
@@ -1323,16 +1327,89 @@ function SyncHistoryCard() {
 /* Data & backups card                                                 */
 /* ------------------------------------------------------------------ */
 
+const LAST_BACKUP_KEY = "erp:lastBackupAt";
+const LAST_RESTORE_KEY = "erp:lastRestoreAt";
+
+function readLocalStamp(key: string): string | null {
+  try {
+    const v = localStorage.getItem(key);
+    return v ? new Date(v).toLocaleString() : null;
+  } catch {
+    return null;
+  }
+}
+
+/** One staged restore candidate, parsed client-side before the write. */
+interface StagedRestore {
+  fileName: string;
+  exportedAt: string | null;
+  rows: { externalId: string; note: string; priority: number }[];
+  withText: number;
+  withPriority: number;
+}
+
+const EXT_PREFIX = "erp:assign:";
+
+/** Accept a full app backup (meta.alaNotes) or a bare notes export (notes). */
+function parseRestoreFile(text: string, fileName: string): StagedRestore | null {
+  let obj: Record<string, unknown>;
+  try {
+    obj = JSON.parse(text) as Record<string, unknown>;
+  } catch {
+    return null;
+  }
+  const raw = Array.isArray(obj.alaNotes) ? obj.alaNotes : Array.isArray(obj.notes) ? obj.notes : null;
+  if (!raw) return null;
+
+  const rows: StagedRestore["rows"] = [];
+  for (const item of raw) {
+    const rec = item as Record<string, unknown> | null;
+    const externalId = typeof rec?.externalId === "string" ? rec.externalId : "";
+    if (!externalId.startsWith(EXT_PREFIX)) continue;
+    const note = typeof rec?.note === "string" ? rec.note : "";
+    const priority = typeof rec?.priority === "number" && Number.isInteger(rec.priority) ? Math.min(Math.max(rec.priority, 0), 3) : 0;
+    rows.push({ externalId, note, priority });
+  }
+  if (rows.length === 0) return null;
+
+  const meta = (obj.meta ?? null) as Record<string, unknown> | null;
+  return {
+    fileName,
+    exportedAt: typeof meta?.exportedAt === "string" ? meta.exportedAt : null,
+    rows,
+    withText: rows.filter((r) => r.note.trim() !== "").length,
+    withPriority: rows.filter((r) => r.priority > 0).length,
+  };
+}
+
 function DataBackupCard() {
+  const qc = useQueryClient();
   const { data: att } = useQuery({ queryKey: qk.attendance, queryFn: fetchAttendance });
-  const [busy, setBusy] = useState<null | "backup" | "csv">(null);
+  const { data: notes } = useQuery({ queryKey: qk.alaNotes, queryFn: fetchAlaNotes });
+  const notedCount = notes?.length ?? 0;
+  const [busy, setBusy] = useState<null | "backup" | "csv" | "restore">(null);
+  const [staged, setStaged] = useState<StagedRestore | null>(null);
+  const [dragOver, setDragOver] = useState(false);
+  const [stamps, setStamps] = useState<{ backup: string | null; restore: string | null }>({
+    backup: null,
+    restore: null,
+  });
+  const fileInputRef = React.useRef<HTMLInputElement>(null);
+
+  /* Surface persisted "last backup / restore" stamps on mount. */
+  React.useEffect(() => {
+    setStamps({ backup: readLocalStamp(LAST_BACKUP_KEY), restore: readLocalStamp(LAST_RESTORE_KEY) });
+  }, []);
 
   /* Full JSON backup via GET /api/export — the portable copy of everything the
-     local mirror knows. Encrypted credentials are excluded server-side. */
+     local mirror knows, including the private ALA notes overlay. Encrypted
+     credentials are excluded server-side. */
   const runBackup = async () => {
     setBusy("backup");
     try {
       const filename = await downloadBackup();
+      localStorage.setItem(LAST_BACKUP_KEY, new Date().toISOString());
+      setStamps((s) => ({ ...s, backup: new Date().toLocaleString() }));
       toast.success("Backup downloaded", { description: filename });
     } catch (e) {
       toast.error("Backup failed", {
@@ -1371,6 +1448,57 @@ function DataBackupCard() {
     }
   };
 
+  /* Read + stage a dropped or browsed backup file (nothing written yet). */
+  const stageFile = async (file: File) => {
+    if (busy) return;
+    setBusy("restore");
+    try {
+      const text = await file.text();
+      const parsed = parseRestoreFile(text, file.name);
+      if (!parsed) {
+        toast.error("Not a restorable backup", {
+          description: "No ALA annotations found — use a JSON file produced by this app.",
+        });
+        return;
+      }
+      setStaged(parsed);
+    } catch {
+      toast.error("Could not read that file");
+    } finally {
+      setBusy(null);
+      if (fileInputRef.current) fileInputRef.current.value = "";
+    }
+  };
+
+  /* The actual write — only runs after the user confirms the dialog. */
+  const runRestore = async () => {
+    if (!staged) return;
+    setBusy("restore");
+    try {
+      const res = await restoreAlaNotes(staged.rows);
+      localStorage.setItem(LAST_RESTORE_KEY, new Date().toISOString());
+      setStamps((s) => ({ ...s, restore: new Date().toLocaleString() }));
+      const parts: string[] = [];
+      if (res.created) parts.push(`${res.created} added`);
+      if (res.updated) parts.push(`${res.updated} updated`);
+      if (res.cleared) parts.push(`${res.cleared} cleared`);
+      if (res.skipped) parts.push(`${res.skipped} skipped (no matching ALA row)`);
+      if (res.invalid) parts.push(`${res.invalid} invalid`);
+      toast.success(`Restored ${res.created + res.updated} noted ${res.created + res.updated === 1 ? "ALA" : "ALAs"}`, {
+        description: parts.join(" · ") || "Nothing to change — your notes already match the backup.",
+      });
+      await qc.invalidateQueries({ queryKey: qk.alaNotes });
+      await qc.invalidateQueries({ queryKey: qk.assignments });
+    } catch (e) {
+      toast.error("Restore failed", {
+        description: e instanceof Error ? e.message : "Could not restore the notes",
+      });
+    } finally {
+      setBusy(null);
+      setStaged(null);
+    }
+  };
+
   return (
     <Card className="rounded-xl border-border/60">
       <CardHeader className="pb-3">
@@ -1385,8 +1513,8 @@ function DataBackupCard() {
           <div className="min-w-0 space-y-0.5">
             <p className="text-sm font-medium">Full backup (JSON)</p>
             <p className="text-xs leading-relaxed text-muted-foreground">
-              Subjects, ALAs &amp; reminders, timetable, sync logs, change events, notifications and settings
-              — one portable file.
+              Subjects, ALAs &amp; reminders, private ALA notes, timetable, sync logs, change events,
+              notifications and settings — one portable file.
             </p>
           </div>
           <Button
@@ -1430,11 +1558,155 @@ function DataBackupCard() {
           </Button>
         </div>
 
+        {/* Restore dropzone — dashed idle, solid+glow while dragging a file over. */}
+        <div
+          role="button"
+          tabIndex={0}
+          aria-label="Restore noted ALAs from a backup file — drop a JSON backup here or press Enter to browse"
+          onClick={() => !busy && fileInputRef.current?.click()}
+          onKeyDown={(e) => {
+            if (e.key === "Enter" || e.key === " ") {
+              e.preventDefault();
+              if (!busy) fileInputRef.current?.click();
+            }
+          }}
+          onDragOver={(e) => {
+            e.preventDefault();
+            if (!busy) setDragOver(true);
+          }}
+          onDragLeave={() => setDragOver(false)}
+          onDrop={(e) => {
+            e.preventDefault();
+            setDragOver(false);
+            const file = e.dataTransfer.files?.[0];
+            if (file) void stageFile(file);
+          }}
+          className={cn(
+            "group cursor-pointer rounded-lg border-2 border-dashed p-3 outline-none transition-all",
+            "focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1",
+            dragOver
+              ? "scale-[1.01] border-primary bg-primary/10 shadow-[0_0_0_4px_hsl(var(--primary)/0.08)]"
+              : "border-border/70 hover:border-primary/50 hover:bg-primary/[0.04]"
+          )}
+        >
+          <div className="flex items-start justify-between gap-3">
+            <div className="flex min-w-0 items-start gap-2.5">
+              <span
+                className={cn(
+                  "mt-0.5 flex size-8 shrink-0 items-center justify-center rounded-md transition-colors",
+                  dragOver ? "bg-primary text-primary-foreground" : "bg-primary/10 text-primary"
+                )}
+              >
+                {busy === "restore" ? (
+                  <Loader2 className="size-4 animate-spin" aria-hidden="true" />
+                ) : (
+                  <FileJson className="size-4" aria-hidden="true" />
+                )}
+              </span>
+              <div className="min-w-0 space-y-0.5">
+                <p className="text-sm font-medium">
+                  Restore noted ALAs
+                  {dragOver && <span className="ml-1.5 text-primary">— drop to stage</span>}
+                </p>
+                <p className="text-xs leading-relaxed text-muted-foreground">
+                  Drag a backup JSON here or click to browse. Your private notes &amp; priority flags come
+                  back — nothing is overwritten until you confirm.
+                </p>
+              </div>
+            </div>
+            <Badge
+              variant="secondary"
+              className={cn(
+                "shrink-0 tabular-nums",
+                notedCount > 0 && "bg-emerald-500/10 text-emerald-600 dark:text-emerald-400"
+              )}
+              aria-label={`${notedCount} noted ${notedCount === 1 ? "ALA" : "ALAs"} currently stored`}
+            >
+              {notedCount} noted
+            </Badge>
+          </div>
+          <input
+            ref={fileInputRef}
+            type="file"
+            accept=".json,application/json"
+            className="hidden"
+            aria-hidden="true"
+            tabIndex={-1}
+            onChange={(e) => {
+              const file = e.target.files?.[0];
+              if (file) void stageFile(file);
+            }}
+          />
+        </div>
+
+        {(stamps.backup || stamps.restore) && (
+          <p className="flex flex-wrap items-center gap-x-3 gap-y-0.5 text-[11px] leading-relaxed text-muted-foreground/70">
+            {stamps.backup && (
+              <span className="inline-flex items-center gap-1">
+                <Download className="size-3" aria-hidden="true" /> Backed up {stamps.backup}
+              </span>
+            )}
+            {stamps.restore && (
+              <span className="inline-flex items-center gap-1">
+                <Upload className="size-3" aria-hidden="true" /> Restored {stamps.restore}
+              </span>
+            )}
+          </p>
+        )}
+
         <p className="flex items-start gap-1.5 text-xs leading-relaxed text-muted-foreground/80">
           <ShieldCheck className="mt-0.5 size-3.5 shrink-0 text-emerald-500" aria-hidden="true" />
           <span>Encrypted ERP credentials and WhatsApp keys are never included in any export.</span>
         </p>
       </CardContent>
+
+      {/* Write confirmation — restore only proceeds after an explicit OK. */}
+      <AlertDialog open={staged !== null} onOpenChange={(open) => !open && setStaged(null)}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle className="flex items-center gap-2">
+              <Upload className="size-4 text-primary" aria-hidden="true" />
+              Restore {staged?.rows.length ?? 0} noted {staged?.rows.length === 1 ? "ALA" : "ALAs"}?
+            </AlertDialogTitle>
+            <AlertDialogDescription asChild>
+              <div className="space-y-2 text-sm">
+                <p>
+                  From <span className="font-medium text-foreground">{staged?.fileName}</span>
+                  {staged?.exportedAt && (
+                    <> · exported {new Date(staged.exportedAt).toLocaleString()}</>
+                  )}
+                </p>
+                <ul className="space-y-1 text-muted-foreground">
+                  <li>· {staged?.withText ?? 0} with a private note</li>
+                  <li>· {staged?.withPriority ?? 0} with a priority flag</li>
+                </ul>
+                <p>
+                  Matching ALA rows are <span className="font-medium text-foreground">overwritten</span> with
+                  the backup state; rows no longer in your ERP mirror are skipped. Nothing is deleted in bulk.
+                </p>
+              </div>
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={busy === "restore"}>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={(e) => {
+                e.preventDefault(); // keep the dialog open until the write finishes
+                void runRestore();
+              }}
+              disabled={busy === "restore"}
+              className="gap-1.5"
+            >
+              {busy === "restore" ? (
+                <Loader2 className="size-3.5 animate-spin" aria-hidden="true" />
+              ) : (
+                <Upload className="size-3.5" aria-hidden="true" />
+              )}
+              Restore {staged?.rows.length ?? 0}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </Card>
   );
 }
