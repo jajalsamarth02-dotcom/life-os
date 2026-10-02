@@ -52,6 +52,19 @@ export function useNow(intervalMs = 30_000): number {
 /* Timetable conflict helper (client-side preview)                     */
 /* ------------------------------------------------------------------ */
 
+/** Deterministic hue (0–359) for a subject code — stable across reloads and tabs. */
+export function subjectHue(code: string): number {
+  let h = 0;
+  for (let i = 0; i < code.length; i++) h = (h * 31 + code.charCodeAt(i)) % 360;
+  return h;
+}
+
+/** hsl() color pair for a code: [solid, 10%-alpha background] e.g. for badges and dots. */
+export function hueColors(code: string): { fg: string; bg: string } {
+  const h = subjectHue(code);
+  return { fg: `hsl(${h} 65% 40%)`, bg: `hsl(${h} 70% 50% / 0.12)` };
+}
+
 export interface LocalSlotConflict {
   subjectCode: string;
   startMin: number;

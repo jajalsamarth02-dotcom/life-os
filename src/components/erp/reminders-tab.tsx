@@ -5,6 +5,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { motion } from "framer-motion";
 import {
   AlertTriangle,
+  ArrowDownUp,
   BellRing,
   BookOpen,
   CalendarClock,
@@ -13,20 +14,24 @@ import {
   Check,
   CheckCircle2,
   ChevronDown,
+  ChevronsDownUp,
+  ChevronsUpDown,
   Circle,
   ClipboardList,
   Clock,
+  Download,
   Link2,
   Loader2,
   Lock,
   Plus,
+  Search,
   Trash2,
   TriangleAlert,
   Undo2,
+  X,
   XCircle,
 } from "lucide-react";
 import { toast } from "sonner";
-import { Download } from "lucide-react";
 import { downloadRemindersIcs } from "@/lib/ics";
 import {
   AlertDialog,
@@ -609,17 +614,35 @@ interface AlaGroup {
   nextPendingMs: number | null;
 }
 
-/** One subject group inside the ALA list — collapsible, with a mini progress bar. */
-function AlaSubjectGroup({ group }: { group: AlaGroup }) {
-  const [open, setOpen] = useState(true);
+/** Compact relative-deadline label for an ALA row: "in 12d" / "due today" / "5d overdue". */
+function relDue(dueMs: number, now: number): string {
+  const diff = dueMs - now;
+  const days = Math.floor(Math.abs(diff) / 86_400_000);
+  if (diff < 0) return days === 0 ? "overdue" : `${days}d overdue`;
+  if (days === 0) return "due today";
+  if (days === 1) return "due tomorrow";
+  return `in ${days}d`;
+}
+
+/** One subject group inside the ALA list — collapsible, with a mini progress bar.
+ *  Open state is controlled by the parent so Expand/Collapse-all and search work. */
+function AlaSubjectGroup({
+  group,
+  open,
+  onOpenChange,
+}: {
+  group: AlaGroup;
+  open: boolean;
+  onOpenChange: (o: boolean) => void;
+}) {
   const now = useNow();
   const total = group.items.length;
   const pending = total - group.submitted;
   const pct = total > 0 ? Math.round((group.submitted / total) * 100) : 0;
 
   return (
-    <Collapsible open={open} onOpenChange={setOpen}>
-      <div className="rounded-xl border border-border/50 bg-card/40">
+    <Collapsible open={open} onOpenChange={onOpenChange}>
+      <div className="overflow-hidden rounded-xl border border-border/50 bg-card/40 transition-colors hover:border-border/80">
         <CollapsibleTrigger asChild>
           <button
             type="button"
@@ -666,13 +689,15 @@ function AlaSubjectGroup({ group }: { group: AlaGroup }) {
                 {pending > 0 && group.nextPendingMs != null && (
                   <span
                     className={cn(
-                      "text-[11px] tabular-nums",
+                      "rounded-full px-1.5 py-0.5 text-[10px] font-semibold tabular-nums",
                       group.nextPendingMs < now
-                        ? "font-medium text-red-600 dark:text-red-400"
-                        : "text-muted-foreground"
+                        ? "bg-red-500/10 text-red-600 dark:text-red-400"
+                        : group.nextPendingMs - now < 7 * 86_400_000
+                          ? "bg-amber-500/15 text-amber-700 dark:text-amber-400"
+                          : "bg-muted text-muted-foreground"
                     )}
                   >
-                    · next last date {fmtDay(new Date(group.nextPendingMs).toISOString())}
+                    last date {fmtDay(new Date(group.nextPendingMs).toISOString())}
                   </span>
                 )}
               </div>
@@ -766,6 +791,20 @@ function AlaSubjectGroup({ group }: { group: AlaGroup }) {
                       >
                         {fmtDay(a.dueAt)}
                       </span>
+                      {!done && (
+                        <span
+                          className={cn(
+                            "ml-1.5 rounded-full px-1.5 py-0.5 text-[10px] font-semibold tabular-nums",
+                            overdue
+                              ? "bg-red-500/10 text-red-600 dark:text-red-400"
+                              : new Date(a.dueAt).getTime() - now < 7 * 86_400_000
+                                ? "bg-amber-500/15 text-amber-700 dark:text-amber-400"
+                                : "bg-muted text-muted-foreground"
+                          )}
+                        >
+                          {relDue(new Date(a.dueAt).getTime(), now)}
+                        </span>
+                      )}
                     </p>
                   </div>
                 </motion.li>
@@ -783,7 +822,19 @@ function AlaSubjectGroup({ group }: { group: AlaGroup }) {
  * (spec #6: ERP truth only; the local list is a read-only mirror — #14).
  * Every row shows whether it is complete ("Submitted") or not ("Pending" /
  * "Overdue") and the ERP End Date — the last date to submit.
+ * Includes search, status filter, sorting, expand/collapse-all and a
+ * one-click .ics export of every not-yet-submitted deadline.
  */
+type AlaStatusFilter = "all" | "pending" | "overdue" | "submitted";
+type AlaSort = "deadline" | "course";
+
+const ALA_STATUS_META: { key: AlaStatusFilter; label: string; activeClass: string }[] = [
+  { key: "all", label: "All", activeClass: "bg-primary text-primary-foreground" },
+  { key: "pending", label: "Pending", activeClass: "bg-amber-500/20 text-amber-800 dark:text-amber-300 border-amber-500/50" },
+  { key: "overdue", label: "Overdue", activeClass: "bg-red-500/15 text-red-700 dark:text-red-300 border-red-500/50" },
+  { key: "submitted", label: "Submitted", activeClass: "bg-emerald-500/15 text-emerald-700 dark:text-emerald-300 border-emerald-500/50" },
+];
+
 function AlaSection() {
   const { data, isPending, isError, error } = useQuery({
     queryKey: qk.assignments,
@@ -791,6 +842,12 @@ function AlaSection() {
     refetchInterval: 30_000,
     staleTime: 10_000,
   });
+
+  const now = useNow();
+  const [query, setQuery] = useState("");
+  const [status, setStatus] = useState<AlaStatusFilter>("all");
+  const [sort, setSort] = useState<AlaSort>("deadline");
+  const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
 
   const groups = useMemo<AlaGroup[]>(() => {
     if (!data) return [];
@@ -827,9 +884,94 @@ function AlaSection() {
     });
   }, [data]);
 
+  /* Live counts for the filter chips (computed from the unfiltered set). */
+  const counts = useMemo(() => {
+    let pending = 0;
+    let overdue = 0;
+    let submitted = 0;
+    for (const a of data?.assignments ?? []) {
+      if (a.status === "ACTIVE") {
+        if (new Date(a.dueAt).getTime() < now) overdue++;
+        else pending++;
+      } else submitted++;
+    }
+    return { all: (data?.assignments.length ?? 0) as number, pending, overdue, submitted };
+  }, [data, now]);
+
+  /* Search + status filter + sort — applied per row, then empty groups drop out. */
+  const visibleGroups = useMemo<AlaGroup[]>(() => {
+    const q = query.trim().toLowerCase();
+    let list = groups;
+    if (q || status !== "all") {
+      list = groups
+        .map((g) => {
+          const matchesQuery =
+            q === "" ||
+            g.code.toLowerCase().includes(q) ||
+            (g.name ?? "").toLowerCase().includes(q) ||
+            g.items.some(
+              (a) =>
+                a.title.toLowerCase().includes(q) ||
+                (a.description ?? "").toLowerCase().includes(q)
+            );
+          if (!matchesQuery) return null;
+          const items = g.items.filter((a) => {
+            if (q !== "" && !(
+              g.code.toLowerCase().includes(q) ||
+              (g.name ?? "").toLowerCase().includes(q) ||
+              a.title.toLowerCase().includes(q) ||
+              (a.description ?? "").toLowerCase().includes(q)
+            )) return false;
+            if (status === "all") return true;
+            const done = a.status !== "ACTIVE";
+            if (status === "submitted") return done;
+            if (done) return false;
+            return status === "overdue" ? new Date(a.dueAt).getTime() < now : new Date(a.dueAt).getTime() >= now;
+          });
+          if (items.length === 0) return null;
+          const submittedCount = items.filter((a) => a.status !== "ACTIVE").length;
+          const pend = items
+            .filter((a) => a.status === "ACTIVE")
+            .map((a) => new Date(a.dueAt).getTime());
+          return { ...g, items, submitted: submittedCount, nextPendingMs: pend.length > 0 ? Math.min(...pend) : null } satisfies AlaGroup;
+        })
+        .filter((g): g is AlaGroup => g !== null);
+    }
+    if (sort === "course") {
+      list = [...list].sort((x, y) => (x.name ?? x.code).localeCompare(y.name ?? y.code));
+    }
+    return list;
+  }, [groups, query, status, sort, now]);
+
   const total = data?.assignments.length ?? 0;
-  const submitted = groups.reduce((n, g) => n + g.submitted, 0);
-  const pending = total - submitted;
+  const submitted = counts.submitted;
+  const pending = counts.pending + counts.overdue;
+  const searching = query.trim() !== "" || status !== "all";
+  const hasActiveDeadlines = counts.pending + counts.overdue > 0;
+
+  const exportAlaIcs = () => {
+    if (!data) return;
+    const active = data.assignments.filter((a) => a.status === "ACTIVE");
+    const filename = downloadRemindersIcs(
+      active.map((a) => ({
+        id: a.id,
+        title: `${a.subjectCode ? `${a.subjectCode} · ` : ""}${a.title}`,
+        description: a.description,
+        dueAt: a.dueAt,
+        type: "ASSIGNMENT" as const,
+        source: a.source,
+      })),
+      "ALA & assignment deadlines (ERP Sync)"
+    );
+    toast.success(`${filename} downloaded`, {
+      description: `${active.length} open deadline${active.length === 1 ? "" : "s"} — import into your calendar app.`,
+    });
+  };
+
+  const toggleAll = (open: boolean) =>
+    setCollapsed(open ? new Set() : new Set(visibleGroups.map((g) => g.code)));
+
+  const allOpen = visibleGroups.length > 0 && visibleGroups.every((g) => !collapsed.has(g.code));
 
   return (
     <Card className="rounded-xl border-border/60">
@@ -844,7 +986,7 @@ function AlaSection() {
           </CardDescription>
         </div>
         {total > 0 && (
-          <div className="flex shrink-0 gap-1.5">
+          <div className="flex shrink-0 items-center gap-1.5">
             <Badge variant="secondary" className="tabular-nums">
               {pending} pending
             </Badge>
@@ -854,6 +996,17 @@ function AlaSection() {
             >
               {submitted} submitted
             </Badge>
+            <Button
+              variant="ghost"
+              size="icon"
+              className="size-8 text-muted-foreground"
+              disabled={!hasActiveDeadlines}
+              onClick={exportAlaIcs}
+              aria-label="Export all open ALA deadlines as a calendar (.ics) file"
+              title="Export all open deadlines as .ics"
+            >
+              <Download className="size-4" aria-hidden="true" />
+            </Button>
           </div>
         )}
       </CardHeader>
@@ -900,9 +1053,133 @@ function AlaSection() {
           </div>
         ) : (
           <div className="space-y-2.5">
-            {groups.map((g) => (
-              <AlaSubjectGroup key={g.code} group={g} />
-            ))}
+            {/* Search + filter chips + sort — sticky-feeling control row */}
+            <div className="flex flex-col gap-2 rounded-xl border border-border/60 bg-muted/25 p-2.5 sm:flex-row sm:items-center">
+              <div className="relative min-w-0 flex-1">
+                <Search
+                  className="pointer-events-none absolute left-2.5 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground"
+                  aria-hidden="true"
+                />
+                <Input
+                  value={query}
+                  onChange={(e) => setQuery(e.target.value)}
+                  placeholder="Search title, course or code…"
+                  aria-label="Search the ALA list"
+                  className="h-8 border-border/70 bg-background pl-8 pr-8 text-xs"
+                />
+                {query !== "" && (
+                  <button
+                    type="button"
+                    onClick={() => setQuery("")}
+                    aria-label="Clear search"
+                    className="absolute right-2 top-1/2 -translate-y-1/2 rounded-full p-0.5 text-muted-foreground hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                  >
+                    <X className="size-3.5" aria-hidden="true" />
+                  </button>
+                )}
+              </div>
+              <div className="flex items-center gap-1.5">
+                <Select value={sort} onValueChange={(v) => setSort(v as AlaSort)}>
+                  <SelectTrigger
+                    className="h-8 w-[132px] shrink-0 gap-1 bg-background text-xs"
+                    aria-label="Sort ALA groups"
+                  >
+                    <ArrowDownUp className="size-3.5 shrink-0 text-muted-foreground" aria-hidden="true" />
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="deadline" className="text-xs">Nearest deadline</SelectItem>
+                    <SelectItem value="course" className="text-xs">Course A–Z</SelectItem>
+                  </SelectContent>
+                </Select>
+                {!searching && (
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="h-8 shrink-0 gap-1 px-2.5 text-xs"
+                    onClick={() => toggleAll(!allOpen)}
+                    aria-label={allOpen ? "Collapse every subject group" : "Expand every subject group"}
+                  >
+                    {allOpen ? (
+                      <ChevronsDownUp className="size-3.5" aria-hidden="true" />
+                    ) : (
+                      <ChevronsUpDown className="size-3.5" aria-hidden="true" />
+                    )}
+                    {allOpen ? "Collapse" : "Expand"}
+                  </Button>
+                )}
+              </div>
+            </div>
+
+            {/* Status filter chips with live counts */}
+            <div className="flex flex-wrap items-center gap-1.5" role="group" aria-label="Filter by status">
+              {ALA_STATUS_META.map((f) => {
+                const active = status === f.key;
+                const n = counts[f.key];
+                return (
+                  <button
+                    key={f.key}
+                    type="button"
+                    aria-pressed={active}
+                    onClick={() => setStatus(f.key)}
+                    className={cn(
+                      "flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-xs font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+                      active
+                        ? `${f.activeClass} border-transparent shadow-sm`
+                        : "border-border/70 bg-background text-muted-foreground hover:bg-muted/60 hover:text-foreground"
+                    )}
+                  >
+                    {f.label}
+                    <span
+                      className={cn(
+                        "rounded-full px-1.5 text-[10px] font-bold tabular-nums",
+                        active ? "bg-background/40" : "bg-muted"
+                      )}
+                    >
+                      {n}
+                    </span>
+                  </button>
+                );
+              })}
+            </div>
+
+            {visibleGroups.length === 0 ? (
+              <div className="flex flex-col items-center gap-1.5 rounded-xl border border-dashed border-border/80 bg-card/40 px-6 py-8 text-center">
+                <Search className="size-6 text-muted-foreground/50" aria-hidden="true" />
+                <p className="text-sm font-medium">Nothing matches</p>
+                <p className="max-w-sm text-xs text-muted-foreground">
+                  No ALA rows match {query.trim() ? `“${query.trim()}”` : "this filter"}.
+                  Try a different search or switch the status chip.
+                </p>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="mt-1 h-7 text-xs"
+                  onClick={() => {
+                    setQuery("");
+                    setStatus("all");
+                  }}
+                >
+                  Reset search &amp; filters
+                </Button>
+              </div>
+            ) : (
+              visibleGroups.map((g) => (
+                <AlaSubjectGroup
+                  key={g.code}
+                  group={g}
+                  open={searching || !collapsed.has(g.code)}
+                  onOpenChange={(o) =>
+                    setCollapsed((prev) => {
+                      const next = new Set(prev);
+                      if (o) next.delete(g.code);
+                      else next.add(g.code);
+                      return next;
+                    })
+                  }
+                />
+              ))
+            )}
             <p className="px-1 pt-1 text-[11px] text-muted-foreground">
               Completion reflects the ERP’s own Submission Status; “last date” is the ERP
               End Date. Items you submit on the ERP turn Submitted at the next sync.

@@ -21,7 +21,13 @@ export async function GET(req: Request) {
     if (filter === "erp") where.source = "ERP";
     if (filter === "personal") where.source = "PERSONAL";
     if (!includeDone) where.status = "ACTIVE";
-    where.NOT = { externalId: { startsWith: ASSIGNMENT_EXT_PREFIX } };
+    // Hide ALA/assignment rows (they have their own view) — null-safe: a bare
+    // NOT + startsWith would silently drop every row with externalId = null
+    // (SQL three-valued logic), i.e. ALL personal reminders.
+    where.OR = [
+      { externalId: null },
+      { NOT: { externalId: { startsWith: ASSIGNMENT_EXT_PREFIX } } },
+    ];
 
     const reminders = await db.reminder.findMany({
       where,

@@ -1,0 +1,790 @@
+     1→"use client";
+     2→
+     3→import { useMemo, useState } from "react";
+     4→import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+     5→import { format } from "date-fns";
+     6→import { toast } from "sonner";
+     7→import {
+     8→  Activity,
+     9→  CalendarDays,
+    10→  CalendarPlus,
+    11→  CheckCircle2,
+    12→  Footprints,
+    13→  History,
+    14→  Loader2,
+    15→  RotateCcw,
+    16→  Target,
+    17→  TrendingDown,
+    18→  TrendingUp,
+    19→  TriangleAlert,
+    20→  X,
+    21→  Zap,
+    22→} from "lucide-react";
+    23→import { Badge } from "@/components/ui/badge";
+    24→import { Button } from "@/components/ui/button";
+    25→import { Input } from "@/components/ui/input";
+    26→import {
+    27→  Select,
+    28→  SelectContent,
+    29→  SelectItem,
+    30→  SelectTrigger,
+    31→  SelectValue,
+    32→} from "@/components/ui/select";
+    33→import { Separator } from "@/components/ui/separator";
+    34→import {
+    35→  Sheet,
+    36→  SheetContent,
+    37→  SheetDescription,
+    38→  SheetHeader,
+    39→  SheetTitle,
+    40→} from "@/components/ui/sheet";
+    41→import { Slider } from "@/components/ui/slider";
+    42→import { cn } from "@/lib/utils";
+    43→import { classesCanSkip, classesToReachTarget } from "@/lib/attendance";
+    44→import { ApiError, createSlot, fetchDashboard, fetchHistory, fetchTimetable, putSubjectTarget, qk, type SlotConflict } from "./api";
+    45→import { AnimatedNumber } from "./trend-chart";
+    46→import { CustomTargetChip, fmtDT, MiniBar, statusColors, StatusChip, useNow, ago } from "./shared";
+    47→import type { AttendanceStatus, HistoryResponse, SubjectView, TimetableSlotRow } from "./types";
+    48→
+    49→const DAY_SHORT = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+    50→const TARGET_PRESETS = [60, 65, 70, 75, 80, 85];
+    51→
+    52→function hhmm(min: number): string {
+    53→  const h = Math.floor(min / 60);
+    54→  const m = min % 60;
+    55→  return `${String(h).padStart(2, "0")}:${String(m).padStart(2, "0")}`;
+    56→}
+    57→
+    58→/* ------------------------------------------------------------------ */
+    59→/* What-if planner                                                     */
+    60→/* ------------------------------------------------------------------ */
+    61→
+    62→type PlanMode = "attend" | "skip";
+    63→
+    64→function WhatIfPlanner({ s, target }: { s: SubjectView; target: number }) {
+    65→  const [mode, setMode] = useState<PlanMode>("attend");
+    66→  const [n, setN] = useState(0);
+    67→
+    68→  const toTarget = classesToReachTarget(s.present, s.total, target);
+    69→  const maxSkip = classesCanSkip(s.present, s.total, target);
+    70→  // NOTE: this component is remounted with key={s.id} when the subject changes,
+    71→  // so planner state resets naturally without effects.
+    72→
+    73→  const projected = useMemo(() => {
+    74→    if (n === 0) return s.percentage;
+    75→    if (mode === "attend") return ((s.present + n) / (s.total + n)) * 100;
+    76→    return (s.present / (s.total + n)) * 100;
+    77→  }, [mode, n, s.present, s.total, s.percentage]);
+    78→
+    79→  const delta = projected - s.percentage;
+    80→  const projectedStatus: AttendanceStatus =
+    81→    projected >= target ? "safe" : projected >= target - 5 ? "warning" : "danger";
+    82→  const pc = statusColors(projectedStatus);
+    83→
+    84→  const setToTarget = () => {
+    85→    setMode("attend");
+    86→    setN(Math.max(1, toTarget));
+    87→  };
+    88→  const setToMaxSkip = () => {
+    89→    setMode("skip");
+    90→    setN(Math.max(1, maxSkip));
+    91→  };
+    92→
+    93→  return (
+    94→    <div className="rounded-xl border border-border/70 bg-muted/30 p-4">
+    95→      <div className="flex flex-wrap items-center justify-between gap-2">
+    96→        <p className="flex items-center gap-1.5 text-sm font-semibold tracking-tight">
+    97→          <Zap className="size-4 text-amber-500" aria-hidden="true" />
+    98→          What-if planner
+    99→        </p>
+   100→        {/* mode switch */}
+   101→        <div
+   102→          role="tablist"
+   103→          aria-label="Planning mode"
+   104→          className="flex rounded-lg border border-border/70 bg-background p-0.5"
+   105→        >
+   106→          {(
+   107→            [
+   108→              { key: "attend", label: "Attend", icon: Footprints },
+   109→              { key: "skip", label: "Skip", icon: TrendingDown },
+   110→            ] as const
+   111→          ).map(({ key, label, icon: Icon }) => (
+   112→            <button
+   113→              key={key}
+   114→              type="button"
+   115→              role="tab"
+   116→              aria-selected={mode === key}
+   117→              onClick={() => {
+   118→                setMode(key);
+   119→                setN(0);
+   120→              }}
+   121→              className={cn(
+   122→                "flex items-center gap-1 rounded-md px-2.5 py-1 text-xs font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+   123→                mode === key
+   124→                  ? key === "attend"
+   125→                    ? "bg-emerald-500/15 text-emerald-700 dark:text-emerald-400"
+   126→                    : "bg-amber-500/15 text-amber-700 dark:text-amber-400"
+   127→                  : "text-muted-foreground hover:bg-muted/60"
+   128→              )}
+   129→            >
+   130→              <Icon className="size-3.5" aria-hidden="true" />
+   131→              {label}
+   132→            </button>
+   133→          ))}
+   134→        </div>
+   135→      </div>
+   136→
+   137→      <p className="mt-2.5 text-xs text-muted-foreground">
+   138→        {mode === "attend" ? (
+   139→          <>
+   140→            Simulate <b className="tabular-nums text-foreground">attending</b> the next classes of {s.code}. Each
+   141→            attended class adds to both present and total.
+   142→          </>
+   143→        ) : (
+   144→          <>
+   145→            Simulate <b className="tabular-nums text-foreground">skipping</b> the next classes of {s.code}. Skipped
+   146→            classes only increase the total — a fast way to see how fast attendance falls.
+   147→          </>
+   148→        )}
+   149→      </p>
+   150→
+   151→      <div className="mt-3 flex items-center gap-3">
+   152→        <Slider
+   153→          value={[n]}
+   154→          min={0}
+   155→          max={40}
+   156→          step={1}
+   157→          aria-label={`Number of classes to ${mode} in the simulation`}
+   158→          onValueChange={(v) => setN(v[0] ?? 0)}
+   159→          className="flex-1"
+   160→        />
+   161→        <span className="w-14 shrink-0 rounded-lg border border-border/70 bg-background px-2 py-1 text-center text-sm font-bold tabular-nums">
+   162→          {n}
+   163→        </span>
+   164→        <Button
+   165→          variant="ghost"
+   166→          size="icon"
+   167→          className="size-8 shrink-0 text-muted-foreground"
+   168→          aria-label="Reset simulation"
+   169→          onClick={() => setN(0)}
+   170→        >
+   171→          <RotateCcw className="size-3.5" aria-hidden="true" />
+   172→        </Button>
+   173→      </div>
+   174→      <div className="mt-1 flex justify-between text-[10px] text-muted-foreground/70 tabular-nums">
+   175→        <span>0</span>
+   176→        <span>10</span>
+   177→        <span>20</span>
+   178→        <span>30</span>
+   179→        <span>40</span>
+   180→      </div>
+   181→
+   182→      {/* Projection result */}
+   183→      <div className={cn("mt-3 flex flex-wrap items-center justify-between gap-3 rounded-lg border px-3.5 py-3", pc.border, pc.bg)}>
+   184→        <div>
+   185→          <p className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
+   186→            Projected attendance
+   187→          </p>
+   188→          <div className="mt-0.5 flex items-baseline gap-2">
+   189→            <span className={cn("text-2xl font-bold tabular-nums", pc.text)}>
+   190→              {n === 0 ? s.percentage.toFixed(2) : projected.toFixed(2)}
+   191→              <span className="text-sm font-semibold">%</span>
+   192→            </span>
+   193→            {n > 0 && (
+   194→              <span
+   195→                className={cn(
+   196→                  "rounded-full px-1.5 py-0.5 text-[11px] font-semibold tabular-nums",
+   197→                  delta >= 0 ? "bg-emerald-500/15 text-emerald-700 dark:text-emerald-400" : "bg-red-500/15 text-red-700 dark:text-red-400"
+   198→                )}
+   199→              >
+   200→                {delta >= 0 ? "+" : ""}
+   201→                {delta.toFixed(2)} pts
+   202→              </span>
+   203→            )}
+   204→          </div>
+   205→        </div>
+   206→        <div className="text-right">
+   207→          {projectedStatus === "safe" ? (
+   208→            <p className="flex items-center gap-1 text-xs font-medium text-emerald-700 dark:text-emerald-400">
+   209→              <CheckCircle2 className="size-3.5" aria-hidden="true" /> Above {target}% target
+   210→            </p>
+   211→          ) : (
+   212→            <p className="flex items-center gap-1 text-xs font-medium text-amber-700 dark:text-amber-400">
+   213→              <Target className="size-3.5" aria-hidden="true" /> Below {target}% target
+   214→            </p>
+   215→          )}
+   216→          <p className="mt-0.5 text-[11px] text-muted-foreground tabular-nums">
+   217→            {mode === "attend"
+   218→              ? `${s.present + n} present of ${s.total + n}`
+   219→              : `${s.present} present of ${s.total + n}`}
+   220→          </p>
+   221→        </div>
+   222→      </div>
+   223→
+   224→      {/* Shortcuts */}
+   225→      <div className="mt-2.5 flex flex-wrap gap-1.5">
+   226→        {s.status !== "safe" && toTarget > 0 && (
+   227→          <Button variant="outline" size="sm" className="h-7 gap-1 border-emerald-500/40 px-2.5 text-[11px] text-emerald-700 hover:bg-emerald-500/10 hover:text-emerald-800 dark:text-emerald-400" onClick={setToTarget}>
+   228→            <TrendingUp className="size-3" aria-hidden="true" />
+   229→            Reach {target}% → attend {toTarget}
+   230→          </Button>
+   231→        )}
+   232→        {maxSkip > 0 && (
+   233→          <Button variant="outline" size="sm" className="h-7 gap-1 px-2.5 text-[11px]" onClick={setToMaxSkip}>
+   234→            <TrendingDown className="size-3" aria-hidden="true" />
+   235→            Max skips ({maxSkip}) — still {target}%
+   236→          </Button>
+   237→        )}
+   238→      </div>
+   239→    </div>
+   240→  );
+   241→}
+   242→
+   243→/* ------------------------------------------------------------------ */
+   244→/* Per-subject target editor                                           */
+   245→/* ------------------------------------------------------------------ */
+   246→
+   247→function SubjectTargetEditor({ s, globalTarget }: { s: SubjectView; globalTarget: number }) {
+   248→  const qc = useQueryClient();
+   249→  const [justSet, setJustSet] = useState<number | null>(null);
+   250→
+   251→  const mutation = useMutation({
+   252→    mutationFn: (v: number | null) => putSubjectTarget(s.code, v),
+   253→    onSuccess: (res) => {
+   254→      qc.invalidateQueries({ queryKey: qk.attendance });
+   255→      qc.invalidateQueries({ queryKey: qk.dashboard });
+   256→      qc.invalidateQueries({ queryKey: qk.settings });
+   257→      setJustSet(res.targetPct);
+   258→      window.setTimeout(() => setJustSet(null), 1600);
+   259→      toast.success(
+   260→        res.hasCustomTarget
+   261→          ? `Target for ${s.code} set to ${res.targetPct}%`
+   262→          : `${s.code} reset to the global target (${res.targetPct}%)`
+   263→      );
+   264→    },
+   265→    onError: (e) => toast.error(e instanceof Error ? e.message : "Could not save the target"),
+   266→  });
+   267→
+   268→  const isActive = (p: number) => (s.hasCustomTarget ? s.targetPct === p : p === globalTarget);
+   269→
+   270→  return (
+   271→    <div className="rounded-xl border border-border/70 bg-muted/30 p-4">
+   272→      <div className="flex flex-wrap items-center justify-between gap-2">
+   273→        <p className="flex items-center gap-1.5 text-sm font-semibold tracking-tight">
+   274→          <Target className="size-4 text-emerald-600 dark:text-emerald-400" aria-hidden="true" />
+   275→          Target for this subject
+   276→        </p>
+   277→        {s.hasCustomTarget ? (
+   278→          <CustomTargetChip target={s.targetPct} />
+   279→        ) : (
+   280→          <Badge variant="outline" className="text-[10px] font-medium uppercase tracking-wide text-muted-foreground">
+   281→            global {globalTarget}%
+   282→          </Badge>
+   283→        )}
+   284→      </div>
+   285→      <p className="mt-2 text-xs text-muted-foreground">
+   286→        Different subjects can have different requirements (e.g. labs at 70%, theory at 75%). This changes the
+   287→        status colors, warnings and what-if math for <b className="text-foreground">{s.code}</b> only.
+   288→      </p>
+   289→
+   290→      <div className="mt-3 flex flex-wrap items-center gap-1.5" role="group" aria-label={`Attendance target for ${s.code}`}>
+   291→        {TARGET_PRESETS.map((p) => (
+   292→          <button
+   293→            key={p}
+   294→            type="button"
+   295→            disabled={mutation.isPending}
+   296→            onClick={() => {
+   297→              if (!isActive(p)) mutation.mutate(p);
+   298→            }}
+   299→            aria-pressed={isActive(p)}
+   300→            className={cn(
+   301→              "h-8 min-w-11 rounded-lg border px-2 text-xs font-semibold tabular-nums transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-60",
+   302→              isActive(p)
+   303→                ? "border-emerald-500/50 bg-emerald-500/15 text-emerald-700 dark:text-emerald-400"
+   304→                : "border-border/70 bg-background text-muted-foreground hover:border-emerald-500/40 hover:text-foreground"
+   305→            )}
+   306→          >
+   307→            {p}%
+   308→          </button>
+   309→        ))}
+   310→        <Button
+   311→          variant="outline"
+   312→          size="sm"
+   313→          disabled={mutation.isPending || !s.hasCustomTarget}
+   314→          className="h-8 gap-1 border-dashed text-xs text-muted-foreground"
+   315→          onClick={() => mutation.mutate(null)}
+   316→          aria-label={`Reset ${s.code} target to the global ${globalTarget}%`}
+   317→        >
+   318→          {mutation.isPending ? (
+   319→            <Loader2 className="size-3.5 animate-spin" aria-hidden="true" />
+   320→          ) : (
+   321→            <RotateCcw className="size-3.5" aria-hidden="true" />
+   322→          )}
+   323→          Default ({globalTarget}%)
+   324→        </Button>
+   325→        {justSet !== null && (
+   326→          <span className="flex items-center gap-1 text-[11px] font-medium text-emerald-600 dark:text-emerald-400" role="status">
+   327→            <CheckCircle2 className="size-3.5" aria-hidden="true" /> saved — {justSet}%
+   328→          </span>
+   329→        )}
+   330→      </div>
+   331→    </div>
+   332→  );
+   333→}
+   334→
+   335→/* ------------------------------------------------------------------ */
+   336→/* Subject trend mini chart (pure SVG, no deps)                        */
+   337→/* ------------------------------------------------------------------ */
+   338→
+   339→/* ------------------------------------------------------------------ */
+   340→/* Recent ERP changes for this subject (from the change feed)          */
+   341→/* ------------------------------------------------------------------ */
+   342→
+   343→function SubjectChanges({ code }: { code: string }) {
+   344→  // Shares the header's dashboard cache (same query key) — no extra fetch.
+   345→  const dash = useQuery({ queryKey: qk.dashboard, queryFn: fetchDashboard, enabled: true });
+   346→  const items = (dash.data?.changes ?? [])
+   347→    .filter((c) => c.subjectCode === code)
+   348→    .slice(0, 5);
+   349→
+   350→  return (
+   351→    <div className="rounded-xl border border-border/70 bg-muted/30 p-4">
+   352→      <p className="flex items-center gap-1.5 text-sm font-semibold tracking-tight">
+   353→        <History className="size-4 text-sky-500" aria-hidden="true" />
+   354→        Recent ERP changes
+   355→      </p>
+   356→      {items.length === 0 ? (
+   357→        <p className="mt-2 text-xs leading-relaxed text-muted-foreground">
+   358→          No recorded changes for this subject yet — events appear here when the sync engine detects a
+   359→          difference on the ERP (a class held, a mark changed, the subject added or removed).
+   360→        </p>
+   361→      ) : (
+   362→        <ul className="mt-2.5 space-y-2">
+   363→          {items.map((c) => (
+   364→            <li key={c.id} className="flex items-start gap-2 text-xs">
+   365→              <span className="mt-1 size-1.5 shrink-0 rounded-full bg-sky-500" aria-hidden="true" />
+   366→              <div className="min-w-0 flex-1">
+   367→                <p className="leading-snug">{c.detail}</p>
+   368→                <p className="mt-0.5 text-[10px] uppercase tracking-wide text-muted-foreground">
+   369→                  {c.kind.toLowerCase().replace(/_/g, " ")} · {ago(c.createdAt)}
+   370→                </p>
+   371→              </div>
+   372→            </li>
+   373→          ))}
+   374→        </ul>
+   375→      )}
+   376→    </div>
+   377→  );
+   378→}
+   379→
+   380→function SubjectTrend({ history, code }: { history: HistoryResponse | undefined; code: string }) {
+   381→  const points = history?.subjects[code] ?? [];
+   382→  const recent = points.slice(-30);
+   383→
+   384→  return (
+   385→    <div className="rounded-xl border border-border/70 p-4">
+   386→      <p className="flex items-center gap-1.5 text-sm font-semibold tracking-tight">
+   387→        <Activity className="size-4 text-emerald-500" aria-hidden="true" />
+   388→        Attendance trend
+   389→      </p>
+   390→      {recent.length < 2 ? (
+   391→        <p className="mt-2 text-xs text-muted-foreground">
+   392→          The trend line appears once the sync engine has recorded at least two snapshots for this subject.
+   393→        </p>
+   394→      ) : (
+   395→        <div className="mt-3">
+   396→          <MiniAreaChart points={recent.map((p) => p.percentage)} />
+   397→          <div className="mt-1.5 flex items-center justify-between text-[11px] text-muted-foreground">
+   398→            <span>{format(new Date(recent[0].t), "d MMM")}</span>
+   399→            <span className="font-medium text-foreground tabular-nums">
+   400→              {recent[0].percentage.toFixed(2)}% → {recent[recent.length - 1].percentage.toFixed(2)}%
+   401→            </span>
+   402→            <span>{format(new Date(recent[recent.length - 1].t), "d MMM")}</span>
+   403→          </div>
+   404→        </div>
+   405→      )}
+   406→    </div>
+   407→  );
+   408→}
+   409→
+   410→function MiniAreaChart({ points }: { points: number[] }) {
+   411→  const w = 320;
+   412→  const h = 64;
+   413→  const path = useMemo(() => {
+   414→    const min = Math.min(...points);
+   415→    const max = Math.max(...points);
+   416→    const span = max - min || 1;
+   417→    const stepX = w / (points.length - 1);
+   418→    const coords = points.map((p, i) => {
+   419→      const x = i * stepX;
+   420→      const y = h - 6 - ((p - min) / span) * (h - 12);
+   421→      return [x, y] as const;
+   422→    });
+   423→    const line = coords.reduce((acc, [x, y], i) => (i === 0 ? `M ${x},${y}` : `${acc} L ${x},${y}`), "");
+   424→    const area = `${line} L ${w},${h} L 0,${h} Z`;
+   425→    return { line, area };
+   426→  }, [points]);
+   427→
+   428→  return (
+   429→    <svg viewBox={`0 0 ${w} ${h}`} className="h-16 w-full" role="img" aria-label="Subject attendance trend">
+   430→      <defs>
+   431→        <linearGradient id="drawerTrendFill" x1="0" y1="0" x2="0" y2="1">
+   432→          <stop offset="0%" stopColor="#10b981" stopOpacity={0.3} />
+   433→          <stop offset="100%" stopColor="#10b981" stopOpacity={0.02} />
+   434→        </linearGradient>
+   435→      </defs>
+   436→      <path d={path.area} fill="url(#drawerTrendFill)" />
+   437→      <path d={path.line} fill="none" stroke="#10b981" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" />
+   438→    </svg>
+   439→  );
+   440→}
+   441→
+   442→/* ------------------------------------------------------------------ */
+   443→/* Weekly classes for this subject + quick add                         */
+   444→/* ------------------------------------------------------------------ */
+   445→
+   446→function SubjectTimetable({ slots, subjectCode, subjectName }: { slots: TimetableSlotRow[]; subjectCode: string; subjectName: string }) {
+   447→  const now = useNow();
+   448→  const today = new Date(now).getDay();
+   449→  const qc = useQueryClient();
+   450→  const [adding, setAdding] = useState(false);
+   451→  const [day, setDay] = useState<string>(String(today));
+   452→  const [start, setStart] = useState("");
+   453→  const [end, setEnd] = useState("");
+   454→  const [conflicts, setConflicts] = useState<SlotConflict[] | null>(null);
+   455→
+   456→  const addMutation = useMutation({
+   457→    mutationFn: (force: boolean) =>
+   458→      createSlot({ dayOfWeek: Number(day), start, end, subjectCode, force }),
+   459→    onSuccess: (_res, force) => {
+   460→      qc.invalidateQueries({ queryKey: qk.timetable });
+   461→      qc.invalidateQueries({ queryKey: qk.dashboard });
+   462→      toast.success(
+   463→        force
+   464→          ? `${DAY_SHORT[Number(day)]} ${start}–${end} added for ${subjectCode} (overlap accepted)`
+   465→          : `${DAY_SHORT[Number(day)]} ${start}–${end} added for ${subjectCode}`
+   466→      );
+   467→      setConflicts(null);
+   468→      setAdding(false);
+   469→      setStart("");
+   470→      setEnd("");
+   471→    },
+   472→    onError: (e) => {
+   473→      if (e instanceof ApiError && e.status === 409 && Array.isArray(e.body.conflicts)) {
+   474→        setConflicts(e.body.conflicts as SlotConflict[]);
+   475→        return;
+   476→      }
+   477→      setConflicts(null);
+   478→      toast.error(e instanceof Error ? e.message : "Could not add the class");
+   479→    },
+   480→  });
+   481→
+   482→  const valid = /^\d{2}:\d{2}$/.test(start) && /^\d{2}:\d{2}$/.test(end) && start < end;
+   483→  const resetConflicts = () => setConflicts(null);
+   484→
+   485→  const byDay = useMemo(() => {
+   486→    const m = new Map<number, TimetableSlotRow[]>();
+   487→    for (const s of slots) {
+   488→      const arr = m.get(s.dayOfWeek) ?? [];
+   489→      arr.push(s);
+   490→      m.set(s.dayOfWeek, arr);
+   491→    }
+   492→    for (const arr of m.values()) arr.sort((a, b) => a.startMin - b.startMin);
+   493→    return m;
+   494→  }, [slots]);
+   495→
+   496→  const orderedDays = useMemo(() => {
+   497→    // Today first, then the rest of the week in order
+   498→    const days = [1, 2, 3, 4, 5, 6, 0].filter((d) => byDay.has(d));
+   499→    return days.sort((a, b) => ((a - today + 7) % 7) - ((b - today + 7) % 7));
+   500→  }, [byDay, today]);
+   501→
+   502→  return (
+   503→    <div className="rounded-xl border border-border/70 p-4">
+   504→      <div className="flex items-center gap-1.5">
+   505→        <p className="flex items-center gap-1.5 text-sm font-semibold tracking-tight">
+   506→          <CalendarDays className="size-4 text-emerald-500" aria-hidden="true" />
+   507→          Weekly classes
+   508→        </p>
+   509→        <Badge variant="secondary" className="ml-auto tabular-nums">{slots.length}/week</Badge>
+   510→        <Button
+   511→          variant="ghost"
+   512→          size="sm"
+   513→          className="h-7 gap-1 px-2 text-[11px] text-muted-foreground"
+   514→          onClick={() => setAdding((v) => !v)}
+   515→          aria-expanded={adding}
+   516→          aria-label={adding ? "Cancel adding a class" : `Add a weekly class for ${subjectName}`}
+   517→        >
+   518→          {adding ? <X className="size-3.5" aria-hidden="true" /> : <CalendarPlus className="size-3.5" aria-hidden="true" />}
+   519→          {adding ? "Cancel" : "Add"}
+   520→        </Button>
+   521→      </div>
+   522→
+   523→      {adding && (
+   524→        <div className="mt-3 rounded-lg border border-border/60 bg-background p-3">
+   525→          <div className="grid grid-cols-3 gap-2">
+   526→            <div className="space-y-1">
+   527→              <label htmlFor="slot-day" className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
+   528→                Day
+   529→              </label>
+   530→              <Select value={day} onValueChange={(v) => { setDay(v); resetConflicts(); }}>
+   531→                <SelectTrigger id="slot-day" className="h-9 text-xs" aria-label="Day of the week">
+   532→                  <SelectValue />
+   533→                </SelectTrigger>
+   534→                <SelectContent>
+   535→                  {[1, 2, 3, 4, 5, 6, 0].map((d) => (
+   536→                    <SelectItem key={d} value={String(d)} className="text-xs">
+   537→                      {DAY_SHORT[d]}
+   538→                      {d === today ? " · today" : ""}
+   539→                    </SelectItem>
+   540→                  ))}
+   541→                </SelectContent>
+   542→              </Select>
+   543→            </div>
+   544→            <div className="space-y-1">
+   545→              <label htmlFor="slot-start" className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
+   546→                Start
+   547→              </label>
+   548→              <Input
+   549→                id="slot-start"
+   550→                type="time"
+   551→                value={start}
+   552→                onChange={(e) => { setStart(e.target.value); resetConflicts(); }}
+   553→                className="h-9 text-xs"
+   554→              />
+   555→            </div>
+   556→            <div className="space-y-1">
+   557→              <label htmlFor="slot-end" className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
+   558→                End
+   559→              </label>
+   560→              <Input
+   561→                id="slot-end"
+   562→                type="time"
+   563→                value={end}
+   564→                onChange={(e) => { setEnd(e.target.value); resetConflicts(); }}
+   565→                className="h-9 text-xs"
+   566→              />
+   567→            </div>
+   568→          </div>
+   569→          {conflicts && conflicts.length > 0 && (
+   570→            <div role="alert" className="mt-2.5 rounded-lg border border-amber-500/50 bg-amber-500/[0.08] p-2.5">
+   571→              <p className="flex items-center gap-1.5 text-[11px] font-semibold text-amber-700 dark:text-amber-400">
+   572→                <TriangleAlert className="size-3.5 shrink-0" aria-hidden="true" />
+   573→                Time conflict — overlaps {conflicts.length === 1 ? "1 class" : `${conflicts.length} classes`}
+   574→              </p>
+   575→              <ul className="mt-1.5 space-y-1">
+   576→                {conflicts.map((c) => (
+   577→                  <li key={c.id} className="flex items-center gap-1.5 text-[11px] text-amber-800 dark:text-amber-300/90">
+   578→                    <span className="size-1.5 shrink-0 rounded-full bg-amber-500" aria-hidden="true" />
+   579→                    <span className="font-mono font-semibold">{c.subjectCode}</span>
+   580→                    <span className="tabular-nums">{c.start}–{c.end}</span>
+   581→                    {c.source === "demo" && <span className="text-amber-700/60 dark:text-amber-400/50">· demo</span>}
+   582→                  </li>
+   583→                ))}
+   584→              </ul>
+   585→              <div className="mt-2 flex gap-1.5">
+   586→                <Button
+   587→                  size="sm"
+   588→                  variant="outline"
+   589→                  className="h-7 gap-1 border-amber-500/50 px-2.5 text-[11px] text-amber-700 hover:bg-amber-500/15 dark:text-amber-400"
+   590→                  disabled={addMutation.isPending}
+   591→                  onClick={() => addMutation.mutate(true)}
+   592→                >
+   593→                  {addMutation.isPending ? <Loader2 className="size-3 animate-spin" aria-hidden="true" /> : <CalendarPlus className="size-3" aria-hidden="true" />}
+   594→                  Add anyway
+   595→                </Button>
+   596→                <Button
+   597→                  size="sm"
+   598→                  variant="ghost"
+   599→                  className="h-7 px-2.5 text-[11px] text-muted-foreground"
+   600→                  onClick={resetConflicts}
+   601→                >
+   602→                  Pick another time
+   603→                </Button>
+   604→              </div>
+   605→            </div>
+   606→          )}
+   607→          <div className="mt-2.5 flex items-center justify-between gap-2">
+   608→            <p className="text-[11px] text-muted-foreground">
+   609→              {valid ? "Looks good — saved locally, never written to the ERP." : "Pick a day and a start/end time (end must be after start)."}
+   610→            </p>
+   611→            <Button
+   612→              size="sm"
+   613→              className="h-8 gap-1 text-xs"
+   614→              disabled={!valid || addMutation.isPending}
+   615→              onClick={() => addMutation.mutate(false)}
+   616→            >
+   617→              {addMutation.isPending && <Loader2 className="size-3.5 animate-spin" aria-hidden="true" />}
+   618→              Add class
+   619→            </Button>
+   620→          </div>
+   621→        </div>
+   622→      )}
+   623→
+   624→      {slots.length === 0 ? (
+   625→        <p className="mt-2 text-xs text-muted-foreground">
+   626→          No timetable slots recorded for this subject{adding ? "." : " — use the Add button above to record one."}
+   627→        </p>
+   628→      ) : (
+   629→        <ul className="mt-3 space-y-1.5">
+   630→          {orderedDays.map((d) => (
+   631→            <li key={d} className="flex items-center gap-2.5">
+   632→              <span
+   633→                className={cn(
+   634→                  "w-10 shrink-0 rounded-md px-1.5 py-0.5 text-center text-[11px] font-semibold",
+   635→                  d === today ? "bg-emerald-500/15 text-emerald-700 dark:text-emerald-400" : "bg-muted text-muted-foreground"
+   636→                )}
+   637→              >
+   638→                {DAY_SHORT[d]}
+   639→              </span>
+   640→              <div className="flex flex-wrap gap-1.5">
+   641→                {byDay.get(d)!.map((slot) => (
+   642→                  <span
+   643→                    key={slot.id}
+   644→                    className="rounded-md border border-border/60 bg-background px-2 py-0.5 text-[11px] tabular-nums text-foreground/80"
+   645→                  >
+   646→                    {hhmm(slot.startMin)}–{hhmm(slot.endMin)}
+   647→                  </span>
+   648→                ))}
+   649→              </div>
+   650→            </li>
+   651→          ))}
+   652→        </ul>
+   653→      )}
+   654→    </div>
+   655→  );
+   656→}
+   657→
+   658→/* ------------------------------------------------------------------ */
+   659→/* Drawer                                                              */
+   660→/* ------------------------------------------------------------------ */
+   661→
+   662→export function SubjectDrawer({
+   663→  subject,
+   664→  target,
+   665→  globalTarget,
+   666→  open,
+   667→  onOpenChange,
+   668→}: {
+   669→  subject: SubjectView | null;
+   670→  target: number;
+   671→  globalTarget: number;
+   672→  open: boolean;
+   673→  onOpenChange: (open: boolean) => void;
+   674→}) {
+   675→  const history = useQuery({
+   676→    queryKey: qk.history,
+   677→    queryFn: fetchHistory,
+   678→    enabled: open,
+   679→    refetchInterval: 60_000,
+   680→  });
+   681→  const timetable = useQuery({
+   682→    queryKey: qk.timetable,
+   683→    queryFn: fetchTimetable,
+   684→    enabled: open,
+   685→    refetchInterval: 120_000,
+   686→  });
+   687→
+   688→  if (!subject) return null;
+   689→  const c = statusColors(subject.status);
+   690→  const mySlots = (timetable.data ?? []).filter((s) => s.subjectCode === subject.code);
+   691→
+   692→  return (
+   693→    <Sheet open={open} onOpenChange={onOpenChange}>
+   694→      <SheetContent side="right" className="w-full overflow-y-auto p-0 sm:max-w-md md:max-w-lg">
+   695→        <div className="sr-only">
+   696→          <SheetHeader>
+   697→            <SheetTitle>{subject.name} attendance details</SheetTitle>
+   698→            <SheetDescription>
+   699→              Detailed statistics, what-if planning, trend and weekly schedule for {subject.code}.
+   700→            </SheetDescription>
+   701→          </SheetHeader>
+   702→        </div>
+   703→
+   704→        {/* Status gradient header */}
+   705→        <div className={cn("relative overflow-hidden border-b p-5", c.bg, c.border)}>
+   706→          <div
+   707→            aria-hidden="true"
+   708→            className={cn(
+   709→              "pointer-events-none absolute -right-10 -top-14 size-40 rounded-full blur-2xl opacity-30",
+   710→              subject.status === "safe" ? "bg-emerald-500" : subject.status === "warning" ? "bg-amber-500" : "bg-red-500"
+   711→            )}
+   712→          />
+   713→          <div className="relative flex items-start justify-between gap-3 pr-10 sm:pr-5">
+   714→            <div className="min-w-0">
+   715→              <div className="flex flex-wrap items-center gap-2">
+   716→                <span className={cn("rounded-md bg-background/70 px-2 py-0.5 font-mono text-[11px] font-bold backdrop-blur", c.text)}>
+   717→                  {subject.code}
+   718→                </span>
+   719→                <StatusChip status={subject.status} target={subject.targetPct} />
+   720→                {subject.hasCustomTarget && <CustomTargetChip target={subject.targetPct} />}
+   721→              </div>
+   722→              <h2 className="mt-1.5 truncate text-lg font-semibold tracking-tight">{subject.name}</h2>
+   723→              <p className="mt-0.5 flex items-center gap-1 text-xs text-muted-foreground">
+   724→                <History className="size-3" aria-hidden="true" />
+   725→                Updated {fmtDT(subject.updatedAt)}
+   726→              </p>
+   727→            </div>
+   728→            <div className="shrink-0 text-right">
+   729→              <p className={cn("text-3xl font-bold tracking-tight tabular-nums", c.text)}>
+   730→                <AnimatedNumber value={subject.percentage} suffix="%" />
+   731→              </p>
+   732→              <p className="text-[11px] text-muted-foreground">
+   733→                target {subject.targetPct}%{subject.hasCustomTarget ? " · custom" : ""}
+   734→              </p>
+   735→            </div>
+   736→          </div>
+   737→          <MiniBar percentage={subject.percentage} status={subject.status} target={subject.targetPct} className="relative mt-3.5 h-2.5" />
+   738→        </div>
+   739→
+   740→        <div className="space-y-4 p-5">
+   741→          {/* Stats */}
+   742→          <div className="grid grid-cols-4 gap-2 text-center">
+   743→            <div className="rounded-lg border border-border/60 bg-card px-2 py-2.5">
+   744→              <p className="text-lg font-semibold tabular-nums text-emerald-700 dark:text-emerald-400">{subject.present}</p>
+   745→              <p className="text-[10px] font-medium uppercase tracking-wide text-muted-foreground">Present</p>
+   746→            </div>
+   747→            <div className="rounded-lg border border-border/60 bg-card px-2 py-2.5">
+   748→              <p className="text-lg font-semibold tabular-nums text-red-700 dark:text-red-400">{subject.absent}</p>
+   749→              <p className="text-[10px] font-medium uppercase tracking-wide text-muted-foreground">Missed</p>
+   750→            </div>
+   751→            <div className="rounded-lg border border-border/60 bg-card px-2 py-2.5">
+   752→              <p className="text-lg font-semibold tabular-nums">{subject.total}</p>
+   753→              <p className="text-[10px] font-medium uppercase tracking-wide text-muted-foreground">Total</p>
+   754→            </div>
+   755→            <div className="rounded-lg border border-border/60 bg-card px-2 py-2.5">
+   756→              <p
+   757→                className={cn(
+   758→                  "text-lg font-semibold tabular-nums",
+   759→                  subject.classesToTarget > 0 ? "text-amber-600 dark:text-amber-400" : "text-emerald-600 dark:text-emerald-400"
+   760→                )}
+   761→              >
+   762→                {subject.classesToTarget > 0 ? subject.classesToTarget : "✓"}
+   763→              </p>
+   764→              <p className="text-[10px] font-medium uppercase tracking-wide text-muted-foreground">
+   765→                {subject.classesToTarget > 0 ? "To reach" : "On target"}
+   766→              </p>
+   767→            </div>
+   768→          </div>
+   769→
+   770→          <WhatIfPlanner key={subject.id} s={subject} target={subject.targetPct} />
+   771→
+   772→          <SubjectTargetEditor s={subject} globalTarget={globalTarget} />
+   773→
+   774→          <SubjectTrend history={history.data} code={subject.code} />
+   775→
+   776→          <SubjectChanges code={subject.code} />
+   777→
+   778→          <SubjectTimetable slots={mySlots} subjectCode={subject.code} subjectName={subject.name} />
+   779→
+   780→          <Separator />
+   781→          <p className="pb-2 text-center text-[11px] leading-relaxed text-muted-foreground">
+   782→            Numbers are recalculated from the ERP mirror on every sync — present ÷ total × 100. This panel never
+   783→            writes to the ERP.
+   784→          </p>
+   785→        </div>
+   786→      </SheetContent>
+   787→    </Sheet>
+   788→  );
+   789→}
+   790→

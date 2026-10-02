@@ -1,0 +1,755 @@
+     1→     1→"use client";
+     2→     2→
+     3→     3→import { useQuery } from "@tanstack/react-query";
+     4→     4→import { useMemo, useState } from "react";
+     5→     5→import { isToday } from "date-fns";
+     6→     6→import {
+     7→     7→  AlertTriangle,
+     8→     8→  ArrowRight,
+     9→     9→  ArrowDownUp,
+    10→    10→  BellRing,
+    11→    11→  CalendarClock,
+    12→    12→  CheckCircle2,
+    13→    13→  ChevronRight,
+    14→    14→  FlaskConical,
+    15→    15→  CalendarRange,
+    16→    16→  GraduationCap,
+    17→    17→  Hourglass,
+    18→    18→  Info,
+    19→    19→  ClipboardList,
+    20→    20→  Layers,
+    21→    21→  WifiOff,
+    22→    22→  XCircle,
+    23→    23→} from "lucide-react";
+    24→    24→import { Badge } from "@/components/ui/badge";
+    25→    25→import { Button } from "@/components/ui/button";
+    26→    26→import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+    27→    27→import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+    28→    28→import { Separator } from "@/components/ui/separator";
+    29→    29→import { motion } from "framer-motion";
+    30→    30→import { cn } from "@/lib/utils";
+    31→    31→import { compactErrorText } from "@/lib/compact-error";
+    32→    32→import { fetchDashboard, fetchHistory, qk } from "./api";
+    33→    33→import { WeeklyDigestDialog } from "./digest-dialog";
+    34→    34→import { SubjectDrawer } from "./subject-drawer";
+    35→    35→import { TimetableCard } from "./timetable-card";
+    36→    36→import {
+    37→    37→  ago,
+    38→    38→  dueGroup,
+    39→    39→  EmptyHero,
+    40→    40→  fmtDT,
+    41→    41→  CustomTargetChip,
+    42→    42→  KindIcon,
+    43→    43→  MiniBar,
+    44→    44→  ProgressRing,
+    45→    45→  SourceBadge,
+    46→    46→  statusColors,
+    47→    47→  StatCard,
+    48→    48→  StatusChip,
+    49→    49→  TypeIcon,
+    50→    50→  useNow,
+    51→    51→} from "./shared";
+    52→    52→import type { ChangeEvent, Reminder, SubjectView } from "./types";
+    53→    53→
+    54→    54→/* ------------------------------------------------------------------ */
+    55→    55→
+    56→    56→const SUBJECT_SORTS = [
+    57→    57→  { key: "lowest", label: "Lowest attendance first" },
+    58→    58→  { key: "highest", label: "Highest attendance first" },
+    59→    59→  { key: "name", label: "Name A–Z" },
+    60→    60→  { key: "recent", label: "Recently updated" },
+    61→    61→] as const;
+    62→    62→
+    63→    63→type SubjectSort = (typeof SUBJECT_SORTS)[number]["key"];
+    64→    64→
+    65→    65→function sortSubjects(list: SubjectView[], sort: SubjectSort): SubjectView[] {
+    66→    66→  const copy = [...list];
+    67→    67→  switch (sort) {
+    68→    68→    case "lowest":
+    69→    69→      return copy.sort((a, b) => a.percentage - b.percentage);
+    70→    70→    case "highest":
+    71→    71→      return copy.sort((a, b) => b.percentage - a.percentage);
+    72→    72→    case "name":
+    73→    73→      return copy.sort((a, b) => a.name.localeCompare(b.name));
+    74→    74→    case "recent":
+    75→    75→      return copy.sort((a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime());
+    76→    76→  }
+    77→    77→}
+    78→    78→
+    79→    79→/** Live countdown label for the next upcoming deadline. */
+    80→    80→function countdownLabel(dueAt: string, now: number): string {
+    81→    81→  const diff = new Date(dueAt).getTime() - now;
+    82→    82→  const abs = Math.abs(diff);
+    83→    83→  const mins = Math.round(abs / 60_000);
+    84→    84→  const hours = Math.round(abs / 3_600_000);
+    85→    85→  const days = Math.round(abs / 86_400_000);
+    86→    86→  let span: string;
+    87→    87→  if (mins < 60) span = `${mins} min`;
+    88→    88→  else if (hours < 36) span = `${hours} hr${hours === 1 ? "" : "s"}`;
+    89→    89→  else span = `${days} day${days === 1 ? "" : "s"}`;
+    90→    90→  return diff >= 0 ? `in ${span}` : `${span} overdue`;
+    91→    91→}
+    92→    92→
+    93→    93→function NextUpStrip({ items }: { items: Reminder[] }) {
+    94→    94→  const now = useNow();
+    95→    95→  const upcoming = items
+    96→    96→    .filter((r) => r.status === "ACTIVE" && r.type !== "ATTENDANCE_WARNING")
+    97→    97→    .sort((a, b) => new Date(a.dueAt).getTime() - new Date(b.dueAt).getTime());
+    98→    98→  const overdue = upcoming.filter((r) => new Date(r.dueAt).getTime() < now);
+    99→    99→  const next = upcoming.find((r) => new Date(r.dueAt).getTime() >= now);
+   100→   100→
+   101→   101→  if (upcoming.length === 0) return null;
+   102→   102→  const shown = overdue.length > 0 ? overdue[0] : (next ?? upcoming[0]);
+   103→   103→  const isOverdue = new Date(shown.dueAt).getTime() < now;
+   104→   104→
+   105→   105→  return (
+   106→   106→    <div
+   107→   107→      className={cn(
+   108→   108→        "flex items-center gap-3 rounded-xl border px-4 py-3",
+   109→   109→        isOverdue ? "border-red-500/30 bg-red-500/[0.05]" : "border-primary/25 bg-primary/[0.04]"
+   110→   110→      )}
+   111→   111→    >
+   112→   112→      <span
+   113→   113→        className={cn(
+   114→   114→          "flex size-9 shrink-0 items-center justify-center rounded-lg",
+   115→   115→          isOverdue ? "bg-red-500/10 text-red-600 dark:text-red-400" : "bg-emerald-500/10 text-emerald-600 dark:text-emerald-400"
+   116→   116→        )}
+   117→   117→      >
+   118→   118→        <Hourglass className="size-4" aria-hidden="true" />
+   119→   119→      </span>
+   120→   120→      <div className="min-w-0 flex-1">
+   121→   121→        <p className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
+   122→   122→          Next up {overdue.length > 0 && <span className="text-red-500">· {overdue.length} overdue</span>}
+   123→   123→        </p>
+   124→   124→        <p className="truncate text-sm font-medium">{shown.title}</p>
+   125→   125→      </div>
+   126→   126→      <div className="shrink-0 text-right">
+   127→   127→        <p
+   128→   128→          className={cn(
+   129→   129→            "text-sm font-bold tabular-nums",
+   130→   130→            isOverdue ? "text-red-600 dark:text-red-400" : "text-emerald-600 dark:text-emerald-400"
+   131→   131→          )}
+   132→   132→        >
+   133→   133→          {countdownLabel(shown.dueAt, now)}
+   134→   134→        </p>
+   135→   135→        <p className="text-[11px] text-muted-foreground">{fmtDT(shown.dueAt)}</p>
+   136→   136→      </div>
+   137→   137→    </div>
+   138→   138→  );
+   139→   139→}
+   140→   140→
+   141→   141→/* ------------------------------------------------------------------ */
+   142→   142→
+   143→   143→function DueBadge({ iso, now }: { iso: string; now: number }) {
+   144→   144→  const d = new Date(iso);
+   145→   145→  if (d.getTime() < now && !isToday(d)) {
+   146→   146→    return <span className="text-xs font-medium text-red-600 dark:text-red-400">{fmtDT(iso)} · overdue</span>;
+   147→   147→  }
+   148→   148→  return <span className="text-xs text-muted-foreground">{fmtDT(iso)}</span>;
+   149→   149→}
+   150→   150→
+   151→   151→function ReminderPreviewRow({ r, now }: { r: Reminder; now: number }) {
+   152→   152→  return (
+   153→   153→    <li className="flex items-start gap-2.5 rounded-lg border border-border/50 p-2.5 transition-colors hover:bg-muted/50">
+   154→   154→      <TypeIcon type={r.type} />
+   155→   155→      <div className="min-w-0 flex-1">
+   156→   156→        <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
+   157→   157→          <p className="min-w-0 flex-1 truncate text-sm font-medium">{r.title}</p>
+   158→   158→          <SourceBadge source={r.source} />
+   159→   159→        </div>
+   160→   160→        <div className="mt-0.5 flex items-center gap-2">
+   161→   161→          <DueBadge iso={r.dueAt} now={now} />
+   162→   162→        </div>
+   163→   163→      </div>
+   164→   164→    </li>
+   165→   165→  );
+   166→   166→}
+   167→   167→
+   168→   168→function RemindersPreview({
+   169→   169→  items,
+   170→   170→  todayCount,
+   171→   171→  weekCount,
+   172→   172→  alaPending,
+   173→   173→  alaTotal,
+   174→   174→  onOpenReminders,
+   175→   175→}: {
+   176→   176→  items: Reminder[];
+   177→   177→  todayCount: number;
+   178→   178→  weekCount: number;
+   179→   179→  alaPending: number;
+   180→   180→  alaTotal: number;
+   181→   181→  onOpenReminders: () => void;
+   182→   182→}) {
+   183→   183→  const now = useNow();
+   184→   184→  const groups: { key: string; label: string; className: string; items: Reminder[] }[] = [
+   185→   185→    { key: "overdue", label: "Overdue", className: "text-red-600 dark:text-red-400", items: [] },
+   186→   186→    { key: "today", label: "Today", className: "text-emerald-600 dark:text-emerald-400", items: [] },
+   187→   187→    { key: "tomorrow", label: "Tomorrow", className: "", items: [] },
+   188→   188→    { key: "week", label: "This week", className: "", items: [] },
+   189→   189→    { key: "later", label: "Later", className: "", items: [] },
+   190→   190→  ];
+   191→   191→  for (const r of items) {
+   192→   192→    const g = dueGroup(r.dueAt, r.status, now);
+   193→   193→    const bucket = groups.find((x) => x.key === g);
+   194→   194→    if (bucket) bucket.items.push(r);
+   195→   195→  }
+   196→   196→  const visible = groups.filter((g) => g.items.length > 0);
+   197→   197→
+   198→   198→  return (
+   199→   199→    <Card className="rounded-xl border-border/60">
+   200→   200→      <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-3">
+   201→   201→        <div>
+   202→   202→          <CardTitle className="text-base tracking-tight">Reminders</CardTitle>
+   203→   203→          <CardDescription className="text-xs">Next deadlines from the ERP and your own list</CardDescription>
+   204→   204→        </div>
+   205→   205→        <div className="flex gap-1.5">
+   206→   206→          <Badge variant="secondary" className="tabular-nums">{todayCount} today</Badge>
+   207→   207→          <Badge variant="secondary" className="tabular-nums">{weekCount} this week</Badge>
+   208→   208→        </div>
+   209→   209→      </CardHeader>
+   210→   210→      <CardContent>
+   211→   211→        {items.length === 0 ? (
+   212→   212→          <p className="py-6 text-center text-sm text-muted-foreground">No active reminders</p>
+   213→   213→        ) : (
+   214→   214→          <div className="max-h-96 space-y-3 overflow-y-auto pr-1">
+   215→   215→            {visible.map((g) => (
+   216→   216→              <div key={g.key}>
+   217→   217→                <p className={cn("mb-1.5 text-xs font-semibold uppercase tracking-wide", g.className)}>{g.label}</p>
+   218→   218→                <ul className="space-y-1.5">
+   219→   219→                  {g.items.slice(0, 5).map((r) => (
+   220→   220→                    <ReminderPreviewRow key={r.id} r={r} now={now} />
+   221→   221→                  ))}
+   222→   222→                </ul>
+   223→   223→              </div>
+   224→   224→            ))}
+   225→   225→          </div>
+   226→   226→        )}
+   227→   227→        {alaTotal > 0 && (
+   228→   228→          <button
+   229→   229→            type="button"
+   230→   230→            onClick={onOpenReminders}
+   231→   231→            aria-label={`Open the Reminders tab — ${alaPending} of ${alaTotal} ALA and assignment submissions still pending`}
+   232→   232→            className="mt-3 flex w-full items-center gap-2 rounded-lg border border-primary/25 bg-primary/[0.05] px-3 py-2 text-left text-xs transition-colors hover:bg-primary/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+   233→   233→          >
+   234→   234→            <ClipboardList className="size-3.5 shrink-0 text-primary" aria-hidden="true" />
+   235→   235→            <span className="min-w-0 flex-1 truncate">
+   236→   236→              <span className="font-semibold">ALA &amp; assignments</span>{" "}
+   237→   237→              <span className="text-muted-foreground">
+   238→   238→                · {alaPending} of {alaTotal} pending — subject-wise list in the Reminders tab
+   239→   239→              </span>
+   240→   240→            </span>
+   241→   241→            <ChevronRight className="size-3.5 shrink-0 text-muted-foreground" aria-hidden="true" />
+   242→   242→          </button>
+   243→   243→        )}
+   244→   244→      </CardContent>
+   245→   245→    </Card>
+   246→   246→  );
+   247→   247→}
+   248→   248→
+   249→   249→/* ------------------------------------------------------------------ */
+   250→   250→
+   251→   251→function ErpStatusCard({
+   252→   252→  connected,
+   253→   253→  demoMode,
+   254→   254→  username,
+   255→   255→  sync,
+   256→   256→}: {
+   257→   257→  connected: boolean;
+   258→   258→  demoMode: boolean;
+   259→   259→  username: string | null;
+   260→   260→  sync: {
+   261→   261→    status: string;
+   262→   262→    lastSyncAt: string | null;
+   263→   263→    lastSuccessAt: string | null;
+   264→   264→    nextScheduledSyncAt: string | null;
+   265→   265→    consecutiveFailures: number;
+   266→   266→  };
+   267→   267→}) {
+   268→   268→  const now = useNow();
+   269→   269→  return (
+   270→   270→    <Card className="rounded-xl border-border/60">
+   271→   271→      <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-3">
+   272→   272→        <div>
+   273→   273→          <CardTitle className="text-base tracking-tight">ERP connection</CardTitle>
+   274→   274→          <CardDescription className="text-xs">erp.gmiu.edu.in · read-only source of truth</CardDescription>
+   275→   275→        </div>
+   276→   276→        {connected ? (
+   277→   277→          <CheckCircle2 className="size-5 text-emerald-500" aria-hidden="true" />
+   278→   278→        ) : demoMode ? (
+   279→   279→          <FlaskConical className="size-5 text-amber-500" aria-hidden="true" />
+   280→   280→        ) : (
+   281→   281→          <WifiOff className="size-5 text-muted-foreground" aria-hidden="true" />
+   282→   282→        )}
+   283→   283→      </CardHeader>
+   284→   284→      <CardContent className="space-y-3">
+   285→   285→        <p className="text-lg font-semibold tracking-tight">
+   286→   286→          {connected ? (
+   287→   287→            <span className="text-emerald-600 dark:text-emerald-400">
+   288→   288→              ✓ Connected{username ? ` · ${username}` : ""}
+   289→   289→            </span>
+   290→   290→          ) : demoMode ? (
+   291→   291→            <span className="text-amber-600 dark:text-amber-400">Demo ERP simulator</span>
+   292→   292→          ) : (
+   293→   293→            <span className="text-muted-foreground">Not connected</span>
+   294→   294→          )}
+   295→   295→        </p>
+   296→   296→        <Separator />
+   297→   297→        <dl className="space-y-2 text-sm">
+   298→   298→          <div className="flex items-center justify-between gap-2">
+   299→   299→            <dt className="text-muted-foreground">Last synced</dt>
+   300→   300→            <dd className="font-medium" title={fmtDT(sync.lastSyncAt)}>{ago(sync.lastSyncAt, now)}</dd>
+   301→   301→          </div>
+   302→   302→          <div className="flex items-center justify-between gap-2">
+   303→   303→            <dt className="text-muted-foreground">Next scheduled sync</dt>
+   304→   304→            <dd className="font-medium">{sync.nextScheduledSyncAt ? fmtDT(sync.nextScheduledSyncAt) : "—"}</dd>
+   305→   305→          </div>
+   306→   306→          {sync.consecutiveFailures > 0 && (
+   307→   307→            <div className="flex items-center justify-between gap-2 rounded-lg bg-amber-500/10 px-2.5 py-1.5 text-amber-700 dark:text-amber-400">
+   308→   308→              <dt className="flex items-center gap-1.5 font-medium">
+   309→   309→                <AlertTriangle className="size-3.5" aria-hidden="true" /> Consecutive failures
+   310→   310→              </dt>
+   311→   311→              <dd className="font-semibold tabular-nums">{sync.consecutiveFailures}</dd>
+   312→   312→            </div>
+   313→   313→          )}
+   314→   314→        </dl>
+   315→   315→      </CardContent>
+   316→   316→    </Card>
+   317→   317→  );
+   318→   318→}
+   319→   319→
+   320→   320→/* ------------------------------------------------------------------ */
+   321→   321→
+   322→   322→function ChangeRow({ c }: { c: ChangeEvent }) {
+   323→   323→  const now = useNow();
+   324→   324→  return (
+   325→   325→    <li className="flex items-start gap-2.5 rounded-lg border border-border/50 p-2.5 transition-colors hover:bg-muted/50">
+   326→   326→      <KindIcon kind={c.kind} />
+   327→   327→      <div className="min-w-0 flex-1">
+   328→   328→        <p className="text-sm leading-snug">{c.detail}</p>
+   329→   329→        <p className="mt-0.5 flex flex-wrap items-center gap-1.5 text-xs text-muted-foreground">
+   330→   330→          {c.subjectCode && (
+   331→   331→            <Badge variant="outline" className="px-1.5 py-0 font-mono text-[10px]">
+   332→   332→              {c.subjectCode}
+   333→   333→            </Badge>
+   334→   334→          )}
+   335→   335→          {ago(c.createdAt, now)}
+   336→   336→        </p>
+   337→   337→      </div>
+   338→   338→    </li>
+   339→   339→  );
+   340→   340→}
+   341→   341→
+   342→   342→/* ------------------------------------------------------------------ */
+   343→   343→
+   344→   344→function SubjectRow({ s, onOpen, shimmer }: { s: SubjectView; onOpen: () => void; shimmer: boolean }) {
+   345→   345→  const c = statusColors(s.status);
+   346→   346→  return (
+   347→   347→    <button
+   348→   348→      type="button"
+   349→   349→      onClick={onOpen}
+   350→   350→      className="flex w-full items-center gap-3 rounded-lg border border-border/50 p-3 text-left transition-all hover:border-primary/40 hover:bg-muted/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+   351→   351→      aria-label={`Open attendance details for ${s.name}`}
+   352→   352→    >
+   353→   353→      <span className={cn("hidden shrink-0 rounded-md px-2 py-1 font-mono text-[11px] font-semibold sm:block", c.bg, c.text)}>
+   354→   354→        {s.code}
+   355→   355→      </span>
+   356→   356→      <div className="min-w-0 flex-1">
+   357→   357→        <div className="flex items-center justify-between gap-2">
+   358→   358→          <p className="min-w-0 truncate text-sm font-medium">{s.name}</p>
+   359→   359→          <span className={cn("shrink-0 text-sm font-bold tabular-nums", c.text)}>{s.percentage.toFixed(2)}%</span>
+   360→   360→        </div>
+   361→   361→        <div className="mt-1.5 flex items-center gap-2">
+   362→   362→          <MiniBar percentage={s.percentage} status={s.status} target={s.targetPct} className="flex-1" shimmer={shimmer} />
+   363→   363→          {s.status !== "safe" && s.classesToTarget > 0 ? (
+   364→   364→            <span className="shrink-0 text-[11px] font-medium text-amber-600 dark:text-amber-400">
+   365→   365→              ⚠ needs {s.classesToTarget} more {s.classesToTarget === 1 ? "class" : "classes"}
+   366→   366→            </span>
+   367→   367→          ) : (
+   368→   368→            <span className="shrink-0 text-[11px] text-muted-foreground tabular-nums">
+   369→   369→              {s.present}/{s.total}
+   370→   370→            </span>
+   371→   371→          )}
+   372→   372→          {s.hasCustomTarget && <CustomTargetChip target={s.targetPct} className="shrink-0" />}
+   373→   373→        </div>
+   374→   374→      </div>
+   375→   375→      <ChevronRight className="size-4 shrink-0 text-muted-foreground/60" aria-hidden="true" />
+   376→   376→    </button>
+   377→   377→  );
+   378→   378→}
+   379→   379→
+   380→   380→/* ------------------------------------------------------------------ */
+   381→   381→
+   382→   382→function NotificationRow({
+   383→   383→  n,
+   384→   384→}: {
+   385→   385→  n: { id: string; title: string; message: string; severity: string; createdAt: string; read: boolean };
+   386→   386→}) {
+   387→   387→  const now = useNow();
+   388→   388→  const Icon =
+   389→   389→    n.severity === "critical"
+   390→   390→      ? XCircle
+   391→   391→      : n.severity === "warning"
+   392→   392→        ? AlertTriangle
+   393→   393→        : n.severity === "success"
+   394→   394→          ? CheckCircle2
+   395→   395→          : Info;
+   396→   396→  const cls =
+   397→   397→    n.severity === "critical"
+   398→   398→      ? "text-red-600 dark:text-red-400 bg-red-500/10"
+   399→   399→      : n.severity === "warning"
+   400→   400→        ? "text-amber-600 dark:text-amber-400 bg-amber-500/10"
+   401→   401→        : n.severity === "success"
+   402→   402→          ? "text-emerald-600 dark:text-emerald-400 bg-emerald-500/10"
+   403→   403→          : "text-muted-foreground bg-muted";
+   404→   404→  return (
+   405→   405→    <li className="flex items-start gap-2.5 rounded-lg p-2 transition-colors hover:bg-muted/50">
+   406→   406→      <span className={cn("mt-0.5 flex size-6 shrink-0 items-center justify-center rounded-md", cls)}>
+   407→   407→        <Icon className="size-3.5" aria-hidden="true" />
+   408→   408→      </span>
+   409→   409→      <div className="min-w-0 flex-1">
+   410→   410→        <p className="text-sm font-medium leading-snug">{n.title}</p>
+   411→   411→        <p className="line-clamp-2 text-xs text-muted-foreground">{compactErrorText(n.message, 240)}</p>
+   412→   412→        <p className="mt-0.5 text-[11px] text-muted-foreground/80">{ago(n.createdAt, now)}</p>
+   413→   413→      </div>
+   414→   414→      {!n.read && <span className="mt-1.5 size-1.5 shrink-0 rounded-full bg-primary" aria-label="unread" />}
+   415→   415→    </li>
+   416→   416→  );
+   417→   417→}
+   418→   418→
+   419→   419→/* ------------------------------------------------------------------ */
+   420→   420→
+   421→   421→function CardSkeletonLight({ className }: { className?: string }) {
+   422→   422→  return (
+   423→   423→    <Card className={cn("rounded-xl border-border/60", className)}>
+   424→   424→      <CardContent className="p-6">
+   425→   425→        <div className="animate-pulse space-y-3">
+   426→   426→          <div className="h-4 w-1/3 rounded bg-muted" />
+   427→   427→          <div className="h-3 w-2/3 rounded bg-muted" />
+   428→   428→          <div className="h-20 w-full rounded bg-muted" />
+   429→   429→        </div>
+   430→   430→      </CardContent>
+   431→   431→    </Card>
+   432→   432→  );
+   433→   433→}
+   434→   434→
+   435→   435→export function DashboardTab({
+   436→   436→  onOpenAttendance,
+   437→   437→  onOpenSettings,
+   438→   438→  onOpenReminders,
+   439→   439→}: {
+   440→   440→  onOpenAttendance: () => void;
+   441→   441→  onOpenSettings: () => void;
+   442→   442→  onOpenReminders: () => void;
+   443→   443→}) {
+   444→   444→  const [sort, setSort] = useState<SubjectSort>("lowest");
+   445→   445→  /* Store the CODE (not the object) and derive the view from fresh query data,
+   446→   446→     so the drawer reflects updated targets/percentages after refetches. */
+   447→   447→  const [selectedCode, setSelectedCode] = useState<string | null>(null);
+   448→   448→  const [digestOpen, setDigestOpen] = useState(false);
+   449→   449→  const { data, isPending, isError, error } = useQuery({
+   450→   450→    queryKey: qk.dashboard,
+   451→   451→    queryFn: fetchDashboard,
+   452→   452→    refetchInterval: 20_000,
+   453→   453→  });
+   454→   454→  const history = useQuery({
+   455→   455→    queryKey: qk.history,
+   456→   456→    queryFn: fetchHistory,
+   457→   457→    refetchInterval: 60_000,
+   458→   458→  });
+   459→   459→
+   460→   460→  const weekDelta = useMemo(() => {
+   461→   461→    const pts = history.data?.overall ?? [];
+   462→   462→    if (pts.length < 2) return null;
+   463→   463→    const cutoff = Date.now() - 7 * 24 * 3600 * 1000;
+   464→   464→    const first = pts.find((p) => new Date(p.t).getTime() >= cutoff) ?? pts[0];
+   465→   465→    const last = pts[pts.length - 1];
+   466→   466→    const d = last.percentage - first.percentage;
+   467→   467→    if (Math.abs(d) < 0.005) return null;
+   468→   468→    // Be honest about the window: when tracked history is younger than the
+   469→   469→    // 7-day span (e.g. live tracking just started), label the real span.
+   470→   470→    const spanDays = Math.max(
+   471→   471→      0,
+   472→   472→      (new Date(last.t).getTime() - new Date(first.t).getTime()) / 86_400_000
+   473→   473→    );
+   474→   474→    return { delta: d, spanDays, fullWeek: spanDays >= 6.5 };
+   475→   475→  }, [history.data]);
+   476→   476→
+   477→   477→  if (isPending) {
+   478→   478→    return (
+   479→   479→      <div className="space-y-4">
+   480→   480→        <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-5">
+   481→   481→          <CardSkeletonLight className="md:col-span-2 xl:col-span-2" />
+   482→   482→          <CardSkeletonLight />
+   483→   483→          <CardSkeletonLight />
+   484→   484→          <CardSkeletonLight />
+   485→   485→        </div>
+   486→   486→        <CardSkeletonLight />
+   487→   487→        <div className="grid gap-4 lg:grid-cols-2">
+   488→   488→          <CardSkeletonLight />
+   489→   489→          <CardSkeletonLight />
+   490→   490→        </div>
+   491→   491→      </div>
+   492→   492→    );
+   493→   493→  }
+   494→   494→
+   495→   495→  if (isError || !data) {
+   496→   496→    return (
+   497→   497→      <Card className="rounded-xl border-red-500/30 bg-red-500/5">
+   498→   498→        <CardContent className="flex items-center gap-3 p-6 text-sm text-red-600 dark:text-red-400">
+   499→   499→          <XCircle className="size-5 shrink-0" aria-hidden="true" />
+   500→   500→          Could not load the dashboard: {error?.message ?? "unknown error"}
+   501→   501→        </CardContent>
+   502→   502→      </Card>
+   503→   503→    );
+   504→   504→  }
+   505→   505→
+   506→   506→  const { overall, subjects, target, mode } = data;
+   507→   507→  const sorted = sortSubjects(subjects, sort);
+   508→   508→
+   509→   509→  if (mode === "none") {
+   510→   510→    return (
+   511→   511→      <EmptyHero
+   512→   512→        title="No ERP data available yet."
+   513→   513→        description="Connect your ERP account or run a first synchronization to fetch your attendance and reminders. Nothing is shown until real data arrives."
+   514→   514→        actionLabel="Connect / Sync ERP"
+   515→   515→        onAction={onOpenSettings}
+   516→   516→      />
+   517→   517→    );
+   518→   518→  }
+   519→   519→
+   520→   520→  return (
+   521→   521→    <motion.div
+   522→   522→      className="space-y-4"
+   523→   523→      initial="hidden"
+   524→   524→      animate="show"
+   525→   525→      variants={{
+   526→   526→        hidden: {},
+   527→   527→        show: { transition: { staggerChildren: 0.05 } },
+   528→   528→      }}
+   529→   529→    >
+   530→   530→      {/* Subject detail drawer (also covers what-if planning) */}
+   531→   531→      <SubjectDrawer
+   532→   532→        subject={data.subjects.find((s) => s.code === selectedCode) ?? null}
+   533→   533→        target={target}
+   534→   534→        globalTarget={target}
+   535→   535→        open={selectedCode !== null}
+   536→   536→        onOpenChange={(o) => {
+   537→   537→          if (!o) setSelectedCode(null);
+   538→   538→        }}
+   539→   539→      />
+   540→   540→
+   541→   541→      {/* Row 0 — next deadline countdown */}
+   542→   542→      <NextUpStrip items={data.reminders.items} />
+   543→   543→
+   544→   544→      {/* Row 1 — overall + stats */}
+   545→   545→      <motion.div
+   546→   546→        className="grid gap-4 md:grid-cols-2 xl:grid-cols-5"
+   547→   547→        variants={{ hidden: { opacity: 0, y: 10 }, show: { opacity: 1, y: 0, transition: { duration: 0.25, ease: "easeOut" } } }}
+   548→   548→      >
+   549→   549→        <Card className="erp-card-accent rounded-xl border-border/60 transition-shadow hover:shadow-md md:col-span-2 xl:col-span-2">
+   550→   550→          <CardContent className="flex flex-col items-center gap-4 p-6 sm:flex-row sm:gap-6">
+   551→   551→            <ProgressRing percentage={overall.percentage} target={target} size={150} animated />
+   552→   552→            <div className="min-w-0 flex-1 space-y-2.5 text-center sm:text-left">
+   553→   553→              <div className="flex flex-wrap items-center justify-center gap-2 sm:justify-start">
+   554→   554→                <h2 className="text-lg font-semibold tracking-tight">Overall attendance</h2>
+   555→   555→                {data.semester !== "all" && (
+   556→   556→                  <Badge
+   557→   557→                    variant="outline"
+   558→   558→                    className="gap-1 border-primary/40 text-primary"
+   559→   559→                    title="A semester partition is active — only this semester's ERP subjects are counted"
+   560→   560→                  >
+   561→   561→                    <GraduationCap className="size-3" aria-hidden="true" />
+   562→   562→                    Sem {data.semester}
+   563→   563→                  </Badge>
+   564→   564→                )}
+   565→   565→                <StatusChip status={overall.status} target={target} />
+   566→   566→                <Button
+   567→   567→                  variant="ghost"
+   568→   568→                  size="sm"
+   569→   569→                  className="ml-auto h-7 gap-1 rounded-full px-2.5 text-xs text-muted-foreground hover:text-foreground"
+   570→   570→                  onClick={() => setDigestOpen(true)}
+   571→   571→                  aria-label="Open the weekly attendance report"
+   572→   572→                >
+   573→   573→                  <CalendarRange className="size-3.5" aria-hidden="true" />
+   574→   574→                  This week
+   575→   575→                </Button>
+   576→   576→                {weekDelta !== null && (
+   577→   577→                  <span
+   578→   578→                    className={cn(
+   579→   579→                      "rounded-full px-2 py-0.5 text-[11px] font-semibold tabular-nums",
+   580→   580→                      weekDelta.delta >= 0
+   581→   581→                        ? "bg-emerald-500/10 text-emerald-600 dark:text-emerald-400"
+   582→   582→                        : "bg-red-500/10 text-red-600 dark:text-red-400"
+   583→   583→                    )}
+   584→   584→                    title={
+   585→   585→                      weekDelta.fullWeek
+   586→   586→                        ? "Change over the last 7 days"
+   587→   587→                        : `Change over the ${weekDelta.spanDays < 1 ? "first day" : `last ${Math.max(1, Math.round(weekDelta.spanDays))} day(s)`} of tracked history`
+   588→   588→                    }
+   589→   589→                  >
+   590→   590→                    {weekDelta.delta >= 0 ? "▲" : "▼"} {Math.abs(weekDelta.delta).toFixed(2)} pts{" "}
+   591→   591→                    {weekDelta.fullWeek
+   592→   592→                      ? "/ 7d"
+   593→   593→                      : weekDelta.spanDays < 1
+   594→   594→                        ? "· day 1"
+   595→   595→                        : `/ ${Math.max(1, Math.round(weekDelta.spanDays))}d`}
+   596→   596→                  </span>
+   597→   597→                )}
+   598→   598→              </div>
+   599→   599→              <p className="text-sm text-muted-foreground tabular-nums">
+   600→   600→                <span className="font-semibold text-foreground">{overall.present}</span> present of{" "}
+   601→   601→                <span className="font-semibold text-foreground">{overall.total}</span> classes
+   602→   602→                <span className="text-muted-foreground/70"> ({overall.absent} missed)</span>
+   603→   603→              </p>
+   604→   604→              <div className="space-y-1 text-sm">
+   605→   605→                {overall.classesToTarget > 0 ? (
+   606→   606→                  <p className="flex items-center justify-center gap-1.5 text-amber-600 dark:text-amber-400 sm:justify-start">
+   607→   607→                    <ArrowRight className="size-3.5 shrink-0" aria-hidden="true" />
+   608→   608→                    Attend the next <b className="tabular-nums">{overall.classesToTarget}</b>{" "}
+   609→   609→                    {overall.classesToTarget === 1 ? "class" : "classes"} to reach {target}%
+   610→   610→                  </p>
+   611→   611→                ) : (
+   612→   612→                  <p className="flex items-center justify-center gap-1.5 text-emerald-600 dark:text-emerald-400 sm:justify-start">
+   613→   613→                    <CheckCircle2 className="size-3.5 shrink-0" aria-hidden="true" />
+   614→   614→                    You are at or above the {target}% target
+   615→   615→                  </p>
+   616→   616→                )}
+   617→   617→                {overall.canSkip > 0 && (
+   618→   618→                  <p className="flex items-center justify-center gap-1.5 text-muted-foreground sm:justify-start">
+   619→   619→                    <CalendarClock className="size-3.5 shrink-0" aria-hidden="true" />
+   620→   620→                    You can skip <b className="tabular-nums text-foreground">{overall.canSkip}</b>{" "}
+   621→   621→                    {overall.canSkip === 1 ? "class" : "classes"} and stay above {target}%
+   622→   622→                  </p>
+   623→   623→                )}
+   624→   624→              </div>
+   625→   625→            </div>
+   626→   626→          </CardContent>
+   627→   627→        </Card>
+   628→   628→
+   629→   629→        <StatCard icon={Layers} label="Subjects" value={subjects.length} tone="emerald" />
+   630→   630→        <StatCard
+   631→   631→          icon={AlertTriangle}
+   632→   632→          label="Below target"
+   633→   633→          value={data.warningSubjects}
+   634→   634→          tone={data.warningSubjects > 0 ? "amber" : "default"}
+   635→   635→        />
+   636→   636→        <StatCard icon={BellRing} label="Active reminders" value={data.reminders.items.length} />
+   637→   637→      </motion.div>
+   638→   638→
+   639→   639→      {/* Weekly digest report dialog */}
+   640→   640→      <WeeklyDigestDialog open={digestOpen} onOpenChange={setDigestOpen} demoMode={mode === "demo"} />
+   641→   641→
+   642→   642→      {/* Row 2 — subject list */}
+   643→   643→      <Card className="rounded-xl border-border/60 transition-shadow hover:shadow-md">
+   644→   644→        <CardHeader className="flex flex-col gap-2 space-y-0 pb-3 sm:flex-row sm:items-center sm:justify-between">
+   645→   645→          <div className="min-w-0">
+   646→   646→            <CardTitle className="text-base tracking-tight">Subject attendance</CardTitle>
+   647→   647→            <CardDescription className="text-xs">Tap a subject for details and what-if planning</CardDescription>
+   648→   648→          </div>
+   649→   649→          <div className="flex items-center gap-1.5">
+   650→   650→            <Select value={sort} onValueChange={(v) => setSort(v as SubjectSort)}>
+   651→   651→              <SelectTrigger
+   652→   652→                className="h-8 w-full min-w-0 gap-1 text-xs sm:w-[190px]"
+   653→   653→                aria-label="Sort subjects"
+   654→   654→              >
+   655→   655→                <ArrowDownUp className="size-3.5 shrink-0 text-muted-foreground" aria-hidden="true" />
+   656→   656→                <SelectValue />
+   657→   657→              </SelectTrigger>
+   658→   658→              <SelectContent>
+   659→   659→                {SUBJECT_SORTS.map((o) => (
+   660→   660→                  <SelectItem key={o.key} value={o.key} className="text-xs">
+   661→   661→                    {o.label}
+   662→   662→                  </SelectItem>
+   663→   663→                ))}
+   664→   664→              </SelectContent>
+   665→   665→            </Select>
+   666→   666→            <Button variant="ghost" size="sm" className="h-8 shrink-0 gap-1 text-xs" onClick={onOpenAttendance}>
+   667→   667→              View all <ChevronRight className="size-3.5" aria-hidden="true" />
+   668→   668→            </Button>
+   669→   669→          </div>
+   670→   670→        </CardHeader>
+   671→   671→        <CardContent>
+   672→   672→          {subjects.length === 0 ? (
+   673→   673→            <p className="py-6 text-center text-sm text-muted-foreground">
+   674→   674→              {data.semester !== "all"
+   675→   675→                ? `No subjects synchronized for Semester ${data.semester}`
+   676→   676→                : "No subjects synchronized yet"}
+   677→   677→            </p>
+   678→   678→          ) : (
+   679→   679→            <div className="max-h-96 space-y-2 overflow-y-auto pr-1">
+   680→   680→              {sorted.map((s) => (
+   681→   681→                <SubjectRow
+   682→   682→                  key={s.id}
+   683→   683→                  s={s}
+   684→   684→                  onOpen={() => setSelectedCode(s.code)}
+   685→   685→                  shimmer={data.erp.sync.status === "syncing"}
+   686→   686→                />
+   687→   687→              ))}
+   688→   688→            </div>
+   689→   689→          )}
+   690→   690→        </CardContent>
+   691→   691→      </Card>
+   692→   692→
+   693→   693→      {/* Row 2.5 — today's schedule / weekly timetable */}
+   694→   694→      {subjects.length > 0 && <TimetableCard subjects={subjects} mode={data.mode} />}
+   695→   695→
+   696→   696→      {/* Row 3 — reminders preview + ERP status */}
+   697→   697→      <div className="grid gap-4 lg:grid-cols-2">
+   698→   698→        <RemindersPreview
+   699→   699→          items={data.reminders.items}
+   700→   700→          todayCount={data.reminders.todayCount}
+   701→   701→          weekCount={data.reminders.weekCount}
+   702→   702→          alaPending={data.reminders.alaPending}
+   703→   703→          alaTotal={data.reminders.alaTotal}
+   704→   704→          onOpenReminders={onOpenReminders}
+   705→   705→        />
+   706→   706→        <ErpStatusCard
+   707→   707→          connected={data.erp.connected}
+   708→   708→          demoMode={data.erp.demoMode ?? false}
+   709→   709→          username={data.erp.username}
+   710→   710→          sync={data.erp.sync}
+   711→   711→        />
+   712→   712→      </div>
+   713→   713→
+   714→   714→      {/* Row 4 — changes feed + notifications */}
+   715→   715→      <div className="grid gap-4 lg:grid-cols-2">
+   716→   716→        <Card className="rounded-xl border-border/60">
+   717→   717→          <CardHeader className="pb-3">
+   718→   718→            <CardTitle className="text-base tracking-tight">Recent ERP changes</CardTitle>
+   719→   719→            <CardDescription className="text-xs">Detected automatically by the sync engine</CardDescription>
+   720→   720→          </CardHeader>
+   721→   721→          <CardContent>
+   722→   722→            {data.changes.length === 0 ? (
+   723→   723→              <p className="py-6 text-center text-sm text-muted-foreground">No changes recorded yet</p>
+   724→   724→            ) : (
+   725→   725→              <ul className="max-h-96 space-y-1.5 overflow-y-auto pr-1">
+   726→   726→                {data.changes.slice(0, 8).map((c) => (
+   727→   727→                  <ChangeRow key={c.id} c={c} />
+   728→   728→                ))}
+   729→   729→              </ul>
+   730→   730→            )}
+   731→   731→          </CardContent>
+   732→   732→        </Card>
+   733→   733→
+   734→   734→        <Card className="rounded-xl border-border/60">
+   735→   735→          <CardHeader className="pb-3">
+   736→   736→            <CardTitle className="text-base tracking-tight">Recent notifications</CardTitle>
+   737→   737→            <CardDescription className="text-xs">{data.unreadCount} unread</CardDescription>
+   738→   738→          </CardHeader>
+   739→   739→          <CardContent>
+   740→   740→            {data.notifications.length === 0 ? (
+   741→   741→              <p className="py-6 text-center text-sm text-muted-foreground">Nothing here yet</p>
+   742→   742→            ) : (
+   743→   743→              <ul className="max-h-96 space-y-1 overflow-y-auto pr-1">
+   744→   744→                {data.notifications.slice(0, 5).map((n) => (
+   745→   745→                  <NotificationRow key={n.id} n={n} />
+   746→   746→                ))}
+   747→   747→              </ul>
+   748→   748→            )}
+   749→   749→          </CardContent>
+   750→   750→        </Card>
+   751→   751→      </div>
+   752→   752→    </motion.div>
+   753→   753→  );
+   754→   754→}
+   755→   755→

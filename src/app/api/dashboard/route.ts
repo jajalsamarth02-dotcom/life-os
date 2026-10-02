@@ -26,8 +26,13 @@ export async function GET() {
       where: {
         status: "ACTIVE",
         dueAt: { gte: new Date(now.getTime() - 12 * 3600 * 1000) },
-        // ALA/assignment rows live in their own subject-wise list (Reminders tab).
-        NOT: { externalId: { startsWith: ASSIGNMENT_EXT_PREFIX } },
+        // ALA/assignment rows live in their own subject-wise list (Reminders
+        // tab). Null-safe: a bare NOT + startsWith would also drop every row
+        // with externalId = null (SQL three-valued logic).
+        OR: [
+          { externalId: null },
+          { NOT: { externalId: { startsWith: ASSIGNMENT_EXT_PREFIX } } },
+        ],
       },
       orderBy: { dueAt: "asc" },
       take: 20,

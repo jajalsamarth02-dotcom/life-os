@@ -786,3 +786,52 @@ Unresolved issues / risks & next-phase priorities:
    TZ-aware calendar events; per-semester scoping stored on slots themselves (schema change →
    controlled dev-server restart).
 5. dev-server-keeper cron (job 430680) must stay alive; preview Caddy 502 self-heals ≤5 min.
+
+---
+Task ID: 11 (user request: reminders subject-wise list + completion + last date)
+Agent: Z.ai Code (main session, user chat)
+
+Task: "in reminder add ala list sub wise and show complate or not and last date" — subject-wise
+reminders with completion status and last date. NOTE: a concurrent webDevReview round (job 430711)
+built the ALA & Assignments section (subject-wise, Submission Status, ERP End Date) in the SAME
+files during this task; both feature sets were merged and verified together.
+
+Work Log:
+- SCHEMA: Reminder.subjectCode String? added (db:push + prisma generate OK).
+- BACKEND: /api/reminders GET now joins subject meta (withSubjectMeta in src/lib/reminders.ts:
+  subjectName + subjectSemester resolved even for inactive subjects); POST/PATCH accept
+  subjectCode (validated, PERSONAL-only for PATCH). Sync engine tags ATTENDANCE_WARNING
+  reminders with subjectCode (erp:warn:<code>) on create AND update.
+- FRONTEND: Reminders tab gained a Timeline / By-subject segmented toggle. New SubjectGroupsList:
+  per-subject cards with deterministic hue dot + left border, code & Sem chips, "x/y done" +
+  emerald progress bar, red "N overdue" chip, "Last date:" (latest due in group); groups with
+  open work sort by soonest deadline, done-only groups sink. Rows carry an explicit status pill
+  (Complete / Not done / Dismissed), subject code chip, and a Link2 dropdown to link/unlink a
+  subject on personal reminders. New-reminder dialog has a Subject (optional) picker fed by the
+  cached attendance query. CSV export gained Subject + friendly status columns.
+- BUG (severe, introduced by the concurrent round and caught by my E2E): both /api/reminders and
+  /api/dashboard filtered ALA rows with bare NOT + startsWith on nullable externalId — SQL
+  three-valued logic made EVERY row with externalId = null vanish (i.e. all personal reminders,
+  including the user's real "Submit project report"). Fixed null-safe in both routes:
+  OR: [ { externalId: null }, { NOT: { startsWith: ASSIGNMENT_EXT_PREFIX } } ].
+- OPS: the running dev server cached the pre-schema Prisma client (sync failed every cycle with
+  "Unknown argument `subjectCode`"). HMR cannot reload the generated client, so after SIGTERM
+  left the old next-server wedged (holding :3000, refusing connections), it was SIGKILLed and
+  scripts/ensure-dev.sh brought a fresh server up in ~6s (keeper cron 430680 stood by). Also
+  hardened db.ts: self-heal probe now checks FIELDS (reminder.subjectCode, subject.semester),
+  not just models, and drops the cached client when the schema gains fields.
+- STYLING/QA hygiene: raw Prisma invocation dumps no longer reach the UI — compactErrorText()
+  (src/lib/compact-error.ts) reduces errors to the reason line; applied at engine capture
+  (SyncError), dashboard NotificationRow, and Settings sync-log tooltips.
+
+Stage Summary / verification:
+- bun run lint: clean. agent-browser E2E (desktop + 390px, scrollWidth 390/390, 0 console errors):
+  dialog create with subject picker → row lands in its subject group; checkbox done → toast +
+  "Complete" pill + group bar 100% + summary "1/3 completed"; show-completed reveals done groups;
+  link/unlink dropdown moves rows between groups ("Subject link removed" toast); delete via
+  confirm dialog ("Reminder deleted"). API cross-checked with curl (create/link/unlink/status,
+  reminders 2 real rows + assignments 47 rows, dashboard reminders include personal rows again).
+- Dev-server was restarted once (controlled, ~6s) for the Prisma client regen — next-server
+  previously wedged; keeper cron untouched and still active.
+- Next-phase suggestions: subject filter chip inside By-subject view; per-subject ALA deep-link
+  from dashboard card; fold L/H/E columns when real rows appear; digest email (SMTP).

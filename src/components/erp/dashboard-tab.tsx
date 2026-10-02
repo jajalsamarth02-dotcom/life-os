@@ -38,6 +38,7 @@ import {
   dueGroup,
   EmptyHero,
   fmtDT,
+  hueColors,
   CustomTargetChip,
   KindIcon,
   MiniBar,
@@ -319,22 +320,57 @@ function ErpStatusCard({
 
 /* ------------------------------------------------------------------ */
 
-function ChangeRow({ c }: { c: ChangeEvent }) {
+function ChangeRow({ c, onOpen }: { c: ChangeEvent; onOpen?: (code: string) => void }) {
   const now = useNow();
-  return (
-    <li className="flex items-start gap-2.5 rounded-lg border border-border/50 p-2.5 transition-colors hover:bg-muted/50">
+  const clickable = Boolean(onOpen && c.subjectCode);
+  const hue = c.subjectCode ? hueColors(c.subjectCode) : null;
+
+  const inner = (
+    <>
       <KindIcon kind={c.kind} />
       <div className="min-w-0 flex-1">
         <p className="text-sm leading-snug">{c.detail}</p>
         <p className="mt-0.5 flex flex-wrap items-center gap-1.5 text-xs text-muted-foreground">
-          {c.subjectCode && (
-            <Badge variant="outline" className="px-1.5 py-0 font-mono text-[10px]">
+          {c.subjectCode && hue && (
+            <Badge
+              variant="outline"
+              className="gap-1 border-transparent px-1.5 py-0 font-mono text-[10px]"
+              style={{ backgroundColor: hue.bg, color: hue.fg }}
+            >
               {c.subjectCode}
             </Badge>
           )}
           {ago(c.createdAt, now)}
         </p>
       </div>
+      {clickable && (
+        <ChevronRight
+          className="mt-1 size-3.5 shrink-0 text-muted-foreground/50 transition-transform group-hover/row:translate-x-0.5 group-hover/row:text-foreground"
+          aria-hidden="true"
+        />
+      )}
+    </>
+  );
+
+  if (!clickable) {
+    return (
+      <li className="flex items-start gap-2.5 rounded-lg border border-border/50 p-2.5 transition-colors hover:bg-muted/50">
+        {inner}
+      </li>
+    );
+  }
+
+  return (
+    <li className="group/row list-none p-0">
+      <button
+        type="button"
+        onClick={() => onOpen?.(c.subjectCode as string)}
+        aria-label={`Open ${c.subjectCode} in the subject drawer`}
+        title={`Open ${c.subjectCode} — attendance, trend and what-if planner`}
+        className="flex w-full items-start gap-2.5 rounded-lg border border-border/50 p-2.5 text-left transition-all hover:border-primary/40 hover:bg-muted/60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+      >
+        {inner}
+      </button>
     </li>
   );
 }
@@ -446,6 +482,8 @@ export function DashboardTab({
      so the drawer reflects updated targets/percentages after refetches. */
   const [selectedCode, setSelectedCode] = useState<string | null>(null);
   const [digestOpen, setDigestOpen] = useState(false);
+  const [showAllChanges, setShowAllChanges] = useState(false);
+  const [showAllNotifs, setShowAllNotifs] = useState(false);
   const { data, isPending, isError, error } = useQuery({
     queryKey: qk.dashboard,
     queryFn: fetchDashboard,
@@ -716,17 +754,38 @@ export function DashboardTab({
         <Card className="rounded-xl border-border/60">
           <CardHeader className="pb-3">
             <CardTitle className="text-base tracking-tight">Recent ERP changes</CardTitle>
-            <CardDescription className="text-xs">Detected automatically by the sync engine</CardDescription>
+            <CardDescription className="text-xs">
+              Detected automatically by the sync engine{data.changes.some((c) => c.subjectCode) && " — tap a code to open the subject"}
+            </CardDescription>
           </CardHeader>
           <CardContent>
             {data.changes.length === 0 ? (
               <p className="py-6 text-center text-sm text-muted-foreground">No changes recorded yet</p>
             ) : (
-              <ul className="max-h-96 space-y-1.5 overflow-y-auto pr-1">
-                {data.changes.slice(0, 8).map((c) => (
-                  <ChangeRow key={c.id} c={c} />
-                ))}
-              </ul>
+              <>
+                <ul className="max-h-96 space-y-1.5 overflow-y-auto pr-1">
+                  {(showAllChanges ? data.changes : data.changes.slice(0, 8)).map((c) => (
+                    <ChangeRow key={c.id} c={c} onOpen={setSelectedCode} />
+                  ))}
+                </ul>
+                {data.changes.length > 8 && (
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    className="mt-2 h-7 w-full gap-1 text-xs text-muted-foreground hover:text-foreground"
+                    onClick={() => setShowAllChanges((v) => !v)}
+                    aria-expanded={showAllChanges}
+                  >
+                    {showAllChanges ? (
+                      <>Show less</>
+                    ) : (
+                      <>
+                        Show all {data.changes.length} events <ChevronRight className="size-3.5" aria-hidden="true" />
+                      </>
+                    )}
+                  </Button>
+                )}
+              </>
             )}
           </CardContent>
         </Card>
@@ -740,11 +799,30 @@ export function DashboardTab({
             {data.notifications.length === 0 ? (
               <p className="py-6 text-center text-sm text-muted-foreground">Nothing here yet</p>
             ) : (
-              <ul className="max-h-96 space-y-1 overflow-y-auto pr-1">
-                {data.notifications.slice(0, 5).map((n) => (
-                  <NotificationRow key={n.id} n={n} />
-                ))}
-              </ul>
+              <>
+                <ul className="max-h-96 space-y-1 overflow-y-auto pr-1">
+                  {(showAllNotifs ? data.notifications : data.notifications.slice(0, 5)).map((n) => (
+                    <NotificationRow key={n.id} n={n} />
+                  ))}
+                </ul>
+                {data.notifications.length > 5 && (
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    className="mt-2 h-7 w-full gap-1 text-xs text-muted-foreground hover:text-foreground"
+                    onClick={() => setShowAllNotifs((v) => !v)}
+                    aria-expanded={showAllNotifs}
+                  >
+                    {showAllNotifs ? (
+                      <>Show less</>
+                    ) : (
+                      <>
+                        Show all {data.notifications.length} <ChevronRight className="size-3.5" aria-hidden="true" />
+                      </>
+                    )}
+                  </Button>
+                )}
+              </>
             )}
           </CardContent>
         </Card>
