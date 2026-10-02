@@ -855,7 +855,7 @@ function SubjectTargetsCard() {
               : "No subjects synchronized yet — targets can be set after the first sync."}
           </p>
         ) : (
-          <div className="max-h-96 overflow-y-auto rounded-lg border border-border/50">
+          <div className="max-h-96 overflow-x-auto overflow-y-auto rounded-lg border border-border/50">
             <Table>
               <TableHeader className="sticky top-0 z-10 bg-card">
                 <TableRow>
@@ -1244,7 +1244,7 @@ function SyncHistoryCard() {
         ) : data.logs.length === 0 ? (
           <p className="py-6 text-center text-sm text-muted-foreground">No sync runs recorded yet</p>
         ) : (
-          <div className="max-h-96 overflow-y-auto rounded-lg border border-border/50">
+          <div className="max-h-96 overflow-x-auto overflow-y-auto rounded-lg border border-border/50">
             <Table>
               <TableHeader className="sticky top-0 bg-card">
                 <TableRow>

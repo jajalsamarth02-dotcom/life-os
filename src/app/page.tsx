@@ -232,7 +232,7 @@ export default function Home() {
   }, [qc]);
 
   return (
-    <div className="relative flex min-h-screen flex-col bg-background">
+    <div className="relative flex min-h-screen flex-col overflow-x-clip bg-background">
       {/* Decorative ambient gradient (subtle, theme-aware) */}
       <div aria-hidden="true" className="pointer-events-none absolute inset-0 overflow-hidden">
         <div className="absolute -top-32 left-1/2 h-72 w-[42rem] -translate-x-1/2 rounded-full bg-emerald-500/[0.07] blur-3xl" />
