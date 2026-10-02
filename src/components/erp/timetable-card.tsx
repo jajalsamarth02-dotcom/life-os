@@ -178,7 +178,7 @@ function ManageTimetableDialog({
   return (
     <Dialog open={open} onOpenChange={setOpen}>
       <DialogTrigger asChild>
-        <Button variant="outline" size="sm" className="h-8 gap-1.5 text-xs">
+        <Button variant="outline" size="sm" className="h-8 gap-1.5 text-xs print:hidden">
           <Settings2 className="size-3.5" aria-hidden="true" />
           Manage
         </Button>
@@ -394,7 +394,7 @@ export function TimetableCard({
         <Button
           variant="ghost"
           size="icon"
-          className="size-8 shrink-0 text-muted-foreground"
+          className="size-8 shrink-0 text-muted-foreground print:hidden"
           disabled={slots.length === 0}
           onClick={() => {
             const filename = downloadTimetableIcs(slots, subjects);

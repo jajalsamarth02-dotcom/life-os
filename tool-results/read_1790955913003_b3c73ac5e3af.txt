@@ -1,0 +1,221 @@
+     1→1384 /home/z/my-project/worklog.md
+     2→
+     3→---
+     4→Task ID: 17 (webDevReview round 13, trace 1a0fc2dd5ff09b15-cron-agent-loop-202610022136 + incident window)
+     5→Agent: Z.ai Code (main orchestrator)
+     6→Task: Incident response & stabilization. User messages: "Application error: a client-side exception", "not working pls help", standing freeze "dont change and runnn". NO app code changes this task (freeze honored) — ops + diagnosis only.
+     7→
+     8→Current project status / assessment:
+     9→- STABLE at round end: server 200, next-server RSS 1.1GB (V8 heap capped via NODE_OPTIONS=--max-old-space-size=1024), ~2.2-2.4GB available, LIVE mode, 66.67%, 41/47 pending, sync idle with 1 honest recorded failure.
+    10→- ROOT CAUSE CHAIN (now fully understood): (1) ERP began hanging login/GET responses ~12:56-13:13Z (rate-limit suspected after ~200 successful syncs today) → one scheduled sync hung ~16.7min (SyncLog durationMs=999999, started 13:13:48Z, no errorCode) leaving SyncState stuck "syncing"; (2) hung-sync memory + QA Chromium concurrently → kernel OOM killed next-server (dmesg event, anon-rss 1.9GB); (3) repeated keeper restarts each hit the past-due nextScheduledSyncAt → immediate sync attempts while ERP still hanging; (4) user's open preview tab held stale Turbopack chunks across restarts → "Application error: a client-side exception" (NOT a code bug — fresh load + 4 tabs = 0 console errors, verified twice).
+    11→- Ops actions taken: SyncState reset to idle (failures=1 kept for honesty), stale sync.lock cleared, next sync pushed +15min (rest for the ERP), server restarted ONCE (pkill "next dev" then relaunch with heap cap — justified by user's explicit help request; no other kills), Chromium closed and now ALWAYS closed after QA (new protocol).
+    12→
+    13→Completed modifications / verified:
+    14→- NONE in app code (user freeze). Verification only: curl health (200, API consistent), 60s+ uptime watch with RSS sampling (stable 1.6GB pre-cap instance, then 1.1GB capped instance), browser smoke test (Dashboard renders, 66.67% visible, 0 console errors) with immediate close, memory confirmed 2.2GB+ free after.
+    15→
+    16→Unresolved issues / risks & next-phase priorities:
+    17→1. NEXT SYNC ~13:51Z (19:21 IST) is the ERP-recovery test: if it fails, backoff (backoffMinutes) lengthens automatically — verify SyncLog shows a clean typed errorCode (UNREACHABLE/timeouts) rather than another hang; if it hangs again >60s, consider raising REQUEST_TIMEOUT_MS review or longer manual cooldown (no code change yet — observe first).
+    18→2. If OOM recurs WITHOUT Chromium open: drop Turbopack cache (rm -rf .next) during a quiet minute, or reduce sync frequency via Settings (user action) to cut ERP pressure.
+    19→3. Keeper-spawned instances died unusually fast during the incident window (20-45s) — likely the same memory pressure; watch whether keeper instances survive now that the heap is capped and Chromium stays closed.
+    20→4. User decisions still pending: free 2nd notification channel (Telegram ⭐ / ntfy / Discord / email) and optional fixed daily digest time (their WhatsApp is enabled; digestTime unset).
+    21→5. Backlog unchanged: L/H/E columns folding, SMTP email digest, TZ anchor cosmetic, per-semester slot scoping.
+    22→6. User freeze: NO code changes unless a fresh-load-reproducible bug appears or the user asks.
+    23→7. dev-server-keeper cron (430680) must stay alive; preview Caddy 502 self-heals ≤5 min.
+    24→
+    25→---
+    26→Task ID: 16-OPS (incident addendum, 2026-10-02 21:20-21:40 IST)
+    27→Agent: Z.ai Code (main orchestrator)
+    28→Task: User reported "Application error: a client-side exception" + "not working pls help". Root-cause the dev-server crash loop and restore the app WITHOUT app-code changes (user freeze in effect).
+    29→
+    30→Current project status / assessment:
+    31→- ROOT CAUSE CHAIN (proven with live instrumentation): (1) one real cgroup OOM at ~21:05 (next-server 1.9GB RSS + leftover headless Chromium; oom_kill counter went 0->1, dmesg confirmed) -> (2) afterwards the sandbox supervisor began silently SIGTERM-ing next-server every few minutes ("Terminated" captured in stderr; no kernel OOM, no JS trace, catch blocks never ran), kill threshold observed anywhere between 1.24-1.64GB RSS (not a fixed line — host under memory pressure); (3) every keeper restart re-truncated its own log (`>/tmp/devsrv.log`, `tee dev.log`), erasing the death traces, which is why the loop looked mysterious; (4) processes spawned from agent Bash sessions (even setsid'd watchdogs) were also reaped.
+    32→- FIXES APPLIED (all ops-level, zero app-code changes): purged the bloated Turbopack .next cache (776MB on disk -> 0; cache loads into RAM on boot and was inflating RSS by ~300-400MB); relaunched with NODE_OPTIONS="--max-old-space-size=900" via plain nohup+disown (not setsid); marked the orphaned 'running' SyncLog row as failed (honest history). Attempted but ineffective: turbopack.memoryLimit in next.config.ts is an UNRECOGNIZED key in Next 16 (warning only — remove it on next natural restart); setsid-spawned watchdog (scripts/dev-watchdog.sh) got reaped by the same reaper — do not rely on it.
+    33→- RESULT: fresh instance stable 5+ min (200 OK, RSS steady 1.27-1.29GB with GC oscillation, /api/dashboard serving live data 66.67%). Keeper cron 430680 remains the backstop at 5-min cadence.
+    34→
+    35→Unresolved issues / risks & next-phase priorities:
+    36→1. If the crash loop returns: FIRST `rm -rf .next` (cache regrows over days and re-inflates boot RSS), then relaunch with the 900MB cap via nohup+disown. Do NOT let headless Chromium linger — close agent-browser after every QA pass.
+    37→2. next.config.ts still carries the unrecognized turbopack.memoryLimit key — harmless warning; remove during a quiet window.
+    38→3. User-facing guidance: preview errors = server was reaped; wait ~15s, refresh; keeper/watchdog restores automatically.
+    39→4. All app data safe (SQLite integrity ok, WhatsApp config intact, sync state clean).
+    40→
+    41→---
+    42→Task ID: 17
+    43→Agent: Z.ai Code (main orchestrator)
+    44→Task: Round task 21:45+08 — full crash-mode diagnosis (promised after user's "not working pls help"), QA via agent-browser, stability engineering + one small app increment (freeze eased ONLY for a single client-side feature per round mandate).
+    45→
+    46→Current project status / assessment:
+    47→- Server was found DOWN at round start (13:45:59Z, curl 000, zero bun/next processes) after serving clean 200s seconds earlier — the silent-kill pattern again. The platform auto-resurrected it at ~13:46:54Z (harness-spawned, no keeper fire due until 13:48:34Z — so resurrection ≈ 2.5 min after death, FASTER than the keeper's 5-min cadence; two independent respawn layers now confirmed).
+    48→- CONTROLLED EXPERIMENT (definitive): spawned two setsid+nohup detached processes from an agent Bash call — scripts/watchdog.sh (heartbeat+resurrector) and scripts/canary-sleep.sh (control). BOTH were killed within ~20s of the spawning tool call completing (each managed exactly 1 heartbeat). Meanwhile the harness-spawned dev server survived 25+ min across many tool calls. CONCLUSION: the sandbox reaps ALL agent-session-spawned background processes regardless of size/name; only harness/keeper/cron-spawned processes persist. => Local watchdogs are IMPOSSIBLE on this platform; do not retry scripts/watchdog.sh, dev-watchdog.sh, dev-keepalive.sh, ensure-dev.sh — they all die on spawn-session tool-call end.
+    49→- Kill taxonomy (consolidated with Task 16-OPS): (a) kernel/cgroup OOM — logged in dmesg (only ONE event, 21:07 era); (b) supervisor SIGTERM of next-server at pressure-dependent RSS line 1.24-1.64GB (observed "Terminated" in stderr, SyncLog row "Server process killed mid-sync (sandbox memory pressure)"); (c) agent-session spawn reaping (proven by experiment). Today's 21:18-21:44 deaths = mechanism (b); my watchdog deaths = mechanism (c).
+    50→- Live data healthy: /api/dashboard 200 (live mode, 8 subjects, 66.67% danger as expected); SyncLog latest row = scheduled LIVE sync success at 13:50:21Z; scheduler ticking normally.
+    51→
+    52→Completed modifications / verified:
+    53→1. package.json dev script now bakes the heap cap into EVERY restart path (keeper, harness auto-respawn, manual): `"dev": "NODE_OPTIONS=--max-old-space-size=900 next dev -p 3000 2>&1 | tee dev.log"`. 900 (not my initial 1536) aligned with Task 16-OPS's empirically-safe observation (capped instance RSS steady 1.27-1.29GB, below the observed kill line). Takes effect on the NEXT natural respawn; current pre-cap instance may still be killed once — its replacement will be capped. This is the single highest-value stability fix available without app changes.
+    54→2. App increment (round-mandated, client-side only, 1 file): dashboard-tab.tsx — new "Copy summary" pill chip next to "This week" in the Overall attendance card: copies a plain-text report (timestamp IST, overall %/classes/status/target, per-subject %/target/status/custom-target flags) via navigator.clipboard, with Copied-state icon feedback (2s) and inert fallback if clipboard is unavailable. Styling pass: Copy + This week chips unified (rounded-full, border-border/40, bg-background/40, hover:bg-accent) with aria-labels/tooltips.
+    55→3. QA: agent-browser single-page pass — HMR connected, ZERO console/page errors, Copy button present in a11y tree, screenshot /tmp/qa-copy-btn.png visually verified (ring 66.67%, chips render, LIVE badge, next-up strip intact). Browser CLOSED immediately after (protocol). Memory before/after QA: 2184MB available, no degradation. Server 200 throughout and after.
+    56→
+    57→Unresolved issues / risks & next-phase priorities:
+    58→1. Current (pre-cap) instance may be SIGTERM-ed once more before a capped one takes over — expected, self-healing ≤3 min via harness/keeper. Do NOT manual-restart from agent sessions (spawn gets reaped — mechanism (c)).
+    59→2. .next Turbopack cache regrows over days and re-inflates boot RSS: if crash frequency rises again, `rm -rf .next` during a quiet minute, then let keeper respawn.
+    60→3. next.config.ts still carries the unrecognized turbopack.memoryLimit key — remove during a quiet window WITH a controlled restart (editing it triggers a dev-server reload).
+    61→4. User decisions still pending: free 2nd notification channel (Telegram ⭐ / ntfy / Discord / email) and optional fixed daily WhatsApp digest time (WhatsApp enabled; digestTime unset — DO NOT send test/digest messages to the real phone during QA).
+    62→5. User-facing guidance stands: if preview shows "Application error", the server was reaped — wait ~15-30s, hard-refresh; auto-recovery ≤3 min.
+    63→6. Backlog unchanged: L/H/E columns folding into totals, SMTP email digest, TZ anchor cosmetic, per-semester slot scoping (needs schema + controlled restart).
+    64→7. Keeper cron 430680 must stay alive; worklog protocol: append-only, three-section handover.
+    65→
+    66→---
+    67→Task ID: 18
+    68→Agent: Z.ai Code (main orchestrator)
+    69→Task: Round task 22:00+08 — status assessment, cold-load QA, one new feature (Recovery pace & ETA) + styling detail pass. All client-side, no schema/API/server changes.
+    70→
+    71→Current project status / assessment:
+    72→- Server healthy at round start AND throughout: root+API 200, API /api/dashboard 38ms. next-server RSS 1460MB (still the PRE-cap instance — the 900MB NODE_OPTIONS cap from Task 17 activates on next natural respawn; kill line observed 1.24–1.64GB, so watch it). Memory available ~2.0GB before QA, 1974MB after — no degradation.
+    73→- No new OOM events in dmesg (only the known 21:07-era kill). The Task 17 diagnosis stands: (a) cgroup OOM, (b) supervisor SIGTERM at RSS pressure line, (c) agent-session spawn reaping. No watchdog attempts (impossible per Task 17 experiment).
+    74→- Timetable slots table is EMPTY ({slots:[]}) — the student never configured slots, so any timetable-dependent feature would be hollow. Chose a zero-config feature instead.
+    75→
+    76→Completed modifications / verified:
+    77→1. NEW FEATURE — src/components/erp/recovery-plan.tsx (new file, client-side only): "Recovery pace" card on the Attendance tab (between summary strip and trend chart). Derives the student's real attendance pace from /api/history snapshots: consecutive-snapshot deltas of (present,total) over the last 14 days → attended/held counts + classes-per-week. For at-risk students: data-driven ETA — "attend every class → back at target% around <date>" (= classesToTarget ÷ pacePerWeek weeks), status-colored box. For safe students: cushion view (canSkip ÷ pace = weeks of bunk buffer). Per-subject recovery rows (worst 5): classes-to-go + per-subject pace ETA (or honest "no pace yet"). "History CSV" button exports the full snapshot history via existing downloadCsv. Honest empty states for <2 snapshots / zero classes in window. No config needed — fills in automatically from sync data.
+    78→2. Styling pass (attendance-tab.tsx): WhatIfPlanner segmented control now has a spring-animated thumb (framer-motion layoutId, unique per subject) and the planner box tints to the projected status color while active (n>0). SubjectCards get hover lift (whileHover y:-2 with its OWN 0.15s transition so the entrance delay doesn't lag hover) + soft shadow. Overall summary strip gets a pinging red danger dot next to the status chip when at risk.
+    79→3. Verification: tsc --noEmit clean for src/ (remaining findings are pre-existing, outside the app: examples/, skills/, scripts/, and the known next.config.ts turbopack key). agent-browser cold-load: Dashboard + Attendance tabs, ZERO console errors/warnings; card renders with REAL data and the math is exact — 2 attended of 2 held in 14d = 1.0/week; overall 2/3=66.67% → 1 class to reach 75% (3/4); ETA Oct 9 (1 week). Screenshot /tmp/qa-recovery2.png visually verified (integers 2/2/1.0 after a decimals={0} fix — AnimatedNumber defaulted to 2 decimals on count tiles). Browser CLOSED immediately after; server 200 after.
+    80→
+    81→Unresolved issues / risks & next-phase priorities:
+    82→1. next-server RSS 1460MB on the pre-cap instance — if it dies, the respawn carries the 900MB heap cap (already in package.json dev script). Do NOT manual-restart from agent sessions (spawn reaping).
+    83→2. .next cache regrowth / next.config.ts unrecognized key — unchanged guidance from Task 17 (rm -rf .next + quiet-window edit with controlled restart).
+    84→3. User decisions still pending: 2nd free notification channel (Telegram ⭐ / ntfy / Discord / email) and optional fixed daily WhatsApp digest time (WhatsApp enabled, digestTime unset — never send test/digest to the real phone during QA).
+    85→4. Feature candidates if the student fills the timetable later: weekly bunk-budget per day (slots × canSkip). Backlog unchanged: L/H/E columns folding, SMTP digest, TZ cosmetic, per-semester scoping.
+    86→5. Keeper cron 430680 must stay alive; worklog protocol: append-only, three-section handover.
+    87→
+    88→---
+    89→Task ID: 19
+    90→Agent: Z.ai Code (main orchestrator)
+    91→Task: Round task 22:15+08 — status assessment, cold-load QA, hash deep-linking + PWA shortcuts feature, animated tab bar styling. All client-side, no schema/API changes.
+    92→
+    93→Current project status / assessment:
+    94→- Server healthy all round: 200s throughout, RSS ~1559MB (pre-cap instance; 900MB cap activates on next natural respawn — do NOT manual-restart). Memory ~1.95GB available before QA, no degradation after. No new OOM events.
+    95→- Cold-load QA at round start: 0 console errors/warnings. Sync-failure surfacing already exists (SyncFailureBanner + header freshness chip fresh/stale/degraded) — no gap there. Command palette already covers nav/sync/theme/semester/subjects; keyboard shortcuts 1-4/S/T/? already wired. Chose genuinely-missing feature set: URL deep-linking.
+    96→
+    97→Completed modifications / verified:
+    98→1. NEW FEATURE — hash deep-linking (src/app/page.tsx): every tab switch writes a shareable URL (/#attendance, /#reminders, /#settings) via history.replaceState (no history pollution); on load AND on hashchange, a valid hash selects the tab (PWA shortcuts, shared links, back/forward all work). Hydration-safe: initial state stays "dashboard", hash applied post-hydration in useEffect — no SSR mismatch.
+    99→2. NEW — PWA manifest shortcuts (public/manifest.json): long-press app icon now offers Attendance / Reminders / Settings deep links into the hash routes above.
+   100→3. STYLING — animated tab bar: active pill is now a framer-motion layoutId thumb that springs between tabs (unique "erp-tab-thumb"); active trigger bg made transparent (light+dark overrides, twMerge-safe) and content wrapped in a z-10 layer; replaces the instant bg swap with a smooth slide.
+   101→4. Verification: tsc --noEmit → zero errors under src/ (pre-existing non-src findings unchanged). agent-browser: opened http://localhost:3000/#attendance COLD → Attendance tab selected (deep link works); clicked Reminders → location.hash = "#reminders" (verified via eval); screenshot /tmp/qa-tabs.png visually verified (thumb pill renders on Reminders, ALA list intact: 41 pending/6 submitted, 20-overdue banner). Console 0 errors/warnings. Browser CLOSED immediately after; server 200 after.
+   102→
+   103→Unresolved issues / risks & next-phase priorities:
+   104→1. Pre-cap next-server RSS ~1559MB near the observed kill line — if it dies, expect a capped (900MB heap) respawn via keeper/harness within ~3 min; leave it alone.
+   105→2. next.config.ts unrecognized turbopack key + .next cache regrowth — unchanged Task 17 guidance.
+   106→3. User decisions still pending: 2nd free notification channel (Telegram ⭐ / ntfy / Discord / email) and optional fixed daily WhatsApp digest time (digestTime unset — never send test/digest to the real phone during QA).
+   107→4. Note: student's live data now shows 20 overdue ALAs across 4 subjects (worst COMPUTER NETWORKS, 6) — the overdue banner + WhatsApp digest already cover this; no action needed from us.
+   108→5. Feature idea parked pending timetable data: weekly bunk-budget per day (slots × canSkip) — timetable is still empty; deep-linked PWA shortcuts should make the app more accessible on the student's phone meanwhile.
+   109→6. Keeper cron 430680 must stay alive; worklog protocol: append-only, three-section handover.
+   110→
+   111→---
+   112→Task ID: 20
+   113→Agent: Z.ai Code (main orchestrator)
+   114→Task: Round task 22:30+08 — status assessment, cold-load QA, offline awareness + perfect-day streak features, StatusChip polish. All client-side, no schema/API changes.
+   115→
+   116→Current project status / assessment:
+   117→- Server healthy all round: 200s throughout; next-server RSS 1599MB (pre-cap instance; 900MB cap lands on next natural respawn — do NOT manual-restart, spawn reaping per Task 17). Memory ~1.88GB available after QA. No new OOM events.
+   118→- Cold-load QA at round start: 0 console errors/warnings. No prior offline handling anywhere (grep-verified) and no streak feature — both genuine gaps, chosen for this round.
+   119→
+   120→Completed modifications / verified:
+   121→1. NEW FEATURE — offline awareness: src/components/erp/use-offline.ts (new hook, navigator.onLine + online/offline events + sonner toasts on transitions) wired into src/app/page.tsx. When offline: amber banner under the header ("You're offline. Showing the last synced data…", role=status) — views keep rendering from the React Query cache, so no data work needed. On reconnect: success toast + banner auto-removes + next 20s poll refreshes.
+   122→2. NEW FEATURE — perfect-day streak (recovery-plan.tsx): groups FULL snapshot history into device-local days via consecutive (present,total) deltas; a day is "perfect" when held>0 and attended===held. Streak walks backwards from the most recent day with classes (clean yesterday still counts). Rendered as a Flame row under the pace tiles: "N perfect day(s) in a row · M perfect days all-time" with a tooltip definition. Honest with sparse data: hidden entirely when no classes recorded.
+   123→3. STYLING — StatusChip (shared.tsx) now leads with a status-colored dot (uses existing statusColors().bar), improving at-a-glance scanning everywhere chips appear (dashboard, attendance cards, summary strips).
+   124→4. Verification: tsc --noEmit → zero errors under src/. agent-browser functional QA: fired synthetic offline event → banner + toast appeared; fired online → DOM check confirmed [role=status] banner removed (earlier text match was the transient toast); console 0 errors. Streak math cross-checked against /api/history via python (only day with classes: 2026-10-02 2/2 → "1 perfect day in a row / 1 all-time" as rendered). Learned mid-QA: programmatic element.click() does NOT activate Radix tabs (activation is pointerdown-based) — used agent-browser's CDP click on the fresh a11y ref instead; hash + tab verified (#attendance + Recovery pace + streak text in DOM). Screenshot /tmp/qa-r20.png visually confirmed: chip dot, streak row, integer tiles. Browser CLOSED immediately; server 200 after.
+   125→
+   126→Unresolved issues / risks & next-phase priorities:
+   127→1. Pre-cap instance RSS ~1600MB and creeping with recompiles — if killed, capped respawn arrives ≤3 min; leave alone.
+   128→2. next.config.ts unrecognized key + .next cache regrowth — Task 17 guidance unchanged.
+   129→3. User decisions still pending: 2nd free notification channel (Telegram ⭐ / ntfy / Discord / email) and optional fixed daily WhatsApp digest time (never send test/digest to the real phone during QA).
+   130→4. Backlog unchanged: L/H/E columns folding (server-side parser — needs user consent), SMTP digest (needs credentials), TZ cosmetic, per-semester scoping (schema), weekly bunk-budget (needs timetable slots — still empty).
+   131→5. Testing note for future rounds: Radix tab/segmented interactions in QA must use real CDP clicks (agent-browser click <ref>), not JS element.click().
+   132→6. Keeper cron 430680 must stay alive; worklog protocol: append-only, three-section handover.
+   133→
+   134→---
+   135→Task ID: 21
+   136→Agent: Z.ai Code (main orchestrator)
+   137→Task: Round task 22:45+08 — status assessment, cold-load QA, Web Share feature + Manage-dialog empty-state polish. All client-side, no schema/API changes.
+   138→
+   139→Current project status / assessment:
+   140→- Server healthy: 200s throughout; next-server RSS ~1620MB (pre-cap instance; 900MB cap lands on next natural respawn — do NOT manual-restart). Memory ~1.9GB available. No new OOM events. Cold-load QA: 0 console errors.
+   141→- Dashboard already has Copy-summary chip, weekly report dialog, week-delta chip, NEXT UP strip, stat cards — feature chosen for the gap: mobile-native sharing (Web Share API), which Copy cannot cover.
+   142→
+   143→Completed modifications / verified:
+   144→1. NEW FEATURE — Share chip (dashboard-tab.tsx): Web Share API button next to Copy in the Overall attendance card, sharing the same plain-text summary (per-subject %, status, targets). Gated post-hydration on typeof navigator.share === "function" (hydration-safe: SSR never renders it). Only appears on capable devices (the student's phone) — verified hidden in headless Chromium (navigator.share undefined → chip absent, no errors) and code path shared with the proven copySummary text. Dismissed share sheets (AbortError) stay silent; success shows "Shared" for 2s.
+   145→2. STYLING — Manage-timetable dialog empty state (timetable-card.tsx): one muted line upgraded to a centered icon+title+hint block explaining that the ERP publishes no timetable and what setup unlocks (today's-schedule highlights, ongoing-class badges, weekly planning).
+   146→3. Verification: tsc --noEmit → zero errors under src/. agent-browser CDP QA: dashboard cold-load 0 errors; Share chip gating confirmed absent in headless; Manage dialog opened via CDP click (ref e20) and new empty-state copy found in the DOM ("The ERP does not publish a timetable page, so add…"); screenshot /tmp/qa-r21.png visually verified (overall card chips, delta chip, NEXT UP strip, stat cards all intact). Browser CLOSED immediately; server 200 after.
+   147→
+   148→Unresolved issues / risks & next-phase priorities:
+   149→1. Pre-cap instance RSS ~1620MB near the kill line — capped respawn ≤3 min if killed; leave alone.
+   150→2. next.config.ts unrecognized key + .next cache regrowth — Task 17 guidance unchanged.
+   151→3. User decisions still pending: 2nd free notification channel (Telegram ⭐ / ntfy / Discord / email) and optional fixed daily WhatsApp digest time (never send test/digest to the real phone during QA).
+   152→4. Backlog unchanged: L/H/E columns folding (server-side, needs user consent), SMTP digest (needs credentials), TZ cosmetic, per-semester scoping (schema), weekly bunk-budget (needs timetable slots — still empty).
+   153→5. Keeper cron 430680 must stay alive; worklog protocol: append-only, three-section handover.
+   154→
+   155→---
+   156→Task ID: 22
+   157→Agent: Z.ai Code (main orchestrator)
+   158→Task: Round task 23:00+08 — status assessment, cold-load QA, App-Router resilience pack (error/global-error/not-found/loading) + PWA app-badge feature. All additive files; only page.tsx modified among existing files.
+   159→
+   160→Current project status / assessment:
+   161→- Server healthy all round: 200s throughout; next-server RSS ~1.69GB (still the PRE-cap instance — 900MB cap lands on next natural respawn; do NOT manual-restart, spawn reaping per Task 17). Memory ~1.88GB available after QA. No new OOM events.
+   162→- Cold-load QA at round start: 0 console errors. Gap analysis vs previous rounds: reminders already has search/filter/sort, heatmap + subject drawer exist, share/offline/streak/deep-links done (R18-21). Genuine gaps found: (a) NO app-router error boundaries (error.tsx / global-error.tsx / not-found.tsx / loading.tsx all absent — a runtime crash showed the raw framework screen), (b) no PWA app-badge usage anywhere.
+   163→
+   164→Completed modifications / verified:
+   165→1. NEW — src/app/error.tsx (route error boundary): app-styled recovery card (ambient gradient, red icon ring, digest chip) with Try again (reset) + Reload page actions and honest ops hint ("server may be restarting — wait ~30s"). Logs the real stack to console.
+   166→2. NEW — src/app/global-error.tsx (root boundary): self-contained <html>/<body>, reads persisted theme from localStorage/document class (providers not mounted), inline-style neutral layout, reload button. Only fires if the root layout itself crashes.
+   167→3. NEW — src/app/not-found.tsx: styled 404 (emerald compass ring, big mono 404, "Back to Dashboard" Link). Verified FUNCTIONALLY: /definitely-not-a-page renders it (light + dark screenshots /tmp/qa-r22-404*.png), CDP click on "Back to Dashboard" returned to / with Dashboard tab selected.
+   168→4. NEW — src/app/loading.tsx: SSR route skeleton mirroring dashboard geometry (header, tab strip, ring card, stat tiles) using Skeleton + erp-shimmer (reduced-motion fallback already in globals.css). Could not be caught visually on fast local SSR — tsc-verified, standard contract.
+   169→5. NEW FEATURE — src/components/erp/use-app-badge.ts + page.tsx wiring: navigator.setAppBadge/clearAppBadge shows the overdue ERP-ALA count on the installed app icon (Android/desktop; iOS 17+ standalone). Count = ACTIVE + past-due rows from /api/assignments (qk.assignments, 60s poll) — SAME rule as the Reminders overdue banner; cross-checked via python: 20 overdue (matches worklog). Learned mid-round: dashboard's reminders.items holds only MANUAL reminders (0 overdue) — first wiring used it, caught by API cross-check, fixed to the assignments query. Feature-detected; silent no-op in headless (verified 0 console errors); failures swallowed (cosmetic).
+   170→6. Verification: tsc --noEmit → zero errors under src/. Root dashboard screenshot /tmp/qa-r22-root.png visually verified (LIVE badge, ring 66.67%, NEXT UP, stat cards, bell with in-app badge 1). /api/assignments confirmed fetched on root. Browser CLOSED immediately after; server 200 after.
+   171→
+   172→Unresolved issues / risks & next-phase priorities:
+   173→1. error.tsx / global-error.tsx / loading.tsx could NOT be triggered in live QA without injecting faults into the running app (refused — live mode); they are tsc-verified and follow the standard App Router contract. If a real crash ever surfaces, observe the new recovery UI instead of the raw framework screen.
+   174→2. Pre-cap instance RSS ~1.69GB — capped respawn ≤3 min if killed; leave alone.
+   175→3. next.config.ts unrecognized turbopack key + .next cache regrowth — Task 17 guidance unchanged.
+   176→4. User decisions still pending: 2nd free notification channel (Telegram ⭐ / ntfy / Discord / email) and optional fixed daily WhatsApp digest time (digestTime unset — never send test/digest to the real phone during QA).
+   177→5. Backlog unchanged: L/H/E columns folding (server-side, needs user consent), SMTP digest (needs credentials), TZ cosmetic, per-semester scoping (schema), weekly bunk-budget (needs timetable slots — still empty).
+   178→6. Keeper cron 430680 must stay alive; worklog protocol: append-only, three-section handover.
+   179→
+   180→---
+   181→Task ID: 23
+   182→Agent: Z.ai Code (main orchestrator)
+   183→Task: Round task 23:15+08 — status assessment, cold-load QA, Data & backups card (backup JSON + subjects CSV) + PRIVACY FIX in /api/export. Client UI additive; one-line server filter in export route.
+   184→
+   185→Current project status / assessment:
+   186→- Server healthy all round: 200s throughout; next-server RSS ~1.86GB (pre-cap instance; 900MB cap lands on next natural respawn — do NOT manual-restart, spawn reaping per Task 17). Memory ~1.6GB available after QA. No new OOM events.
+   187→- Cold-load QA: 0 console errors. Gap analysis: notifications bell already has filter+mark-read; sync history already surfaced; reducedMotion="user" already in providers (MotionConfig); R22 resilience pack in place. Found ONE orphaned capability + one privacy issue: fetchBackup()/downloadBackup() in api.ts had NO UI caller (the /api/export endpoint was unreachable from the app), and /api/export filtered only "demo.*" settings — it INCLUDED notify.wa.enc, the AES-256-GCM-encrypted WhatsApp credential blob (ciphertext exposure = unnecessary attack surface in a portable file).
+   188→
+   189→Completed modifications / verified:
+   190→1. PRIVACY FIX (src/app/api/export/route.ts): settings filter now excludes any key ending ".enc" (notify.wa.enc dropped from backups; harmless metadata keys like notify.wa.enabled/lastResult remain). Docstring + backup meta.note updated. VERIFIED via API diff: backup settings now 8 keys, no .enc; subjects 14 (all semesters — full dump by design), reminders 50.
+   191→2. NEW FEATURE — DataBackupCard (src/components/erp/settings-tab.tsx), rendered between Demo-mode and Sync-history cards: (a) "Full backup (JSON)" — wires the previously orphaned downloadBackup(), pending spinner, success toast with the generated filename, honest error toast; (b) "Subjects (CSV)" — one row per subject (code, name, present, held, %, target, status, custom-target flag) via existing downloadCsv, success toast with subject count + overall %; (c) ShieldCheck privacy note ("Encrypted ERP credentials and WhatsApp keys are never included"). Hover-tinted action rows, disabled states while busy.
+   192→3. Verification: tsc --noEmit → zero errors under src/. agent-browser CDP QA: opened /#settings, card found; clicked Download → toast "Backup downloaded · erp-sync-backup-2026-10-02-15-17.json"; clicked Export → toast "Subjects CSV exported · 8 subjects · overall 66.67%" (matches live semester-5 view); /api/export 200; screenshots light+dark /tmp/qa-r23-backup*.png visually verified (card, rows, buttons, note, toast). Console 0 errors. Browser CLOSED immediately; server 200 after.
+   193→
+   194→Unresolved issues / risks & next-phase priorities:
+   195→1. Pre-cap instance RSS ~1.86GB and creeping (was 1.69GB last round) — if the supervisor kill line hits, expect a capped respawn ≤3 min; leave it alone. If RSS keeps climbing across days, prefer a quiet-window `rm -rf .next` + keeper respawn over any manual restart.
+   196→2. next.config.ts unrecognized turbopack key — unchanged Task 17 guidance.
+   197→3. User decisions still pending: 2nd free notification channel (Telegram ⭐ / ntfy / Discord / email) and optional fixed daily WhatsApp digest time (digestTime unset — never send test/digest to the real phone during QA).
+   198→4. Backup RESTORE (import) deliberately NOT built — would need a write endpoint and data-clobber rules; suggest asking the user before adding.
+   199→5. Backlog unchanged: L/H/E columns folding (needs user consent), SMTP digest (needs credentials), TZ cosmetic, per-semester scoping (schema), weekly bunk-budget (needs timetable slots — still empty).
+   200→6. Keeper cron 430680 must stay alive; worklog protocol: append-only, three-section handover.
+   201→
+   202→---
+   203→Task ID: 24
+   204→Agent: Z.ai Code (main orchestrator)
+   205→Task: Round task 23:30+08 — status assessment, cold-load QA, Print / Save-as-PDF attendance report (chip + print-only report header + print stylesheet + palette command). Client-side only.
+   206→
+   207→Current project status / assessment:
+   208→- Server healthy all round: 200s throughout; next-server RSS ~1.96GB (pre-cap instance, creeping ~+100MB/round — 900MB cap lands on next natural respawn; do NOT manual-restart, spawn reaping per Task 17). Memory ~1.4GB available after QA. No new OOM events.
+   209→- Cold-load QA: 0 console errors. Gap analysis vs R18-23: no print support anywhere (no window.print, no @media print) — a genuine miss for a student who may need a paper/PDF attendance report. Chose as the round feature.
+   210→
+   211→Completed modifications / verified:
+   212→1. NEW FEATURE — Print report: (a) "Print" chip (Printer icon, sibling pill styling) in the Overall attendance card chip row → window.print(); (b) print-ONLY report header (hidden print:block) replacing app chrome: "Attendance Report", university + source + semester, overall %/target, generated timestamp; (c) print stylesheet in globals.css (@media print): white bg + black text, print-color-adjust exact (ring/chips stay colored), shadow/backdrop removal, ink borders, scroll-viewports unclamped, rows/trs never split across pages; (d) Tailwind print:hidden on app chrome — header, tabs, footer, ambient blobs, NEXT UP strip, the 4 interactive chips, subject-card sort/View-all controls; (e) command-palette item "Print attendance report (PDF)" with Ctrl+P shortcut hint.
+   213→2. DEBUGGING JOURNEY (documented for future rounds): first attempt used a global `button { display: none }` print rule — WRONG: subject rows ARE buttons (SubjectRow), the report lost its data; reverted to targeted print:hidden on chrome-only controls. Second issue: the subject list lives in a max-h-96 overflow-y-auto container — paged media clipped it; fixed by unclamping [class*="max-h-"]/overflow containers in print. Third issue: break-inside: avoid on the tall subject card made Chromium silently DROP mid-card rows in the PDF; relaxed cards to break-inside: auto and added row-level avoid (button/tr) so no ROW ever splits.
+   214→3. VERIFICATION (ground truth): agent-browser pdf (renders with print media) → 5-page report; pages: 1) report header + overall card + stat cards + first subject rows, 2) remaining 6 subject rows + today's schedule + reminders, 3) ALA deadlines + ERP connection, 4) recent ERP changes, 5) overflow. All 8 subject rows present with real values (66.67% overall, AI/COMPILER 100% 1/1, "needs 3 more classes" hints). Palette item found via CDP ("Print attendance report (PDF) Ctrl+P"). Screen view unaffected (screenshot /tmp/qa-r24-screen.png: chips row Copy/This week/Print, everything intact). tsc --noEmit clean under src/. Console 0 errors. Browser CLOSED immediately; server 200 after.
+   215→
+   216→Unresolved issues / risks & next-phase priorities:
+   217→1. Pre-cap instance RSS ~1.96GB — highest observed yet; if the supervisor kill line hits, a capped (900MB) respawn arrives ≤3 min via keeper/harness; leave it alone. If it survives another round or two, consider a quiet-window `rm -rf .next` + keeper respawn to shed cache weight.
+   218→2. Print report minor noise: "Manage" button + download icon inside Today's-schedule empty state still print (buttons inside TimetableCard) — could add print:hidden there in a future styling pass; harmless.
+   219→3. User decisions still pending: 2nd free notification channel (Telegram ⭐ / ntfy / Discord / email) and optional fixed daily WhatsApp digest time (digestTime unset — never send test/digest to the real phone during QA).
+   220→4. Backlog unchanged: L/H/E columns folding (needs user consent), SMTP digest (needs credentials), TZ cosmetic, per-semester scoping (schema), weekly bunk-budget (needs timetable slots — still empty), backup restore (needs user consent for a write endpoint).
+   221→5. Keeper cron 430680 must stay alive; worklog protocol: append-only, three-section handover.

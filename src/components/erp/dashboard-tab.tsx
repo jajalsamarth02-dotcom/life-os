@@ -35,6 +35,7 @@ import { cn } from "@/lib/utils";
 import { compactErrorText } from "@/lib/compact-error";
 import { fetchDashboard, fetchHistory, qk } from "./api";
 import { WeeklyDigestDialog } from "./digest-dialog";
+import { MilestoneCelebration, MilestonesStrip } from "./milestones";
 import { SubjectDrawer } from "./subject-drawer";
 import { TimetableCard } from "./timetable-card";
 import {
@@ -967,6 +968,18 @@ export function DashboardTab({
         />
         <StatCard icon={BellRing} label="Active reminders" value={data.reminders.items.length} />
       </motion.div>
+
+      {/* Milestones — best ever, days at target, streak (honest from snapshot history) */}
+      <MilestonesStrip history={history.data} overallPct={overall.percentage} target={target} />
+
+      {/* One-time celebration when the target is (re)crossed or a personal best lands */}
+      <MilestoneCelebration
+        overallPct={overall.percentage}
+        present={overall.present}
+        total={overall.total}
+        target={target}
+        history={history.data}
+      />
 
       {/* Weekly digest report dialog */}
       <WeeklyDigestDialog open={digestOpen} onOpenChange={setDigestOpen} demoMode={mode === "demo"} />

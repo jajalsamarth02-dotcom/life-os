@@ -52,6 +52,15 @@ export default function RootLayout({
 }>) {
   return (
     <html lang="en" suppressHydrationWarning>
+      <head>
+        {/* Pre-paint text-size restore (keep the key in sync with src/lib/text-size.ts). */}
+        <script
+          dangerouslySetInnerHTML={{
+            __html:
+              'try{var t=localStorage.getItem("erp-text-size");var px=t==="sm"?"15px":t==="lg"?"17.5px":null;if(px)document.documentElement.style.fontSize=px;}catch(e){}',
+          }}
+        />
+      </head>
       <body
         className={`${geistSans.variable} ${geistMono.variable} antialiased bg-background text-foreground`}
       >

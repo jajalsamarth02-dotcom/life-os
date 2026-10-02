@@ -105,6 +105,7 @@ import {
   qk,
 } from "./api";
 import { CustomTargetChip, fmtDT, syncLogIcon } from "./shared";
+import { TextSizeCard } from "./text-size-card";
 import { downloadCsv } from "./trend-chart";
 import type { AppSettings, ErpConnectFailure, SubjectView } from "./types";
 
@@ -1703,6 +1704,7 @@ export function SettingsTab() {
         <BrowserRemindersCard />
         <InstallAppCard />
       </div>
+      <TextSizeCard />
       <DemoModeCard liveConnected={liveConnected} />
       <DataBackupCard />
       <SyncHistoryCard />

@@ -4,6 +4,7 @@ import * as React from "react";
 import { useTheme } from "next-themes";
 import { toast } from "sonner";
 import {
+  ALargeSmall,
   BarChart3,
   CalendarClock,
   Check,
@@ -29,8 +30,10 @@ import {
   CommandShortcut,
 } from "@/components/ui/command";
 import { cn } from "@/lib/utils";
+import { cycleTextSize, TEXT_SIZES } from "@/lib/text-size";
 import { postDemoEvolve, postSync, putSelectedSemester } from "./api";
 import type { AttendanceStatus, SubjectView } from "./types";
+import { useTextSize } from "./text-size-card";
 
 const STATUS_DOT: Record<AttendanceStatus, string> = {
   safe: "bg-emerald-500",
@@ -97,6 +100,18 @@ export function CommandPalette({
 
   const toggleTheme = () => {
     run(() => setTheme(resolvedTheme === "dark" ? "light" : "dark"));
+  };
+
+  const [textSize, setTextSizeState] = useTextSize();
+  const cycleText = () => {
+    const nextSize = cycleTextSize(textSize);
+    run(() => {
+      setTextSizeState(nextSize);
+      toast.success(
+        `Text size: ${TEXT_SIZES.find((s) => s.key === nextSize)?.label ?? nextSize}`,
+        { description: "Adjust any time in Settings → Text size." }
+      );
+    });
   };
 
   const setSemester = (value: string) => {
@@ -252,6 +267,11 @@ export function CommandPalette({
             <Printer className="size-4 text-muted-foreground" aria-hidden="true" />
             Print attendance report (PDF)
             <CommandShortcut>Ctrl+P</CommandShortcut>
+          </CommandItem>
+          <CommandItem onSelect={cycleText} value="text size font accessibility larger smaller">
+            <ALargeSmall className="size-4 text-muted-foreground" aria-hidden="true" />
+            Text size: {TEXT_SIZES.find((s) => s.key === textSize)?.label ?? "Default"}
+            <CommandShortcut>cycle</CommandShortcut>
           </CommandItem>
           <CommandItem onSelect={() => run(onShowShortcuts)}>
             <Keyboard className="size-4 text-muted-foreground" aria-hidden="true" />

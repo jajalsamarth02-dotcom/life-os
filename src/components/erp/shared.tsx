@@ -453,15 +453,17 @@ export function StatCard({
   tone?: "default" | "amber" | "emerald";
 }) {
   return (
-    <div className="rounded-xl border border-border/60 bg-card p-4 transition-colors hover:border-primary/30">
+    <div className="group rounded-xl border border-border/60 bg-card p-4 transition-all duration-200 hover:-translate-y-0.5 hover:border-primary/30 hover:shadow-md">
       <div className="flex items-center justify-between gap-2">
         <div className="min-w-0">
           <p className="truncate text-xs font-medium text-muted-foreground">{label}</p>
-          <p className="mt-1 text-2xl font-semibold tracking-tight tabular-nums">{value}</p>
+          <p className="mt-1 text-2xl font-semibold tracking-tight tabular-nums transition-transform duration-200 group-hover:scale-[1.03] origin-left">
+            {value}
+          </p>
         </div>
         <span
           className={cn(
-            "flex size-9 shrink-0 items-center justify-center rounded-lg",
+            "flex size-9 shrink-0 items-center justify-center rounded-lg transition-transform duration-200 group-hover:scale-110 group-hover:-rotate-3",
             tone === "amber"
               ? "bg-amber-500/10 text-amber-600 dark:text-amber-400"
               : tone === "emerald"
