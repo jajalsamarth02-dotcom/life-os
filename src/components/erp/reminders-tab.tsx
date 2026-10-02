@@ -905,7 +905,10 @@ function AlaSubjectGroup({
           <ul className="space-y-1.5 px-2.5 pb-2.5">
             {group.items.map((a) => {
               const done = a.status !== "ACTIVE";
-              const overdue = !done && new Date(a.dueAt).getTime() < now;
+              const dueMs = new Date(a.dueAt).getTime();
+              const overdue = !done && dueMs < now;
+              // Overdue aging tier — the pill deepens as the deadline recedes further away.
+              const lateDays = overdue ? Math.floor((now - dueMs) / 86_400_000) : 0;
               const isAla = /\bala/i.test(a.title);
               return (
                 <motion.li
@@ -993,13 +996,17 @@ function AlaSubjectGroup({
                           className={cn(
                             "ml-1.5 rounded-full px-1.5 py-0.5 text-[10px] font-semibold tabular-nums",
                             overdue
-                              ? "bg-red-500/10 text-red-600 dark:text-red-400"
-                              : new Date(a.dueAt).getTime() - now < 7 * 86_400_000
+                              ? lateDays > 21
+                                ? "bg-red-500/25 text-red-700 ring-1 ring-red-500/50 dark:bg-red-500/20 dark:text-red-200"
+                                : lateDays > 7
+                                  ? "bg-red-500/15 text-red-600 dark:text-red-300"
+                                  : "bg-red-500/10 text-red-600 dark:text-red-400"
+                              : dueMs - now < 7 * 86_400_000
                                 ? "bg-amber-500/15 text-amber-700 dark:text-amber-400"
                                 : "bg-muted text-muted-foreground"
                           )}
                         >
-                          {relDue(new Date(a.dueAt).getTime(), now)}
+                          {relDue(dueMs, now)}
                         </span>
                       )}
                     </p>
@@ -1047,11 +1054,11 @@ function AlaSubjectGroup({
  * last date to submit. Pending rows carry an explicit, per-row "Submit"
  * action that uploads to the portal with the student's own session (never
  * automatic; the ERP's own page must confirm before the row flips).
- * Includes search, status filter, sorting, expand/collapse-all and a
+ * Includes search, status + subject filter chips, sorting, expand/collapse-all and a
  * one-click .ics export of every not-yet-submitted deadline.
  */
 type AlaStatusFilter = "all" | "overdue" | "soon" | "pending" | "submitted";
-type AlaSort = "deadline" | "course";
+type AlaSort = "deadline" | "course" | "overdue";
 
 const ALA_STATUS_META: { key: AlaStatusFilter; label: string; activeClass: string }[] = [
   { key: "all", label: "All", activeClass: "bg-primary text-primary-foreground" },
@@ -1060,6 +1067,23 @@ const ALA_STATUS_META: { key: AlaStatusFilter; label: string; activeClass: strin
   { key: "pending", label: "Pending", activeClass: "bg-sky-500/15 text-sky-700 dark:text-sky-300 border-sky-500/50" },
   { key: "submitted", label: "Submitted", activeClass: "bg-emerald-500/15 text-emerald-700 dark:text-emerald-300 border-emerald-500/50" },
 ];
+
+/** Deterministic per-subject dot colors for the subject filter chips (hash of the code). */
+const SUBJECT_DOTS = [
+  "bg-sky-500",
+  "bg-violet-500",
+  "bg-amber-500",
+  "bg-emerald-500",
+  "bg-rose-500",
+  "bg-cyan-500",
+  "bg-orange-500",
+  "bg-teal-500",
+];
+function subjectDot(code: string): string {
+  let h = 0;
+  for (let i = 0; i < code.length; i++) h = (h * 31 + code.charCodeAt(i)) >>> 0;
+  return SUBJECT_DOTS[h % SUBJECT_DOTS.length];
+}
 
 /* ------------------------------------------------------------------ */
 
@@ -1374,8 +1398,22 @@ function AlaDeadlineRadar({
         <span>+34d</span>
       </div>
       {selectedOffset == null ? (
-        <p className="mt-1 text-[10px] text-muted-foreground/70">
-          Click a bar to see that day&apos;s deadlines.
+        <p className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-0.5 text-[10px] text-muted-foreground/70">
+          <span>Click a bar to see that day&apos;s deadlines.</span>
+          <span className="ml-auto flex items-center gap-3" aria-hidden="true">
+            <span className="flex items-center gap-1">
+              <span className="size-2 rounded-[3px] bg-gradient-to-t from-amber-500/80 to-amber-400/90" />
+              due ≤7d
+            </span>
+            <span className="flex items-center gap-1">
+              <span className="size-2 rounded-[3px] bg-gradient-to-t from-slate-400/50 to-slate-400/70 dark:from-slate-500/50 dark:to-slate-500/70" />
+              later
+            </span>
+            <span className="flex items-center gap-1">
+              <span className="size-2 rounded-[3px] bg-primary shadow-[0_0_6px_-1px] shadow-primary/60" />
+              today
+            </span>
+          </span>
         </p>
       ) : null}
     </div>
@@ -1393,6 +1431,8 @@ function AlaSection() {
   const now = useNow();
   const [query, setQuery] = useState("");
   const [status, setStatus] = useState<AlaStatusFilter>("all");
+  /** Subject filter (group code) — the third axis alongside status and the radar day drill-down. */
+  const [subject, setSubject] = useState<string | null>(null);
   const [sort, setSort] = useState<AlaSort>("deadline");
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
   /** Radar drill-down: calendar-day offset (0 = today) the list is filtered to. */
@@ -1406,6 +1446,7 @@ function AlaSection() {
       if (typeof q === "string" && q.trim()) {
         setQuery(q);
         setStatus("all");
+        setSubject(null);
         setSort("deadline");
         setDayOffset(null);
       }
@@ -1481,8 +1522,10 @@ function AlaSection() {
   const visibleGroups = useMemo<AlaGroup[]>(() => {
     const q = query.trim().toLowerCase();
     let list = groups;
+    /* Subject axis: whole groups drop out (code is the group identity). */
+    if (subject != null) list = list.filter((g) => g.code === subject);
     if (q || status !== "all" || dayStartMs != null) {
-      list = groups
+      list = list
         .map((g) => {
           const matchesQuery =
             q === "" ||
@@ -1532,14 +1575,22 @@ function AlaSection() {
     }
     if (sort === "course") {
       list = [...list].sort((x, y) => (x.name ?? x.code).localeCompare(y.name ?? y.code));
+    } else if (sort === "overdue") {
+      // Triage view: the heaviest overdue walls first, then nearest deadline, then A–Z.
+      list = [...list].sort(
+        (x, y) =>
+          y.overdue - x.overdue ||
+          (x.nextPendingMs ?? Number.POSITIVE_INFINITY) - (y.nextPendingMs ?? Number.POSITIVE_INFINITY) ||
+          (x.name ?? x.code).localeCompare(y.name ?? y.code)
+      );
     }
     return list;
-  }, [groups, query, status, sort, now, dayStartMs]);
+  }, [groups, query, status, subject, sort, now, dayStartMs]);
 
   const total = data?.assignments.length ?? 0;
   const submitted = counts.submitted;
   const pending = counts.pending + counts.overdue;
-  const searching = query.trim() !== "" || status !== "all";
+  const searching = query.trim() !== "" || status !== "all" || subject != null;
   const hasActiveDeadlines = counts.pending + counts.overdue > 0;
 
   const exportAlaIcs = () => {
@@ -1728,6 +1779,7 @@ function AlaSection() {
                   </SelectTrigger>
                   <SelectContent>
                     <SelectItem value="deadline" className="text-xs">Nearest deadline</SelectItem>
+                    <SelectItem value="overdue" className="text-xs">Most overdue</SelectItem>
                     <SelectItem value="course" className="text-xs">Course A–Z</SelectItem>
                   </SelectContent>
                 </Select>
@@ -1795,6 +1847,77 @@ function AlaSection() {
               )}
             </div>
 
+            {/* Subject filter chips — the third axis (status × subject × day) */}
+            {groups.length > 1 && (
+              <div className="flex flex-wrap items-center gap-1.5" role="group" aria-label="Filter by subject">
+                {groups.map((g) => {
+                  const active = subject === g.code;
+                  const open = g.items.length - g.submitted;
+                  return (
+                    <button
+                      key={g.code}
+                      type="button"
+                      aria-pressed={active}
+                      onClick={() => setSubject(active ? null : g.code)}
+                      title={`${g.name ?? "Unmapped course"} (${g.code}) — ${open} open, ${g.overdue} overdue`}
+                      aria-label={`Filter the ALA list to ${g.name ?? g.code} — ${open} open, ${g.overdue} overdue`}
+                      className={cn(
+                        "flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-xs font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+                        active
+                          ? "border-primary/60 bg-primary/10 text-primary shadow-sm"
+                          : "border-border/70 bg-background text-muted-foreground hover:bg-muted/60 hover:text-foreground"
+                      )}
+                    >
+                      <span
+                        className={cn(
+                          "size-2 shrink-0 rounded-full",
+                          subjectDot(g.code),
+                          active && "ring-2 ring-ring/40 ring-offset-1"
+                        )}
+                        aria-hidden="true"
+                      />
+                      <span className="max-w-32 truncate text-[11px] font-semibold tracking-tight">
+                        {g.name ?? "Unmapped"}
+                      </span>
+                      <span
+                        className={cn(
+                          "rounded-full px-1.5 text-[10px] font-bold tabular-nums",
+                          active ? "bg-primary/15 text-primary" : "bg-muted"
+                        )}
+                      >
+                        {open}
+                      </span>
+                    </button>
+                  );
+                })}
+              </div>
+            )}
+
+            {/* Live result count + clear-all — only while any filter axis is engaged */}
+            {(searching || dayOffset != null) && (
+              <div className="flex flex-wrap items-center gap-2 px-1 text-[11px] text-muted-foreground">
+                <span className="tabular-nums" aria-live="polite">
+                  <span className="font-semibold text-foreground">
+                    {visibleGroups.reduce((n, g) => n + g.items.length, 0)}
+                  </span>{" "}
+                  of {total} rows · {visibleGroups.length} subject{visibleGroups.length === 1 ? "" : "s"} shown
+                </span>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setQuery("");
+                    setStatus("all");
+                    setSubject(null);
+                    setDayOffset(null);
+                  }}
+                  className="flex items-center gap-1 rounded-full border border-border/70 px-2 py-0.5 text-[10px] font-semibold text-muted-foreground transition-colors hover:bg-muted/60 hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                >
+                  Clear all filters
+                  <X className="size-3" aria-hidden="true" />
+                </button>
+              </div>
+            )}
+
             {/* Overdue digest — collapses to nothing the moment any filter is active */}
             {!searching && dayOffset == null && (
               <AlaOverdueDigest groups={groups} onViewOverdue={() => setStatus("overdue")} />
@@ -1816,7 +1939,7 @@ function AlaSection() {
                 <p className="text-sm font-medium">Nothing matches</p>
                 <p className="max-w-sm text-xs text-muted-foreground">
                   No ALA rows match {query.trim() ? `“${query.trim()}”` : "this filter"}.
-                  Try a different search or switch the status chip.
+                  Try a different search or clear a filter chip.
                 </p>
                 <Button
                   variant="outline"
@@ -1825,6 +1948,8 @@ function AlaSection() {
                   onClick={() => {
                     setQuery("");
                     setStatus("all");
+                    setSubject(null);
+                    setDayOffset(null);
                   }}
                 >
                   Reset search &amp; filters
