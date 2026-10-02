@@ -35,6 +35,7 @@ const STATUS_DOT: Record<AttendanceStatus, string> = {
   safe: "bg-emerald-500",
   warning: "bg-amber-500",
   danger: "bg-red-500",
+  none: "bg-muted-foreground/50",
 };
 
 export type PaletteTab = "dashboard" | "attendance" | "reminders" | "settings";

@@ -50,7 +50,7 @@ import {
   TypeIcon,
   useNow,
 } from "./shared";
-import type { ChangeEvent, Reminder, SubjectView } from "./types";
+import type { AlaUpcomingRow, ChangeEvent, Reminder, SubjectView } from "./types";
 
 /* ------------------------------------------------------------------ */
 
@@ -91,6 +91,118 @@ function countdownLabel(dueAt: string, now: number): string {
   return diff >= 0 ? `in ${span}` : `${span} overdue`;
 }
 
+/** Relative urgency pill for an ALA deadline: red overdue/≤48h, amber ≤7d, muted later. */
+function deadlinePill(dueAt: string, now: number): { label: string; className: string } {
+  const due = new Date(dueAt).getTime();
+  const diff = due - now;
+  if (diff < 0)
+    return {
+      label: countdownLabel(dueAt, now),
+      className: "bg-red-500/10 text-red-600 dark:text-red-400",
+    };
+  if (diff <= 2 * 86_400_000)
+    return {
+      label: countdownLabel(dueAt, now),
+      className: "bg-red-500/10 text-red-600 dark:text-red-400",
+    };
+  if (diff <= 7 * 86_400_000)
+    return {
+      label: countdownLabel(dueAt, now),
+      className: "bg-amber-500/10 text-amber-700 dark:text-amber-400",
+    };
+  return { label: countdownLabel(dueAt, now), className: "bg-muted text-muted-foreground" };
+}
+
+/**
+ * Top of the open ALA/assignment deadline queue, mirrored straight from the
+ * ERP sync (Reminder rows with the assignment externalId prefix). Every row
+ * deep-links into the Reminders tab, where the subject-wise list lives.
+ */
+function AlaDeadlinePanel({
+  rows,
+  pending,
+  total,
+  onOpenReminders,
+}: {
+  rows: AlaUpcomingRow[];
+  pending: number;
+  total: number;
+  onOpenReminders: () => void;
+}) {
+  const now = useNow();
+  if (rows.length === 0) return null;
+  return (
+    <div className="overflow-hidden rounded-xl border border-border/60 bg-muted/20">
+      <div className="flex items-center justify-between gap-2 border-b border-border/60 px-3 py-2">
+        <p className="flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+          <ClipboardList className="size-3.5" aria-hidden="true" />
+          Next ALA &amp; assignment deadlines
+        </p>
+        <Badge variant={pending > 0 ? "secondary" : "outline"} className="text-[10px] tabular-nums">
+          {pending} of {total} pending
+        </Badge>
+      </div>
+      <ul>
+        {rows.map((row, i) => {
+          const hue = row.subjectCode ? hueColors(row.subjectCode) : null;
+          const pill = deadlinePill(row.dueAt, now);
+          const overdue = new Date(row.dueAt).getTime() < now;
+          return (
+            <motion.li
+              key={row.id}
+              initial={{ opacity: 0, y: 4 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ delay: 0.05 * i, duration: 0.18 }}
+              className="list-none border-b border-border/40 last:border-b-0"
+            >
+              <button
+                type="button"
+                onClick={onOpenReminders}
+                aria-label={`Open the subject-wise ALA list — ${row.title}`}
+                title="Open the subject-wise list in the Reminders tab"
+                className="group/ala flex w-full items-center gap-2.5 px-3 py-2.5 text-left transition-colors hover:bg-muted/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring"
+              >
+                {hue ? (
+                  <span
+                    className="shrink-0 rounded-md px-1.5 py-0.5 font-mono text-[10px] font-semibold"
+                    style={{ backgroundColor: hue.bg, color: hue.fg }}
+                  >
+                    {row.subjectCode}
+                  </span>
+                ) : (
+                  <ClipboardList className="size-3.5 shrink-0 text-muted-foreground" aria-hidden="true" />
+                )}
+                <span className="min-w-0 flex-1">
+                  <span className="block truncate text-sm font-medium leading-snug">{row.title}</span>
+                  {row.subjectName && (
+                    <span className="block truncate text-[11px] text-muted-foreground">{row.subjectName}</span>
+                  )}
+                </span>
+                <span className="shrink-0 text-right">
+                  <span
+                    className={cn(
+                      "block rounded-full px-2 py-0.5 text-[10px] font-semibold tabular-nums transition-colors",
+                      pill.className,
+                      overdue && "group-hover/ala:bg-red-500/20"
+                    )}
+                  >
+                    {pill.label}
+                  </span>
+                  <span className="mt-0.5 block text-[10px] text-muted-foreground">{fmtDT(row.dueAt)}</span>
+                </span>
+                <ChevronRight
+                  className="size-3.5 shrink-0 text-muted-foreground/40 transition-transform group-hover/ala:translate-x-0.5 group-hover/ala:text-foreground"
+                  aria-hidden="true"
+                />
+              </button>
+            </motion.li>
+          );
+        })}
+      </ul>
+    </div>
+  );
+}
+
 function NextUpStrip({ items }: { items: Reminder[] }) {
   const now = useNow();
   const upcoming = items
@@ -122,7 +234,20 @@ function NextUpStrip({ items }: { items: Reminder[] }) {
         <p className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
           Next up {overdue.length > 0 && <span className="text-red-500">· {overdue.length} overdue</span>}
         </p>
-        <p className="truncate text-sm font-medium">{shown.title}</p>
+        <p className="flex min-w-0 items-center gap-1.5">
+          {shown.subjectCode && hueColors(shown.subjectCode) && (
+            <span
+              className="shrink-0 rounded-md px-1.5 py-0.5 font-mono text-[10px] font-semibold"
+              style={(() => {
+                const hue = hueColors(shown.subjectCode as string);
+                return { backgroundColor: hue.bg, color: hue.fg };
+              })()}
+            >
+              {shown.subjectCode}
+            </span>
+          )}
+          <span className="truncate text-sm font-medium">{shown.title}</span>
+        </p>
       </div>
       <div className="shrink-0 text-right">
         <p
@@ -172,6 +297,7 @@ function RemindersPreview({
   weekCount,
   alaPending,
   alaTotal,
+  alaUpcoming,
   onOpenReminders,
 }: {
   items: Reminder[];
@@ -179,6 +305,7 @@ function RemindersPreview({
   weekCount: number;
   alaPending: number;
   alaTotal: number;
+  alaUpcoming: AlaUpcomingRow[];
   onOpenReminders: () => void;
 }) {
   const now = useNow();
@@ -225,19 +352,38 @@ function RemindersPreview({
             ))}
           </div>
         )}
+        <AlaDeadlinePanel
+          rows={alaUpcoming}
+          pending={alaPending}
+          total={alaTotal}
+          onOpenReminders={onOpenReminders}
+        />
         {alaTotal > 0 && (
           <button
             type="button"
             onClick={onOpenReminders}
-            aria-label={`Open the Reminders tab — ${alaPending} of ${alaTotal} ALA and assignment submissions still pending`}
-            className="mt-3 flex w-full items-center gap-2 rounded-lg border border-primary/25 bg-primary/[0.05] px-3 py-2 text-left text-xs transition-colors hover:bg-primary/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+            aria-label={
+              alaPending > 0
+                ? `Open the Reminders tab — ${alaPending} of ${alaTotal} ALA and assignment submissions still pending`
+                : `Open the Reminders tab — all ${alaTotal} ALA and assignment rows are submitted or closed`
+            }
+            className={cn(
+              "mt-3 flex w-full items-center gap-2 rounded-lg border px-3 py-2 text-left text-xs transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+              alaPending > 0
+                ? "border-primary/25 bg-primary/[0.05] hover:bg-primary/10"
+                : "border-emerald-500/30 bg-emerald-500/[0.06] hover:bg-emerald-500/10"
+            )}
           >
-            <ClipboardList className="size-3.5 shrink-0 text-primary" aria-hidden="true" />
+            {alaPending > 0 ? (
+              <ClipboardList className="size-3.5 shrink-0 text-primary" aria-hidden="true" />
+            ) : (
+              <CheckCircle2 className="size-3.5 shrink-0 text-emerald-600 dark:text-emerald-400" aria-hidden="true" />
+            )}
             <span className="min-w-0 flex-1 truncate">
-              <span className="font-semibold">ALA &amp; assignments</span>{" "}
-              <span className="text-muted-foreground">
-                · {alaPending} of {alaTotal} pending — subject-wise list in the Reminders tab
-              </span>
+              <span className="font-semibold">
+                {alaPending > 0 ? `${alaPending} of ${alaTotal} pending` : `All ${alaTotal} submitted or closed`}
+              </span>{" "}
+              <span className="text-muted-foreground">· open the subject-wise list</span>
             </span>
             <ChevronRight className="size-3.5 shrink-0 text-muted-foreground" aria-hidden="true" />
           </button>
@@ -248,6 +394,18 @@ function RemindersPreview({
 }
 
 /* ------------------------------------------------------------------ */
+
+/** Live "in 12 min"-style countdown for a future instant (null when absent/past). */
+function inCountdown(iso: string | null, now: number): string | null {
+  if (!iso) return null;
+  const diff = new Date(iso).getTime() - now;
+  if (diff <= 0) return null;
+  const mins = Math.max(1, Math.round(diff / 60_000));
+  if (mins < 60) return `in ${mins} min`;
+  const hrs = Math.floor(mins / 60);
+  const rem = mins % 60;
+  return rem > 0 ? `in ${hrs}h ${rem}m` : `in ${hrs}h`;
+}
 
 function ErpStatusCard({
   connected,
@@ -302,7 +460,14 @@ function ErpStatusCard({
           </div>
           <div className="flex items-center justify-between gap-2">
             <dt className="text-muted-foreground">Next scheduled sync</dt>
-            <dd className="font-medium">{sync.nextScheduledSyncAt ? fmtDT(sync.nextScheduledSyncAt) : "—"}</dd>
+            <dd className="font-medium">
+              {sync.nextScheduledSyncAt ? fmtDT(sync.nextScheduledSyncAt) : "—"}
+              {inCountdown(sync.nextScheduledSyncAt, now) && (
+                <span className="ml-1.5 rounded-full bg-muted px-1.5 py-0.5 text-[10px] font-semibold tabular-nums text-muted-foreground">
+                  {inCountdown(sync.nextScheduledSyncAt, now)}
+                </span>
+              )}
+            </dd>
           </div>
           {sync.consecutiveFailures > 0 && (
             <div className="flex items-center justify-between gap-2 rounded-lg bg-amber-500/10 px-2.5 py-1.5 text-amber-700 dark:text-amber-400">
@@ -739,6 +904,7 @@ export function DashboardTab({
           weekCount={data.reminders.weekCount}
           alaPending={data.reminders.alaPending}
           alaTotal={data.reminders.alaTotal}
+          alaUpcoming={data.reminders.alaUpcoming}
           onOpenReminders={onOpenReminders}
         />
         <ErpStatusCard

@@ -965,3 +965,63 @@ Unresolved issues / risks & next-phase priorities:
 4. Per-semester scoping stored on slots themselves (schema change → controlled dev-server restart
    after Prisma client regen, per Task 11 ops playbook).
 5. dev-server-keeper cron (job 430680) must stay alive; preview Caddy 502 self-heals ≤5 min.
+
+---
+Task ID: 14 (webDevReview round 10, trace 1a0fc2dd5ff09b15-cron-agent-loop-202610022031)
+Agent: Z.ai Code (main orchestrator)
+Task: Status assessment + agent-browser QA, then dashboard ALA deadline preview + next-sync countdown + status-dot fix + styling polish.
+
+Current project status / assessment:
+- LIVE mode healthy (real account, demo OFF, partition Sem 5 = ERP current, 8 subjects, overall
+  66.67% = 2/3, sync idle 0 consecutive failures, next auto-sync on schedule, freshness green).
+- Pre-work QA sweep: all four tabs 0 console/page errors, /api/dashboard + /api/erp/status +
+  /api/assignments consistent (47 ALA rows, 41 pending, semester=sourceSemester=5), mobile 390px
+  scrollWidth 390/390. No runtime bugs found → one latent type bug fixed (below) + features.
+- Tooling note for future rounds: the bash output channel in this environment can mangle bracket
+  sequences (e.g. "[h" disappears), which made a healthy line look like `}, istory.data]);`.
+  Verified byte-exact via python + `bunx tsc --noEmit`: file was fine. Trust tsc/Read over
+  visually-parsed bash output.
+
+Completed modifications / verified:
+1. FIX — STATUS_DOT type hole (command-palette.tsx:34): Record<AttendanceStatus,string> lacked
+   "none" (TS2741, caught by full tsc which lint never runs). A 0/0-class subject would render a
+   colorless dot. Added none:"bg-muted-foreground/50". src/ is now tsc-clean (only pre-existing
+   noise in examples/, scripts/, skills/ remains — outside the app build).
+2. FEATURE — DASHBOARD ALA DEADLINE PREVIEW: /api/dashboard now returns reminders.alaUpcoming
+   (top 4 open ASSIGNMENT rows by dueAt — overdue included first, the true head of the queue);
+   subjectName resolved via the erp.courseNames setting map (same source /api/assignments uses),
+   Subject table as fallback. New AlaDeadlinePanel in the Reminders preview card: header with
+   "{pending} of {total} pending" badge; per-row hue-coded course-code chip, title, subject name,
+   urgency pill ("78 days overdue" red / "in 3 days" red ≤48h / amber ≤7d / muted later) + date;
+   framer-motion staggered entrance; every row deep-links to the Reminders tab. Footer strip
+   upgraded: pending>0 keeps the primary CTA, pending=0 flips to an emerald CheckCircle2
+   "All N submitted or closed" (honest completion state).
+3. FEATURE — NEXT-SYNC COUNTDOWN (spec #9 transparency): ERP connection card's "Next scheduled
+   sync" now shows a live "in 5 min"/"in 1h 12m" pill (new inCountdown(), useNow-driven); hidden
+   when absent/past.
+4. STYLING (mandatory): deadlinePill urgency system (red/amber/muted with dark-mode variants);
+   row hover states with chevron slide + pill deepening (group-hover/ala:bg-red-500/20);
+   NextUpStrip gained a subject hue chip next to the title when the shown reminder carries a
+   subjectCode; panel uses inset focus rings for keyboard nav; aria-labels on every row/button.
+5. Hygiene: removed a stray JSX comment introduced mid-edit; RemindersPreview signature + call
+   site extended with alaUpcoming; types.ts gained exported AlaUpcomingRow.
+
+Verification results:
+- bun run lint: clean. bunx tsc --noEmit: zero errors under src/.
+- agent-browser E2E: panel renders 4 rows (BETCE15322 · SOFTWARE ENGINEERING · SE-Y1-ALA-3 ·
+  "78 days overdue"; 3× BETCE15315 · COMPUTER NETWORKS); clicking a row switched to the Reminders
+  tab; countdown pill "in 5 min" live next to 12:44 PM; stale console error text from a mid-edit
+  state of a previous round was investigated and dismissed (fresh reload + Reminders sweep: 0
+  errors); screenshots 1280px light+dark + ALA panel crop + Reminders tab all clean; mobile 390
+  scrollWidth 390/390.
+- No dev-server restart, no production build, next-server untouched; keeper cron 430680 active.
+
+Unresolved issues / risks & next-phase priorities:
+1. L/H/E columns still not folded into totals (needs real rows of that shape to test against).
+2. Digest email delivery still needs SMTP; the copyable digest remains the interim workaround.
+3. Parser date-only anchor 12:00Z vs IST noon: cosmetic only.
+4. Per-semester scoping stored on slots themselves (schema change → controlled dev-server restart
+   after Prisma client regen, per Task 11 ops playbook).
+5. 14 unread notifications — a "mark all read" action in the notifications popover is cheap UX
+   debt worth picking up next round.
+6. dev-server-keeper cron (job 430680) must stay alive; preview Caddy 502 self-heals ≤5 min.

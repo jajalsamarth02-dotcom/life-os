@@ -1,0 +1,845 @@
+     1→"use client";
+     2→
+     3→import { useQuery } from "@tanstack/react-query";
+     4→import { useMemo, useState } from "react";
+     5→import { isToday } from "date-fns";
+     6→import {
+     7→  AlertTriangle,
+     8→  ArrowRight,
+     9→  ArrowDownUp,
+    10→  BellRing,
+    11→  CalendarClock,
+    12→  CheckCircle2,
+    13→  ChevronRight,
+    14→  FlaskConical,
+    15→  CalendarRange,
+    16→  GraduationCap,
+    17→  Hourglass,
+    18→  Info,
+    19→  ClipboardList,
+    20→  Layers,
+    21→  WifiOff,
+    22→  XCircle,
+    23→} from "lucide-react";
+    24→import { Badge } from "@/components/ui/badge";
+    25→import { Button } from "@/components/ui/button";
+    26→import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+    27→import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+    28→import { Separator } from "@/components/ui/separator";
+    29→import { motion } from "framer-motion";
+    30→import { cn } from "@/lib/utils";
+    31→import { compactErrorText } from "@/lib/compact-error";
+    32→import { fetchDashboard, fetchHistory, qk } from "./api";
+    33→import { WeeklyDigestDialog } from "./digest-dialog";
+    34→import { SubjectDrawer } from "./subject-drawer";
+    35→import { TimetableCard } from "./timetable-card";
+    36→import {
+    37→  ago,
+    38→  dueGroup,
+    39→  EmptyHero,
+    40→  fmtDT,
+    41→  hueColors,
+    42→  CustomTargetChip,
+    43→  KindIcon,
+    44→  MiniBar,
+    45→  ProgressRing,
+    46→  SourceBadge,
+    47→  statusColors,
+    48→  StatCard,
+    49→  StatusChip,
+    50→  TypeIcon,
+    51→  useNow,
+    52→} from "./shared";
+    53→import type { ChangeEvent, Reminder, SubjectView } from "./types";
+    54→
+    55→/* ------------------------------------------------------------------ */
+    56→
+    57→const SUBJECT_SORTS = [
+    58→  { key: "lowest", label: "Lowest attendance first" },
+    59→  { key: "highest", label: "Highest attendance first" },
+    60→  { key: "name", label: "Name A–Z" },
+    61→  { key: "recent", label: "Recently updated" },
+    62→] as const;
+    63→
+    64→type SubjectSort = (typeof SUBJECT_SORTS)[number]["key"];
+    65→
+    66→function sortSubjects(list: SubjectView[], sort: SubjectSort): SubjectView[] {
+    67→  const copy = [...list];
+    68→  switch (sort) {
+    69→    case "lowest":
+    70→      return copy.sort((a, b) => a.percentage - b.percentage);
+    71→    case "highest":
+    72→      return copy.sort((a, b) => b.percentage - a.percentage);
+    73→    case "name":
+    74→      return copy.sort((a, b) => a.name.localeCompare(b.name));
+    75→    case "recent":
+    76→      return copy.sort((a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime());
+    77→  }
+    78→}
+    79→
+    80→/** Live countdown label for the next upcoming deadline. */
+    81→function countdownLabel(dueAt: string, now: number): string {
+    82→  const diff = new Date(dueAt).getTime() - now;
+    83→  const abs = Math.abs(diff);
+    84→  const mins = Math.round(abs / 60_000);
+    85→  const hours = Math.round(abs / 3_600_000);
+    86→  const days = Math.round(abs / 86_400_000);
+    87→  let span: string;
+    88→  if (mins < 60) span = `${mins} min`;
+    89→  else if (hours < 36) span = `${hours} hr${hours === 1 ? "" : "s"}`;
+    90→  else span = `${days} day${days === 1 ? "" : "s"}`;
+    91→  return diff >= 0 ? `in ${span}` : `${span} overdue`;
+    92→}
+    93→
+    94→function NextUpStrip({ items }: { items: Reminder[] }) {
+    95→  const now = useNow();
+    96→  const upcoming = items
+    97→    .filter((r) => r.status === "ACTIVE" && r.type !== "ATTENDANCE_WARNING")
+    98→    .sort((a, b) => new Date(a.dueAt).getTime() - new Date(b.dueAt).getTime());
+    99→  const overdue = upcoming.filter((r) => new Date(r.dueAt).getTime() < now);
+   100→  const next = upcoming.find((r) => new Date(r.dueAt).getTime() >= now);
+   101→
+   102→  if (upcoming.length === 0) return null;
+   103→  const shown = overdue.length > 0 ? overdue[0] : (next ?? upcoming[0]);
+   104→  const isOverdue = new Date(shown.dueAt).getTime() < now;
+   105→
+   106→  return (
+   107→    <div
+   108→      className={cn(
+   109→        "flex items-center gap-3 rounded-xl border px-4 py-3",
+   110→        isOverdue ? "border-red-500/30 bg-red-500/[0.05]" : "border-primary/25 bg-primary/[0.04]"
+   111→      )}
+   112→    >
+   113→      <span
+   114→        className={cn(
+   115→          "flex size-9 shrink-0 items-center justify-center rounded-lg",
+   116→          isOverdue ? "bg-red-500/10 text-red-600 dark:text-red-400" : "bg-emerald-500/10 text-emerald-600 dark:text-emerald-400"
+   117→        )}
+   118→      >
+   119→        <Hourglass className="size-4" aria-hidden="true" />
+   120→      </span>
+   121→      <div className="min-w-0 flex-1">
+   122→        <p className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
+   123→          Next up {overdue.length > 0 && <span className="text-red-500">· {overdue.length} overdue</span>}
+   124→        </p>
+   125→        <p className="truncate text-sm font-medium">{shown.title}</p>
+   126→      </div>
+   127→      <div className="shrink-0 text-right">
+   128→        <p
+   129→          className={cn(
+   130→            "text-sm font-bold tabular-nums",
+   131→            isOverdue ? "text-red-600 dark:text-red-400" : "text-emerald-600 dark:text-emerald-400"
+   132→          )}
+   133→        >
+   134→          {countdownLabel(shown.dueAt, now)}
+   135→        </p>
+   136→        <p className="text-[11px] text-muted-foreground">{fmtDT(shown.dueAt)}</p>
+   137→      </div>
+   138→    </div>
+   139→  );
+   140→}
+   141→
+   142→/* ------------------------------------------------------------------ */
+   143→
+   144→function DueBadge({ iso, now }: { iso: string; now: number }) {
+   145→  const d = new Date(iso);
+   146→  if (d.getTime() < now && !isToday(d)) {
+   147→    return <span className="text-xs font-medium text-red-600 dark:text-red-400">{fmtDT(iso)} · overdue</span>;
+   148→  }
+   149→  return <span className="text-xs text-muted-foreground">{fmtDT(iso)}</span>;
+   150→}
+   151→
+   152→function ReminderPreviewRow({ r, now }: { r: Reminder; now: number }) {
+   153→  return (
+   154→    <li className="flex items-start gap-2.5 rounded-lg border border-border/50 p-2.5 transition-colors hover:bg-muted/50">
+   155→      <TypeIcon type={r.type} />
+   156→      <div className="min-w-0 flex-1">
+   157→        <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
+   158→          <p className="min-w-0 flex-1 truncate text-sm font-medium">{r.title}</p>
+   159→          <SourceBadge source={r.source} />
+   160→        </div>
+   161→        <div className="mt-0.5 flex items-center gap-2">
+   162→          <DueBadge iso={r.dueAt} now={now} />
+   163→        </div>
+   164→      </div>
+   165→    </li>
+   166→  );
+   167→}
+   168→
+   169→function RemindersPreview({
+   170→  items,
+   171→  todayCount,
+   172→  weekCount,
+   173→  alaPending,
+   174→  alaTotal,
+   175→  onOpenReminders,
+   176→}: {
+   177→  items: Reminder[];
+   178→  todayCount: number;
+   179→  weekCount: number;
+   180→  alaPending: number;
+   181→  alaTotal: number;
+   182→  onOpenReminders: () => void;
+   183→}) {
+   184→  const now = useNow();
+   185→  const groups: { key: string; label: string; className: string; items: Reminder[] }[] = [
+   186→    { key: "overdue", label: "Overdue", className: "text-red-600 dark:text-red-400", items: [] },
+   187→    { key: "today", label: "Today", className: "text-emerald-600 dark:text-emerald-400", items: [] },
+   188→    { key: "tomorrow", label: "Tomorrow", className: "", items: [] },
+   189→    { key: "week", label: "This week", className: "", items: [] },
+   190→    { key: "later", label: "Later", className: "", items: [] },
+   191→  ];
+   192→  for (const r of items) {
+   193→    const g = dueGroup(r.dueAt, r.status, now);
+   194→    const bucket = groups.find((x) => x.key === g);
+   195→    if (bucket) bucket.items.push(r);
+   196→  }
+   197→  const visible = groups.filter((g) => g.items.length > 0);
+   198→
+   199→  return (
+   200→    <Card className="rounded-xl border-border/60">
+   201→      <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-3">
+   202→        <div>
+   203→          <CardTitle className="text-base tracking-tight">Reminders</CardTitle>
+   204→          <CardDescription className="text-xs">Next deadlines from the ERP and your own list</CardDescription>
+   205→        </div>
+   206→        <div className="flex gap-1.5">
+   207→          <Badge variant="secondary" className="tabular-nums">{todayCount} today</Badge>
+   208→          <Badge variant="secondary" className="tabular-nums">{weekCount} this week</Badge>
+   209→        </div>
+   210→      </CardHeader>
+   211→      <CardContent>
+   212→        {items.length === 0 ? (
+   213→          <p className="py-6 text-center text-sm text-muted-foreground">No active reminders</p>
+   214→        ) : (
+   215→          <div className="max-h-96 space-y-3 overflow-y-auto pr-1">
+   216→            {visible.map((g) => (
+   217→              <div key={g.key}>
+   218→                <p className={cn("mb-1.5 text-xs font-semibold uppercase tracking-wide", g.className)}>{g.label}</p>
+   219→                <ul className="space-y-1.5">
+   220→                  {g.items.slice(0, 5).map((r) => (
+   221→                    <ReminderPreviewRow key={r.id} r={r} now={now} />
+   222→                  ))}
+   223→                </ul>
+   224→              </div>
+   225→            ))}
+   226→          </div>
+   227→        )}
+   228→        {alaTotal > 0 && (
+   229→          <button
+   230→            type="button"
+   231→            onClick={onOpenReminders}
+   232→            aria-label={`Open the Reminders tab — ${alaPending} of ${alaTotal} ALA and assignment submissions still pending`}
+   233→            className="mt-3 flex w-full items-center gap-2 rounded-lg border border-primary/25 bg-primary/[0.05] px-3 py-2 text-left text-xs transition-colors hover:bg-primary/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+   234→          >
+   235→            <ClipboardList className="size-3.5 shrink-0 text-primary" aria-hidden="true" />
+   236→            <span className="min-w-0 flex-1 truncate">
+   237→              <span className="font-semibold">ALA &amp; assignments</span>{" "}
+   238→              <span className="text-muted-foreground">
+   239→                · {alaPending} of {alaTotal} pending — subject-wise list in the Reminders tab
+   240→              </span>
+   241→            </span>
+   242→            <ChevronRight className="size-3.5 shrink-0 text-muted-foreground" aria-hidden="true" />
+   243→          </button>
+   244→        )}
+   245→      </CardContent>
+   246→    </Card>
+   247→  );
+   248→}
+   249→
+   250→/* ------------------------------------------------------------------ */
+   251→
+   252→function ErpStatusCard({
+   253→  connected,
+   254→  demoMode,
+   255→  username,
+   256→  sync,
+   257→}: {
+   258→  connected: boolean;
+   259→  demoMode: boolean;
+   260→  username: string | null;
+   261→  sync: {
+   262→    status: string;
+   263→    lastSyncAt: string | null;
+   264→    lastSuccessAt: string | null;
+   265→    nextScheduledSyncAt: string | null;
+   266→    consecutiveFailures: number;
+   267→  };
+   268→}) {
+   269→  const now = useNow();
+   270→  return (
+   271→    <Card className="rounded-xl border-border/60">
+   272→      <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-3">
+   273→        <div>
+   274→          <CardTitle className="text-base tracking-tight">ERP connection</CardTitle>
+   275→          <CardDescription className="text-xs">erp.gmiu.edu.in · read-only source of truth</CardDescription>
+   276→        </div>
+   277→        {connected ? (
+   278→          <CheckCircle2 className="size-5 text-emerald-500" aria-hidden="true" />
+   279→        ) : demoMode ? (
+   280→          <FlaskConical className="size-5 text-amber-500" aria-hidden="true" />
+   281→        ) : (
+   282→          <WifiOff className="size-5 text-muted-foreground" aria-hidden="true" />
+   283→        )}
+   284→      </CardHeader>
+   285→      <CardContent className="space-y-3">
+   286→        <p className="text-lg font-semibold tracking-tight">
+   287→          {connected ? (
+   288→            <span className="text-emerald-600 dark:text-emerald-400">
+   289→              ✓ Connected{username ? ` · ${username}` : ""}
+   290→            </span>
+   291→          ) : demoMode ? (
+   292→            <span className="text-amber-600 dark:text-amber-400">Demo ERP simulator</span>
+   293→          ) : (
+   294→            <span className="text-muted-foreground">Not connected</span>
+   295→          )}
+   296→        </p>
+   297→        <Separator />
+   298→        <dl className="space-y-2 text-sm">
+   299→          <div className="flex items-center justify-between gap-2">
+   300→            <dt className="text-muted-foreground">Last synced</dt>
+   301→            <dd className="font-medium" title={fmtDT(sync.lastSyncAt)}>{ago(sync.lastSyncAt, now)}</dd>
+   302→          </div>
+   303→          <div className="flex items-center justify-between gap-2">
+   304→            <dt className="text-muted-foreground">Next scheduled sync</dt>
+   305→            <dd className="font-medium">{sync.nextScheduledSyncAt ? fmtDT(sync.nextScheduledSyncAt) : "—"}</dd>
+   306→          </div>
+   307→          {sync.consecutiveFailures > 0 && (
+   308→            <div className="flex items-center justify-between gap-2 rounded-lg bg-amber-500/10 px-2.5 py-1.5 text-amber-700 dark:text-amber-400">
+   309→              <dt className="flex items-center gap-1.5 font-medium">
+   310→                <AlertTriangle className="size-3.5" aria-hidden="true" /> Consecutive failures
+   311→              </dt>
+   312→              <dd className="font-semibold tabular-nums">{sync.consecutiveFailures}</dd>
+   313→            </div>
+   314→          )}
+   315→        </dl>
+   316→      </CardContent>
+   317→    </Card>
+   318→  );
+   319→}
+   320→
+   321→/* ------------------------------------------------------------------ */
+   322→
+   323→function ChangeRow({ c, onOpen }: { c: ChangeEvent; onOpen?: (code: string) => void }) {
+   324→  const now = useNow();
+   325→  const clickable = Boolean(onOpen && c.subjectCode);
+   326→  const hue = c.subjectCode ? hueColors(c.subjectCode) : null;
+   327→
+   328→  const inner = (
+   329→    <>
+   330→      <KindIcon kind={c.kind} />
+   331→      <div className="min-w-0 flex-1">
+   332→        <p className="text-sm leading-snug">{c.detail}</p>
+   333→        <p className="mt-0.5 flex flex-wrap items-center gap-1.5 text-xs text-muted-foreground">
+   334→          {c.subjectCode && hue && (
+   335→            <Badge
+   336→              variant="outline"
+   337→              className="gap-1 border-transparent px-1.5 py-0 font-mono text-[10px]"
+   338→              style={{ backgroundColor: hue.bg, color: hue.fg }}
+   339→            >
+   340→              {c.subjectCode}
+   341→            </Badge>
+   342→          )}
+   343→          {ago(c.createdAt, now)}
+   344→        </p>
+   345→      </div>
+   346→      {clickable && (
+   347→        <ChevronRight
+   348→          className="mt-1 size-3.5 shrink-0 text-muted-foreground/50 transition-transform group-hover/row:translate-x-0.5 group-hover/row:text-foreground"
+   349→          aria-hidden="true"
+   350→        />
+   351→      )}
+   352→    </>
+   353→  );
+   354→
+   355→  if (!clickable) {
+   356→    return (
+   357→      <li className="flex items-start gap-2.5 rounded-lg border border-border/50 p-2.5 transition-colors hover:bg-muted/50">
+   358→        {inner}
+   359→      </li>
+   360→    );
+   361→  }
+   362→
+   363→  return (
+   364→    <li className="group/row list-none p-0">
+   365→      <button
+   366→        type="button"
+   367→        onClick={() => onOpen?.(c.subjectCode as string)}
+   368→        aria-label={`Open ${c.subjectCode} in the subject drawer`}
+   369→        title={`Open ${c.subjectCode} — attendance, trend and what-if planner`}
+   370→        className="flex w-full items-start gap-2.5 rounded-lg border border-border/50 p-2.5 text-left transition-all hover:border-primary/40 hover:bg-muted/60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+   371→      >
+   372→        {inner}
+   373→      </button>
+   374→    </li>
+   375→  );
+   376→}
+   377→
+   378→/* ------------------------------------------------------------------ */
+   379→
+   380→function SubjectRow({ s, onOpen, shimmer }: { s: SubjectView; onOpen: () => void; shimmer: boolean }) {
+   381→  const c = statusColors(s.status);
+   382→  return (
+   383→    <button
+   384→      type="button"
+   385→      onClick={onOpen}
+   386→      className="flex w-full items-center gap-3 rounded-lg border border-border/50 p-3 text-left transition-all hover:border-primary/40 hover:bg-muted/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+   387→      aria-label={`Open attendance details for ${s.name}`}
+   388→    >
+   389→      <span className={cn("hidden shrink-0 rounded-md px-2 py-1 font-mono text-[11px] font-semibold sm:block", c.bg, c.text)}>
+   390→        {s.code}
+   391→      </span>
+   392→      <div className="min-w-0 flex-1">
+   393→        <div className="flex items-center justify-between gap-2">
+   394→          <p className="min-w-0 truncate text-sm font-medium">{s.name}</p>
+   395→          <span className={cn("shrink-0 text-sm font-bold tabular-nums", c.text)}>{s.percentage.toFixed(2)}%</span>
+   396→        </div>
+   397→        <div className="mt-1.5 flex items-center gap-2">
+   398→          <MiniBar percentage={s.percentage} status={s.status} target={s.targetPct} className="flex-1" shimmer={shimmer} />
+   399→          {s.status !== "safe" && s.classesToTarget > 0 ? (
+   400→            <span className="shrink-0 text-[11px] font-medium text-amber-600 dark:text-amber-400">
+   401→              ⚠ needs {s.classesToTarget} more {s.classesToTarget === 1 ? "class" : "classes"}
+   402→            </span>
+   403→          ) : (
+   404→            <span className="shrink-0 text-[11px] text-muted-foreground tabular-nums">
+   405→              {s.present}/{s.total}
+   406→            </span>
+   407→          )}
+   408→          {s.hasCustomTarget && <CustomTargetChip target={s.targetPct} className="shrink-0" />}
+   409→        </div>
+   410→      </div>
+   411→      <ChevronRight className="size-4 shrink-0 text-muted-foreground/60" aria-hidden="true" />
+   412→    </button>
+   413→  );
+   414→}
+   415→
+   416→/* ------------------------------------------------------------------ */
+   417→
+   418→function NotificationRow({
+   419→  n,
+   420→}: {
+   421→  n: { id: string; title: string; message: string; severity: string; createdAt: string; read: boolean };
+   422→}) {
+   423→  const now = useNow();
+   424→  const Icon =
+   425→    n.severity === "critical"
+   426→      ? XCircle
+   427→      : n.severity === "warning"
+   428→        ? AlertTriangle
+   429→        : n.severity === "success"
+   430→          ? CheckCircle2
+   431→          : Info;
+   432→  const cls =
+   433→    n.severity === "critical"
+   434→      ? "text-red-600 dark:text-red-400 bg-red-500/10"
+   435→      : n.severity === "warning"
+   436→        ? "text-amber-600 dark:text-amber-400 bg-amber-500/10"
+   437→        : n.severity === "success"
+   438→          ? "text-emerald-600 dark:text-emerald-400 bg-emerald-500/10"
+   439→          : "text-muted-foreground bg-muted";
+   440→  return (
+   441→    <li className="flex items-start gap-2.5 rounded-lg p-2 transition-colors hover:bg-muted/50">
+   442→      <span className={cn("mt-0.5 flex size-6 shrink-0 items-center justify-center rounded-md", cls)}>
+   443→        <Icon className="size-3.5" aria-hidden="true" />
+   444→      </span>
+   445→      <div className="min-w-0 flex-1">
+   446→        <p className="text-sm font-medium leading-snug">{n.title}</p>
+   447→        <p className="line-clamp-2 text-xs text-muted-foreground">{compactErrorText(n.message, 240)}</p>
+   448→        <p className="mt-0.5 text-[11px] text-muted-foreground/80">{ago(n.createdAt, now)}</p>
+   449→      </div>
+   450→      {!n.read && <span className="mt-1.5 size-1.5 shrink-0 rounded-full bg-primary" aria-label="unread" />}
+   451→    </li>
+   452→  );
+   453→}
+   454→
+   455→/* ------------------------------------------------------------------ */
+   456→
+   457→function CardSkeletonLight({ className }: { className?: string }) {
+   458→  return (
+   459→    <Card className={cn("rounded-xl border-border/60", className)}>
+   460→      <CardContent className="p-6">
+   461→        <div className="animate-pulse space-y-3">
+   462→          <div className="h-4 w-1/3 rounded bg-muted" />
+   463→          <div className="h-3 w-2/3 rounded bg-muted" />
+   464→          <div className="h-20 w-full rounded bg-muted" />
+   465→        </div>
+   466→      </CardContent>
+   467→    </Card>
+   468→  );
+   469→}
+   470→
+   471→export function DashboardTab({
+   472→  onOpenAttendance,
+   473→  onOpenSettings,
+   474→  onOpenReminders,
+   475→}: {
+   476→  onOpenAttendance: () => void;
+   477→  onOpenSettings: () => void;
+   478→  onOpenReminders: () => void;
+   479→}) {
+   480→  const [sort, setSort] = useState<SubjectSort>("lowest");
+   481→  /* Store the CODE (not the object) and derive the view from fresh query data,
+   482→     so the drawer reflects updated targets/percentages after refetches. */
+   483→  const [selectedCode, setSelectedCode] = useState<string | null>(null);
+   484→  const [digestOpen, setDigestOpen] = useState(false);
+   485→  const [showAllChanges, setShowAllChanges] = useState(false);
+   486→  const [showAllNotifs, setShowAllNotifs] = useState(false);
+   487→  const { data, isPending, isError, error } = useQuery({
+   488→    queryKey: qk.dashboard,
+   489→    queryFn: fetchDashboard,
+   490→    refetchInterval: 20_000,
+   491→  });
+   492→  const history = useQuery({
+   493→    queryKey: qk.history,
+   494→    queryFn: fetchHistory,
+   495→    refetchInterval: 60_000,
+   496→  });
+   497→
+   498→  const weekDelta = useMemo(() => {
+   499→    const pts = history.data?.overall ?? [];
+   500→    if (pts.length < 2) return null;
+   501→    const cutoff = Date.now() - 7 * 24 * 3600 * 1000;
+   502→    const first = pts.find((p) => new Date(p.t).getTime() >= cutoff) ?? pts[0];
+   503→    const last = pts[pts.length - 1];
+   504→    const d = last.percentage - first.percentage;
+   505→    if (Math.abs(d) < 0.005) return null;
+   506→    // Be honest about the window: when tracked history is younger than the
+   507→    // 7-day span (e.g. live tracking just started), label the real span.
+   508→    const spanDays = Math.max(
+   509→      0,
+   510→      (new Date(last.t).getTime() - new Date(first.t).getTime()) / 86_400_000
+   511→    );
+   512→    return { delta: d, spanDays, fullWeek: spanDays >= 6.5 };
+   513→  }, [history.data]);
+   514→
+   515→  if (isPending) {
+   516→    return (
+   517→      <div className="space-y-4">
+   518→        <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-5">
+   519→          <CardSkeletonLight className="md:col-span-2 xl:col-span-2" />
+   520→          <CardSkeletonLight />
+   521→          <CardSkeletonLight />
+   522→          <CardSkeletonLight />
+   523→        </div>
+   524→        <CardSkeletonLight />
+   525→        <div className="grid gap-4 lg:grid-cols-2">
+   526→          <CardSkeletonLight />
+   527→          <CardSkeletonLight />
+   528→        </div>
+   529→      </div>
+   530→    );
+   531→  }
+   532→
+   533→  if (isError || !data) {
+   534→    return (
+   535→      <Card className="rounded-xl border-red-500/30 bg-red-500/5">
+   536→        <CardContent className="flex items-center gap-3 p-6 text-sm text-red-600 dark:text-red-400">
+   537→          <XCircle className="size-5 shrink-0" aria-hidden="true" />
+   538→          Could not load the dashboard: {error?.message ?? "unknown error"}
+   539→        </CardContent>
+   540→      </Card>
+   541→    );
+   542→  }
+   543→
+   544→  const { overall, subjects, target, mode } = data;
+   545→  const sorted = sortSubjects(subjects, sort);
+   546→
+   547→  if (mode === "none") {
+   548→    return (
+   549→      <EmptyHero
+   550→        title="No ERP data available yet."
+   551→        description="Connect your ERP account or run a first synchronization to fetch your attendance and reminders. Nothing is shown until real data arrives."
+   552→        actionLabel="Connect / Sync ERP"
+   553→        onAction={onOpenSettings}
+   554→      />
+   555→    );
+   556→  }
+   557→
+   558→  return (
+   559→    <motion.div
+   560→      className="space-y-4"
+   561→      initial="hidden"
+   562→      animate="show"
+   563→      variants={{
+   564→        hidden: {},
+   565→        show: { transition: { staggerChildren: 0.05 } },
+   566→      }}
+   567→    >
+   568→      {/* Subject detail drawer (also covers what-if planning) */}
+   569→      <SubjectDrawer
+   570→        subject={data.subjects.find((s) => s.code === selectedCode) ?? null}
+   571→        target={target}
+   572→        globalTarget={target}
+   573→        open={selectedCode !== null}
+   574→        onOpenChange={(o) => {
+   575→          if (!o) setSelectedCode(null);
+   576→        }}
+   577→      />
+   578→
+   579→      {/* Row 0 — next deadline countdown */}
+   580→      <NextUpStrip items={data.reminders.items} />
+   581→
+   582→      {/* Row 1 — overall + stats */}
+   583→      <motion.div
+   584→        className="grid gap-4 md:grid-cols-2 xl:grid-cols-5"
+   585→        variants={{ hidden: { opacity: 0, y: 10 }, show: { opacity: 1, y: 0, transition: { duration: 0.25, ease: "easeOut" } } }}
+   586→      >
+   587→        <Card className="erp-card-accent rounded-xl border-border/60 transition-shadow hover:shadow-md md:col-span-2 xl:col-span-2">
+   588→          <CardContent className="flex flex-col items-center gap-4 p-6 sm:flex-row sm:gap-6">
+   589→            <ProgressRing percentage={overall.percentage} target={target} size={150} animated />
+   590→            <div className="min-w-0 flex-1 space-y-2.5 text-center sm:text-left">
+   591→              <div className="flex flex-wrap items-center justify-center gap-2 sm:justify-start">
+   592→                <h2 className="text-lg font-semibold tracking-tight">Overall attendance</h2>
+   593→                {data.semester !== "all" && (
+   594→                  <Badge
+   595→                    variant="outline"
+   596→                    className="gap-1 border-primary/40 text-primary"
+   597→                    title="A semester partition is active — only this semester's ERP subjects are counted"
+   598→                  >
+   599→                    <GraduationCap className="size-3" aria-hidden="true" />
+   600→                    Sem {data.semester}
+   601→                  </Badge>
+   602→                )}
+   603→                <StatusChip status={overall.status} target={target} />
+   604→                <Button
+   605→                  variant="ghost"
+   606→                  size="sm"
+   607→                  className="ml-auto h-7 gap-1 rounded-full px-2.5 text-xs text-muted-foreground hover:text-foreground"
+   608→                  onClick={() => setDigestOpen(true)}
+   609→                  aria-label="Open the weekly attendance report"
+   610→                >
+   611→                  <CalendarRange className="size-3.5" aria-hidden="true" />
+   612→                  This week
+   613→                </Button>
+   614→                {weekDelta !== null && (
+   615→                  <span
+   616→                    className={cn(
+   617→                      "rounded-full px-2 py-0.5 text-[11px] font-semibold tabular-nums",
+   618→                      weekDelta.delta >= 0
+   619→                        ? "bg-emerald-500/10 text-emerald-600 dark:text-emerald-400"
+   620→                        : "bg-red-500/10 text-red-600 dark:text-red-400"
+   621→                    )}
+   622→                    title={
+   623→                      weekDelta.fullWeek
+   624→                        ? "Change over the last 7 days"
+   625→                        : `Change over the ${weekDelta.spanDays < 1 ? "first day" : `last ${Math.max(1, Math.round(weekDelta.spanDays))} day(s)`} of tracked history`
+   626→                    }
+   627→                  >
+   628→                    {weekDelta.delta >= 0 ? "▲" : "▼"} {Math.abs(weekDelta.delta).toFixed(2)} pts{" "}
+   629→                    {weekDelta.fullWeek
+   630→                      ? "/ 7d"
+   631→                      : weekDelta.spanDays < 1
+   632→                        ? "· day 1"
+   633→                        : `/ ${Math.max(1, Math.round(weekDelta.spanDays))}d`}
+   634→                  </span>
+   635→                )}
+   636→              </div>
+   637→              <p className="text-sm text-muted-foreground tabular-nums">
+   638→                <span className="font-semibold text-foreground">{overall.present}</span> present of{" "}
+   639→                <span className="font-semibold text-foreground">{overall.total}</span> classes
+   640→                <span className="text-muted-foreground/70"> ({overall.absent} missed)</span>
+   641→              </p>
+   642→              <div className="space-y-1 text-sm">
+   643→                {overall.classesToTarget > 0 ? (
+   644→                  <p className="flex items-center justify-center gap-1.5 text-amber-600 dark:text-amber-400 sm:justify-start">
+   645→                    <ArrowRight className="size-3.5 shrink-0" aria-hidden="true" />
+   646→                    Attend the next <b className="tabular-nums">{overall.classesToTarget}</b>{" "}
+   647→                    {overall.classesToTarget === 1 ? "class" : "classes"} to reach {target}%
+   648→                  </p>
+   649→                ) : (
+   650→                  <p className="flex items-center justify-center gap-1.5 text-emerald-600 dark:text-emerald-400 sm:justify-start">
+   651→                    <CheckCircle2 className="size-3.5 shrink-0" aria-hidden="true" />
+   652→                    You are at or above the {target}% target
+   653→                  </p>
+   654→                )}
+   655→                {overall.canSkip > 0 && (
+   656→                  <p className="flex items-center justify-center gap-1.5 text-muted-foreground sm:justify-start">
+   657→                    <CalendarClock className="size-3.5 shrink-0" aria-hidden="true" />
+   658→                    You can skip <b className="tabular-nums text-foreground">{overall.canSkip}</b>{" "}
+   659→                    {overall.canSkip === 1 ? "class" : "classes"} and stay above {target}%
+   660→                  </p>
+   661→                )}
+   662→              </div>
+   663→            </div>
+   664→          </CardContent>
+   665→        </Card>
+   666→
+   667→        <StatCard icon={Layers} label="Subjects" value={subjects.length} tone="emerald" />
+   668→        <StatCard
+   669→          icon={AlertTriangle}
+   670→          label="Below target"
+   671→          value={data.warningSubjects}
+   672→          tone={data.warningSubjects > 0 ? "amber" : "default"}
+   673→        />
+   674→        <StatCard icon={BellRing} label="Active reminders" value={data.reminders.items.length} />
+   675→      </motion.div>
+   676→
+   677→      {/* Weekly digest report dialog */}
+   678→      <WeeklyDigestDialog open={digestOpen} onOpenChange={setDigestOpen} demoMode={mode === "demo"} />
+   679→
+   680→      {/* Row 2 — subject list */}
+   681→      <Card className="rounded-xl border-border/60 transition-shadow hover:shadow-md">
+   682→        <CardHeader className="flex flex-col gap-2 space-y-0 pb-3 sm:flex-row sm:items-center sm:justify-between">
+   683→          <div className="min-w-0">
+   684→            <CardTitle className="text-base tracking-tight">Subject attendance</CardTitle>
+   685→            <CardDescription className="text-xs">Tap a subject for details and what-if planning</CardDescription>
+   686→          </div>
+   687→          <div className="flex items-center gap-1.5">
+   688→            <Select value={sort} onValueChange={(v) => setSort(v as SubjectSort)}>
+   689→              <SelectTrigger
+   690→                className="h-8 w-full min-w-0 gap-1 text-xs sm:w-[190px]"
+   691→                aria-label="Sort subjects"
+   692→              >
+   693→                <ArrowDownUp className="size-3.5 shrink-0 text-muted-foreground" aria-hidden="true" />
+   694→                <SelectValue />
+   695→              </SelectTrigger>
+   696→              <SelectContent>
+   697→                {SUBJECT_SORTS.map((o) => (
+   698→                  <SelectItem key={o.key} value={o.key} className="text-xs">
+   699→                    {o.label}
+   700→                  </SelectItem>
+   701→                ))}
+   702→              </SelectContent>
+   703→            </Select>
+   704→            <Button variant="ghost" size="sm" className="h-8 shrink-0 gap-1 text-xs" onClick={onOpenAttendance}>
+   705→              View all <ChevronRight className="size-3.5" aria-hidden="true" />
+   706→            </Button>
+   707→          </div>
+   708→        </CardHeader>
+   709→        <CardContent>
+   710→          {subjects.length === 0 ? (
+   711→            <p className="py-6 text-center text-sm text-muted-foreground">
+   712→              {data.semester !== "all"
+   713→                ? `No subjects synchronized for Semester ${data.semester}`
+   714→                : "No subjects synchronized yet"}
+   715→            </p>
+   716→          ) : (
+   717→            <div className="max-h-96 space-y-2 overflow-y-auto pr-1">
+   718→              {sorted.map((s) => (
+   719→                <SubjectRow
+   720→                  key={s.id}
+   721→                  s={s}
+   722→                  onOpen={() => setSelectedCode(s.code)}
+   723→                  shimmer={data.erp.sync.status === "syncing"}
+   724→                />
+   725→              ))}
+   726→            </div>
+   727→          )}
+   728→        </CardContent>
+   729→      </Card>
+   730→
+   731→      {/* Row 2.5 — today's schedule / weekly timetable */}
+   732→      {subjects.length > 0 && <TimetableCard subjects={subjects} mode={data.mode} />}
+   733→
+   734→      {/* Row 3 — reminders preview + ERP status */}
+   735→      <div className="grid gap-4 lg:grid-cols-2">
+   736→        <RemindersPreview
+   737→          items={data.reminders.items}
+   738→          todayCount={data.reminders.todayCount}
+   739→          weekCount={data.reminders.weekCount}
+   740→          alaPending={data.reminders.alaPending}
+   741→          alaTotal={data.reminders.alaTotal}
+   742→          onOpenReminders={onOpenReminders}
+   743→        />
+   744→        <ErpStatusCard
+   745→          connected={data.erp.connected}
+   746→          demoMode={data.erp.demoMode ?? false}
+   747→          username={data.erp.username}
+   748→          sync={data.erp.sync}
+   749→        />
+   750→      </div>
+   751→
+   752→      {/* Row 4 — changes feed + notifications */}
+   753→      <div className="grid gap-4 lg:grid-cols-2">
+   754→        <Card className="rounded-xl border-border/60">
+   755→          <CardHeader className="pb-3">
+   756→            <CardTitle className="text-base tracking-tight">Recent ERP changes</CardTitle>
+   757→            <CardDescription className="text-xs">
+   758→              Detected automatically by the sync engine
+   759→              {data.changes.some((c) => c.subjectCode && data.subjects.some((s) => s.code === c.subjectCode)) &&
+   760→                " — tap a code to open the subject"}
+   761→            </CardDescription>
+   762→          </CardHeader>
+   763→          <CardContent>
+   764→            {data.changes.length === 0 ? (
+   765→              <p className="py-6 text-center text-sm text-muted-foreground">No changes recorded yet</p>
+   766→            ) : (
+   767→              <>
+   768→                <ul className="max-h-96 space-y-1.5 overflow-y-auto pr-1">
+   769→                  {(showAllChanges ? data.changes : data.changes.slice(0, 8)).map((c) => (
+   770→                    <ChangeRow
+   771→                      key={c.id}
+   772→                      c={c}
+   773→                      /* Only rows whose subject still exists are clickable — a code that
+   774→                         no longer matches a live subject would open nothing (honest affordance). */
+   775→                      onOpen={
+   776→                        c.subjectCode && data.subjects.some((s) => s.code === c.subjectCode)
+   777→                          ? setSelectedCode
+   778→                          : undefined
+   779→                      }
+   780→                    />
+   781→                  ))}
+   782→                </ul>
+   783→                {data.changes.length > 8 && (
+   784→                  <Button
+   785→                    variant="ghost"
+   786→                    size="sm"
+   787→                    className="mt-2 h-7 w-full gap-1 text-xs text-muted-foreground hover:text-foreground"
+   788→                    onClick={() => setShowAllChanges((v) => !v)}
+   789→                    aria-expanded={showAllChanges}
+   790→                  >
+   791→                    {showAllChanges ? (
+   792→                      <>Show less</>
+   793→                    ) : (
+   794→                      <>
+   795→                        Show all {data.changes.length} events <ChevronRight className="size-3.5" aria-hidden="true" />
+   796→                      </>
+   797→                    )}
+   798→                  </Button>
+   799→                )}
+   800→              </>
+   801→            )}
+   802→          </CardContent>
+   803→        </Card>
+   804→
+   805→        <Card className="rounded-xl border-border/60">
+   806→          <CardHeader className="pb-3">
+   807→            <CardTitle className="text-base tracking-tight">Recent notifications</CardTitle>
+   808→            <CardDescription className="text-xs">{data.unreadCount} unread</CardDescription>
+   809→          </CardHeader>
+   810→          <CardContent>
+   811→            {data.notifications.length === 0 ? (
+   812→              <p className="py-6 text-center text-sm text-muted-foreground">Nothing here yet</p>
+   813→            ) : (
+   814→              <>
+   815→                <ul className="max-h-96 space-y-1 overflow-y-auto pr-1">
+   816→                  {(showAllNotifs ? data.notifications : data.notifications.slice(0, 5)).map((n) => (
+   817→                    <NotificationRow key={n.id} n={n} />
+   818→                  ))}
+   819→                </ul>
+   820→                {data.notifications.length > 5 && (
+   821→                  <Button
+   822→                    variant="ghost"
+   823→                    size="sm"
+   824→                    className="mt-2 h-7 w-full gap-1 text-xs text-muted-foreground hover:text-foreground"
+   825→                    onClick={() => setShowAllNotifs((v) => !v)}
+   826→                    aria-expanded={showAllNotifs}
+   827→                  >
+   828→                    {showAllNotifs ? (
+   829→                      <>Show less</>
+   830→                    ) : (
+   831→                      <>
+   832→                        Show all {data.notifications.length} <ChevronRight className="size-3.5" aria-hidden="true" />
+   833→                      </>
+   834→                    )}
+   835→                  </Button>
+   836→                )}
+   837→              </>
+   838→            )}
+   839→          </CardContent>
+   840→        </Card>
+   841→      </div>
+   842→    </motion.div>
+   843→  );
+   844→}
+   845→

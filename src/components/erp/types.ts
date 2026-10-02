@@ -60,6 +60,15 @@ export interface Reminder {
   updatedAt?: string;
 }
 
+/** Compact open ALA deadline row for the dashboard preview panel. */
+export interface AlaUpcomingRow {
+  id: string;
+  title: string;
+  subjectCode: string | null;
+  subjectName: string | null;
+  dueAt: string;
+}
+
 export interface SyncState {
   status: SyncStatus;
   mode: AppMode;
@@ -146,6 +155,8 @@ export interface DashboardResponse {
     alaPending: number;
     /** All tracked ERP ALA/assignment rows. */
     alaTotal: number;
+    /** Top of the open ALA deadline queue (soonest first, overdue included). */
+    alaUpcoming: AlaUpcomingRow[];
   };
   erp: ErpSyncEnvelope;
   notifications: AppNotification[];
