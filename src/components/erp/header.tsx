@@ -10,6 +10,7 @@ import {
   CheckCircle2,
   GraduationCap,
   Info,
+  MonitorSmartphone,
   Moon,
   OctagonAlert,
   RefreshCw,
@@ -34,6 +35,7 @@ import {
   TooltipTrigger,
 } from "@/components/ui/tooltip";
 import { cn } from "@/lib/utils";
+import { promptInstall, useCanInstall } from "./install-prompt";
 import { fetchDashboard, fetchTimetable, markAllNotificationsRead, postSync, qk } from "./api";
 import { ago, fmtDT, useNow } from "./shared";
 import type { AppMode, AppNotification, NotificationSeverity } from "./types";
@@ -116,6 +118,29 @@ function ThemeToggle() {
       onClick={() => setTheme(isDark ? "light" : "dark")}
     >
       {mounted && isDark ? <Sun className="size-4.5" /> : <Moon className="size-4.5" />}
+    </Button>
+  );
+}
+
+/** One-click PWA install — rendered only while the browser offers the prompt. */
+function InstallButton() {
+  const canInstall = useCanInstall();
+  const [pending, setPending] = React.useState(false);
+  if (!canInstall) return null;
+  return (
+    <Button
+      variant="ghost"
+      size="icon"
+      aria-label="Install ERP Sync as an app"
+      disabled={pending}
+      onClick={async () => {
+        setPending(true);
+        const outcome = await promptInstall();
+        setPending(false);
+        if (outcome === "accepted") toast.success("App installed", { description: "Launch ERP Sync from your home screen." });
+      }}
+    >
+      <MonitorSmartphone className={cn("size-4.5", pending && "animate-pulse")} aria-hidden="true" />
     </Button>
   );
 }
@@ -374,6 +399,8 @@ export function AppHeader({ onOpenPalette }: { onOpenPalette?: () => void }) {
                 <Bell className="size-4.5" />
               </Button>
             )}
+
+            <InstallButton />
 
             <ThemeToggle />
           </div>

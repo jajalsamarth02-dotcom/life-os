@@ -12,6 +12,7 @@ import {
   CheckCircle2,
   ChevronRight,
   FlaskConical,
+  CalendarRange,
   Hourglass,
   Info,
   Layers,
@@ -23,8 +24,10 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Separator } from "@/components/ui/separator";
+import { motion } from "framer-motion";
 import { cn } from "@/lib/utils";
 import { fetchDashboard, fetchHistory, qk } from "./api";
+import { WeeklyDigestDialog } from "./digest-dialog";
 import { SubjectDrawer } from "./subject-drawer";
 import { TimetableCard } from "./timetable-card";
 import {
@@ -410,6 +413,7 @@ export function DashboardTab({
 }) {
   const [sort, setSort] = useState<SubjectSort>("lowest");
   const [selectedSubject, setSelectedSubject] = useState<SubjectView | null>(null);
+  const [digestOpen, setDigestOpen] = useState(false);
   const { data, isPending, isError, error } = useQuery({
     queryKey: qk.dashboard,
     queryFn: fetchDashboard,
@@ -475,7 +479,15 @@ export function DashboardTab({
   }
 
   return (
-    <div className="space-y-4">
+    <motion.div
+      className="space-y-4"
+      initial="hidden"
+      animate="show"
+      variants={{
+        hidden: {},
+        show: { transition: { staggerChildren: 0.05 } },
+      }}
+    >
       {/* Subject detail drawer (also covers what-if planning) */}
       <SubjectDrawer
         subject={selectedSubject}
@@ -490,14 +502,27 @@ export function DashboardTab({
       <NextUpStrip items={data.reminders.items} />
 
       {/* Row 1 — overall + stats */}
-      <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-5">
-        <Card className="rounded-xl border-border/60 transition-shadow hover:shadow-md md:col-span-2 xl:col-span-2">
+      <motion.div
+        className="grid gap-4 md:grid-cols-2 xl:grid-cols-5"
+        variants={{ hidden: { opacity: 0, y: 10 }, show: { opacity: 1, y: 0, transition: { duration: 0.25, ease: "easeOut" } } }}
+      >
+        <Card className="erp-card-accent rounded-xl border-border/60 transition-shadow hover:shadow-md md:col-span-2 xl:col-span-2">
           <CardContent className="flex flex-col items-center gap-4 p-6 sm:flex-row sm:gap-6">
             <ProgressRing percentage={overall.percentage} target={target} size={150} animated />
             <div className="min-w-0 flex-1 space-y-2.5 text-center sm:text-left">
               <div className="flex flex-wrap items-center justify-center gap-2 sm:justify-start">
                 <h2 className="text-lg font-semibold tracking-tight">Overall attendance</h2>
                 <StatusChip status={overall.status} target={target} />
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="ml-auto h-7 gap-1 rounded-full px-2.5 text-xs text-muted-foreground hover:text-foreground"
+                  onClick={() => setDigestOpen(true)}
+                  aria-label="Open the weekly attendance report"
+                >
+                  <CalendarRange className="size-3.5" aria-hidden="true" />
+                  This week
+                </Button>
                 {weekDelta !== null && (
                   <span
                     className={cn(
@@ -550,7 +575,10 @@ export function DashboardTab({
           tone={data.warningSubjects > 0 ? "amber" : "default"}
         />
         <StatCard icon={BellRing} label="Active reminders" value={data.reminders.items.length} />
-      </div>
+      </motion.div>
+
+      {/* Weekly digest report dialog */}
+      <WeeklyDigestDialog open={digestOpen} onOpenChange={setDigestOpen} demoMode={mode === "demo"} />
 
       {/* Row 2 — subject list */}
       <Card className="rounded-xl border-border/60 transition-shadow hover:shadow-md">
@@ -655,6 +683,6 @@ export function DashboardTab({
           </CardContent>
         </Card>
       </div>
-    </div>
+    </motion.div>
   );
 }

@@ -34,6 +34,7 @@ import { AttendanceTab } from "@/components/erp/attendance-tab";
 import { RemindersTab } from "@/components/erp/reminders-tab";
 import { SettingsTab } from "@/components/erp/settings-tab";
 import { CommandPalette } from "@/components/erp/command-palette";
+import { useDueNotifications } from "@/components/erp/use-due-notifications";
 import { fetchDashboard, postSync, qk } from "@/components/erp/api";
 import { fmtDT } from "@/components/erp/shared";
 
@@ -159,6 +160,9 @@ export default function Home() {
   const qc = useQueryClient();
   const { resolvedTheme, setTheme } = useTheme();
   const { data } = useQuery({ queryKey: qk.dashboard, queryFn: fetchDashboard, refetchInterval: 20_000 });
+
+  /* System notifications when a reminder becomes due (device-local opt-in) */
+  useDueNotifications();
 
   const sync = data?.erp?.sync;
   const mode = data?.mode;

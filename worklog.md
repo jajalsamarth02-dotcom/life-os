@@ -217,3 +217,67 @@ Unresolved issues / risks & next-phase recommendations:
 2. In live mode the heatmap starts sparse (honest accrual); the empty state explains this.
 3. Backlog: PWA install-prompt UI, weekly digest report, per-reminder due-date notifications
    (browser Notification API), "ongoing class" hero strip on the dashboard, Ctrl+K recent-actions.
+
+---
+Task ID: R6 (webDevReview round 6)
+Agent: Z.ai Code (autonomous review & feature round)
+Task: QA + weekly digest report + browser due-reminders + PWA install UI + styling polish
+
+Work Log / Current status assessment:
+- Read worklog (R1–R5 complete; app feature-rich and stable). QA pass first: fresh agent-browser
+  session → all 4 tabs navigate, scheduler syncing demo data ("Last ERP sync" ticking), zero
+  console/page errors, no hydration issues. Security spot-check: ERP password field value is empty
+  (dots are a placeholder only) and localStorage contains just "theme" — no credential leakage.
+  No bugs found → proceeded to backlog features per R5 recommendations.
+
+Completed modifications:
+1. WEEKLY DIGEST REPORT (new feature):
+   - GET /api/digest?days=7 (1–90 clamp, tolerant of bad params): first→last AttendanceSnapshot
+     diffs per subject + "__overall__" → pctStart/pctEnd/deltaPts plus honest attended/held/missed
+     derived from snapshot deltas; sync health (total/success/failed from SyncLog); ChangeEvent
+     count; reminders created/completed; upcoming ACTIVE reminders (±window).
+   - src/components/erp/digest-dialog.tsx: "This week" button on the dashboard Overall attendance
+     card opens a Weekly report dialog — hero movement panel, per-subject table (sticky header,
+     delta chips, Held column hidden on mobile), 2×2 activity tiles, next-7-days list with source
+     badges, Copy summary (clipboard text report) + Download CSV actions, DEMO DATA badge in demo
+     mode, honest footnote that totals come from sync-time snapshots (no invented data).
+2. BROWSER DUE-REMINDER NOTIFICATIONS (new feature):
+   - src/lib/browser-reminders.ts: device-local opt-in (permission + localStorage flag, change
+     event), once-per-reminder notified bookkeeping with 7-day prune, test notification helper.
+   - src/components/erp/use-due-notifications.ts: mounted on the page — while granted+enabled it
+     polls active reminders (30s) and fires a system notification + in-app toast when something
+     becomes due (auto-managed ATTENDANCE_WARNING excluded; items >24h overdue never fire).
+   - Settings "Browser reminders" card: OFF/ON/BLOCKED/NOT-SUPPORTED badge, permission request
+     flow, per-device switch, "Send a test". Reminders tab gained a dismissible opt-in banner.
+3. PWA INSTALL UI (completes the R3 manifest work):
+   - src/components/erp/install-prompt.ts: module-level beforeinstallprompt capture, appinstalled
+     handling, useCanInstall/useIsInstalled/promptInstall, iOS detection.
+   - Header install icon-button (only while the browser offers the prompt); Settings "Install the
+     app" card covering three states: Install now button → INSTALLED badge → iOS "Add to Home
+     Screen" steps → generic fallback instructions.
+4. STYLING polish (mandatory):
+   - MotionConfig reducedMotion="user" app-wide (every framer animation now respects OS setting).
+   - Staggered entrance for the dashboard row-1 grid; .erp-card-accent emerald gradient hairline
+     (overall card + digest dialog), reduced-motion aware.
+   - Digest dialog: gradient hero, delta chips (▲/▼ emerald/red), sticky table header, theme-aware
+     in both light and dark.
+
+Verification results:
+- bun run lint: clean (fixed one react-hooks/set-state-in-effect in the notifications hook via
+  lazy useState initializers instead of setState-in-effect).
+- /api/digest verified with real data: overall 70.18%→72.13% (+1.96 pts), per-subject deltas,
+  14 syncs (12 ok/2 failed), 49 changes, 8 reminders created, 4 upcoming; days=abc / days=500 → 200.
+- agent-browser E2E: "This week" dialog opens from the dashboard (mobile 390px + desktop 1280px,
+  dark + light screenshots); Copy summary → "Report copied to clipboard" toast; Download CSV click
+  clean; browser-reminders permission flow exercised end-to-end (headless denies → honest BLOCKED
+  badge + guidance shown); "Install now" → prompt fired → "Install dismissed" handled gracefully;
+  fresh load: 0 console errors, 0 page errors; dev.log clean.
+
+Unresolved issues / risks & next-phase recommendations:
+1. Live ERP scrape parser still generic — needs one real student login to fine-tune against the
+   actual dashboard HTML (demo mode covers everything meanwhile). TOP priority if credentials arrive.
+2. Browser due-reminders fire only while the app is open (page-level watcher). A service-worker
+   push/scheduled-check would cover closed-tab cases — bigger change, worth doing only for a
+   deployed build.
+3. Backlog: per-subject target overrides, weekly digest as scheduled email/report, command-palette
+   recent actions, "add to timetable from drawer" shortcut.

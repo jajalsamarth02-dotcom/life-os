@@ -5,9 +5,11 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { motion } from "framer-motion";
 import {
   AlertTriangle,
+  BellRing,
   CalendarClock,
   CheckCircle2,
   ChevronDown,
+  Loader2,
   Lock,
   Plus,
   Trash2,
@@ -56,6 +58,13 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { Switch } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/textarea";
 import { cn } from "@/lib/utils";
+import {
+  CHANGE_EVENT as BROWSER_REMINDERS_EVENT,
+  isEnabled as browserRemindersEnabled,
+  permissionState as browserRemindersPermission,
+  requestPermission as requestNotificationPermission,
+  setEnabled as setBrowserRemindersEnabled,
+} from "@/lib/browser-reminders";
 import {
   createReminder,
   deleteReminder,
@@ -415,6 +424,80 @@ function RemindersList({ items }: { items: Reminder[] }) {
 
 /* ------------------------------------------------------------------ */
 
+/** Compact opt-in banner for system due-reminders (only until a decision). */
+function BrowserRemindersBanner() {
+  const [state, setState] = useState<{ permission: string; enabled: boolean; dismissed: boolean }>({
+    permission: "default",
+    enabled: false,
+    dismissed: true,
+  });
+  const [busy, setBusy] = useState(false);
+
+  useEffect(() => {
+    const read = () => {
+      let dismissed = true;
+      try {
+        dismissed = window.localStorage.getItem("erp.browserReminders.bannerDismissed") === "1";
+      } catch {
+        /* non-fatal */
+      }
+      setState({
+        permission: browserRemindersPermission(),
+        enabled: browserRemindersEnabled(),
+        dismissed,
+      });
+    };
+    read();
+    window.addEventListener(BROWSER_REMINDERS_EVENT, read);
+    return () => window.removeEventListener(BROWSER_REMINDERS_EVENT, read);
+  }, []);
+
+  if (state.dismissed || state.permission !== "default") return null;
+
+  const dismiss = () => {
+    try {
+      window.localStorage.setItem("erp.browserReminders.bannerDismissed", "1");
+    } catch {
+      /* non-fatal */
+    }
+    setState((s) => ({ ...s, dismissed: true }));
+  };
+
+  const enable = async () => {
+    setBusy(true);
+    const result = await requestNotificationPermission();
+    setBusy(false);
+    if (result === "granted") {
+      setBrowserRemindersEnabled(true);
+      toast.success("Browser reminders on");
+    } else if (result === "denied") {
+      toast.error("Permission denied", { description: "Allow notifications for this site in your browser settings." });
+    }
+    dismiss();
+  };
+
+  return (
+    <div className="flex flex-wrap items-center gap-2.5 rounded-xl border border-primary/25 bg-primary/[0.05] px-4 py-3">
+      <CalendarClock className="size-4 shrink-0 text-primary" aria-hidden="true" />
+      <p className="min-w-0 flex-1 text-xs sm:text-sm">
+        <span className="font-medium">Never miss a deadline.</span>{" "}
+        <span className="text-muted-foreground">Get a system alert when a reminder becomes due.</span>
+      </p>
+      <div className="flex items-center gap-1.5">
+        <Button size="sm" className="h-7 gap-1 px-2.5 text-xs" onClick={enable} disabled={busy}
+          aria-label="Enable browser due-reminder notifications">
+          {busy ? <Loader2 className="size-3.5 animate-spin" aria-hidden="true" /> : <BellRing className="size-3.5" aria-hidden="true" />}
+          Enable
+        </Button>
+        <Button variant="ghost" size="sm" className="h-7 px-2 text-xs text-muted-foreground" onClick={dismiss}
+          aria-label="Dismiss browser reminders banner">
+          Not now
+        </Button>
+      </div>
+    </div>
+  );
+}
+
 export function RemindersTab() {
   const [filter, setFilter] = useState<RemindersFilter>("all");
   const [includeDone, setIncludeDone] = useState(false);
@@ -427,6 +510,7 @@ export function RemindersTab() {
 
   return (
     <div className="space-y-4">
+      <BrowserRemindersBanner />
       <Card className="rounded-xl border-border/60">
         <CardContent className="flex flex-wrap items-center gap-3 p-4">
           <div

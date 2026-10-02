@@ -7,6 +7,7 @@ import {
   AlertCircle,
   Bell,
   BellOff,
+  BellRing,
   CalendarClock,
   CheckCircle2,
   FlaskConical,
@@ -15,6 +16,7 @@ import {
   Loader2,
   Lock,
   LogOut,
+  MonitorSmartphone,
   RefreshCw,
   Save,
   ShieldCheck,
@@ -22,6 +24,7 @@ import {
   TriangleAlert,
 } from "lucide-react";
 import { toast } from "sonner";
+import { isIOS, promptInstall, useCanInstall, useIsInstalled } from "./install-prompt";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -57,6 +60,14 @@ import {
   TooltipTrigger,
 } from "@/components/ui/tooltip";
 import { cn } from "@/lib/utils";
+import {
+  isEnabled as browserRemindersEnabled,
+  permissionState as browserRemindersPermission,
+  requestPermission as requestNotificationPermission,
+  sendTestNotification,
+  setEnabled as setBrowserRemindersEnabled,
+  type PermissionState,
+} from "@/lib/browser-reminders";
 import {
   connectErp,
   disconnectErp,
@@ -539,6 +550,198 @@ function NotificationPrefsCard() {
 }
 
 /* ------------------------------------------------------------------ */
+/* Browser reminders (system notifications when something is due)      */
+/* ------------------------------------------------------------------ */
+
+function BrowserRemindersCard() {
+  const [permission, setPermission] = React.useState<PermissionState>("default");
+  const [enabled, setEnabled] = React.useState(false);
+  const [requesting, setRequesting] = React.useState(false);
+
+  React.useEffect(() => {
+    const read = () => {
+      setPermission(browserRemindersPermission());
+      setEnabled(browserRemindersEnabled());
+    };
+    read();
+    window.addEventListener("erp:browser-reminders-changed", read);
+    return () => window.removeEventListener("erp:browser-reminders-changed", read);
+  }, []);
+
+  const enable = async () => {
+    setRequesting(true);
+    const result = await requestNotificationPermission();
+    setRequesting(false);
+    if (result === "granted") {
+      setBrowserRemindersEnabled(true);
+      toast.success("Browser reminders on", {
+        description: "You'll get a system alert when a reminder becomes due.",
+      });
+    } else if (result === "denied") {
+      toast.error("Permission denied", {
+        description: "Allow notifications for this site in your browser settings to use reminders.",
+      });
+    }
+  };
+
+  const supported = permission !== "unsupported";
+
+  return (
+    <Card className="rounded-xl border-border/60">
+      <CardHeader className="flex flex-row items-start justify-between space-y-0 pb-3">
+        <div>
+          <CardTitle className="flex items-center gap-2 text-base tracking-tight">
+            <BellRing className="size-4 text-primary" aria-hidden="true" />
+            Browser reminders
+          </CardTitle>
+          <CardDescription>System alerts when a reminder becomes due</CardDescription>
+        </div>
+        <Badge
+          variant="outline"
+          className={cn(
+            "text-[10px]",
+            enabled && permission === "granted"
+              ? "border-emerald-500/40 text-emerald-700 dark:text-emerald-400"
+              : "text-muted-foreground"
+          )}
+        >
+          {permission === "unsupported"
+            ? "NOT SUPPORTED"
+            : enabled && permission === "granted"
+              ? "ON"
+              : permission === "denied"
+                ? "BLOCKED"
+                : "OFF"}
+        </Badge>
+      </CardHeader>
+      <CardContent className="space-y-3">
+        {!supported ? (
+          <p className="flex items-center gap-2 text-sm text-muted-foreground">
+            <Info className="size-4 shrink-0" aria-hidden="true" />
+            This browser does not support system notifications. In-app toasts still work.
+          </p>
+        ) : permission === "denied" ? (
+          <p className="flex items-start gap-2 text-sm text-muted-foreground">
+            <AlertCircle className="mt-0.5 size-4 shrink-0 text-amber-500" aria-hidden="true" />
+            Notifications are blocked for this site. Re-enable them in your browser's site settings, then reload.
+          </p>
+        ) : permission === "granted" ? (
+          <>
+            <div className="flex items-center justify-between gap-3 rounded-lg border border-border/50 p-3">
+              <div>
+                <Label htmlFor="browser-reminders" className="text-sm">Notify me when a reminder is due</Label>
+                <p className="text-[11px] text-muted-foreground">
+                  Fires once per reminder on this device; auto-managed attendance warnings are excluded.
+                </p>
+              </div>
+              <Switch
+                id="browser-reminders"
+                checked={enabled}
+                onCheckedChange={(v) => setBrowserRemindersEnabled(v)}
+                aria-label="Toggle browser due-reminder notifications"
+              />
+            </div>
+            <Button
+              variant="outline"
+              size="sm"
+              className="h-8 gap-1.5"
+              disabled={!enabled}
+              onClick={() => {
+                const ok = sendTestNotification();
+                if (ok) toast.success("Test notification sent");
+                else toast.error("Could not show a notification");
+              }}
+            >
+              <BellRing className="size-3.5" aria-hidden="true" />
+              Send a test
+            </Button>
+          </>
+        ) : (
+          <div className="space-y-3">
+            <p className="text-sm text-muted-foreground">
+              Get a system-level alert the moment a deadline becomes due — even when this tab is in the
+              background. Permission is asked once, per device.
+            </p>
+            <Button size="sm" className="h-8 gap-1.5" onClick={enable} disabled={requesting}>
+              {requesting ? <Loader2 className="size-3.5 animate-spin" aria-hidden="true" /> : <BellRing className="size-3.5" aria-hidden="true" />}
+              Enable browser reminders
+            </Button>
+          </div>
+        )}
+      </CardContent>
+    </Card>
+  );
+}
+
+/* ------------------------------------------------------------------ */
+/* Install app (PWA)                                                   */
+/* ------------------------------------------------------------------ */
+
+function InstallAppCard() {
+  const canInstall = useCanInstall();
+  const installed = useIsInstalled();
+  const [pending, setPending] = useState(false);
+  const ios = isIOS();
+
+  const install = async () => {
+    setPending(true);
+    const outcome = await promptInstall();
+    setPending(false);
+    if (outcome === "accepted") toast.success("App installed 🎉", { description: "Launch it from your home screen." });
+    else if (outcome === "dismissed") toast.info("Install dismissed", { description: "You can install any time from Settings." });
+  };
+
+  return (
+    <Card className="rounded-xl border-border/60">
+      <CardHeader className="flex flex-row items-start justify-between space-y-0 pb-3">
+        <div>
+          <CardTitle className="flex items-center gap-2 text-base tracking-tight">
+            <MonitorSmartphone className="size-4 text-primary" aria-hidden="true" />
+            Install the app
+          </CardTitle>
+          <CardDescription>Full-screen, offline-friendly home-screen app (PWA)</CardDescription>
+        </div>
+        {installed && (
+          <Badge variant="outline" className="border-emerald-500/40 text-[10px] text-emerald-700 dark:text-emerald-400">
+            INSTALLED
+          </Badge>
+        )}
+      </CardHeader>
+      <CardContent className="space-y-3">
+        {installed ? (
+          <p className="flex items-center gap-2 text-sm text-emerald-600 dark:text-emerald-400">
+            <CheckCircle2 className="size-4 shrink-0" aria-hidden="true" />
+            You're running the installed app. Data still syncs from the ERP whenever a connection is available.
+          </p>
+        ) : canInstall ? (
+          <div className="space-y-3">
+            <p className="text-sm text-muted-foreground">
+              Install ERP Sync as an app — own window, home-screen icon, faster launches.
+            </p>
+            <Button size="sm" className="h-8 gap-1.5" onClick={install} disabled={pending}>
+              {pending ? <Loader2 className="size-3.5 animate-spin" aria-hidden="true" /> : <MonitorSmartphone className="size-3.5" aria-hidden="true" />}
+              Install now
+            </Button>
+          </div>
+        ) : ios ? (
+          <ol className="list-inside list-decimal space-y-1 text-sm text-muted-foreground">
+            <li>Open this page in Safari</li>
+            <li>Tap the <span className="font-medium text-foreground">Share</span> button</li>
+            <li>Choose <span className="font-medium text-foreground">Add to Home Screen</span></li>
+          </ol>
+        ) : (
+          <p className="flex items-center gap-2 text-sm text-muted-foreground">
+            <Info className="size-4 shrink-0" aria-hidden="true" />
+            Use your browser menu → <span className="font-medium text-foreground">Install app / Add to Home screen</span> when
+            offered. The button appears here automatically when your browser supports it.
+          </p>
+        )}
+      </CardContent>
+    </Card>
+  );
+}
+
+/* ------------------------------------------------------------------ */
 /* Demo mode card                                                      */
 /* ------------------------------------------------------------------ */
 
@@ -729,6 +932,10 @@ export function SettingsTab() {
         <SyncSettingsCard />
       </div>
       <NotificationPrefsCard />
+      <div className="grid gap-4 lg:grid-cols-2">
+        <BrowserRemindersCard />
+        <InstallAppCard />
+      </div>
       <DemoModeCard liveConnected={liveConnected} />
       <SyncHistoryCard />
 

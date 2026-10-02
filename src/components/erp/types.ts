@@ -194,6 +194,33 @@ export interface SyncEventsResponse {
   events: ChangeEvent[];
 }
 
+export interface DigestResponse {
+  days: number;
+  window: { from: string; to: string };
+  overall: {
+    pctStart: number | null;
+    pctEnd: number | null;
+    deltaPts: number | null;
+    attended: number;
+    held: number;
+    missed: number;
+  } | null;
+  subjects: {
+    code: string;
+    name: string;
+    pctStart: number | null;
+    pctEnd: number | null;
+    deltaPts: number | null;
+    attended: number;
+    held: number;
+    missed: number;
+  }[];
+  syncs: { total: number; success: number; failed: number };
+  changes: number;
+  reminders: { created: number; completed: number };
+  upcoming: { id: string; title: string; source: string; dueAt: string }[];
+}
+
 export interface ErpConnectSuccess {
   ok: true;
   username: string;

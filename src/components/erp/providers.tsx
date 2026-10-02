@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { MotionConfig } from "framer-motion";
 import { ThemeProvider } from "next-themes";
 import { Toaster } from "@/components/ui/sonner";
 
@@ -31,8 +32,11 @@ export function Providers({ children }: { children: React.ReactNode }) {
       disableTransitionOnChange
     >
       <QueryClientProvider client={queryClient}>
-        {children}
-        <Toaster richColors position="top-right" />
+        {/* reducedMotion="user" makes every framer-motion animation respect the OS setting */}
+        <MotionConfig reducedMotion="user">
+          {children}
+          <Toaster richColors position="top-right" />
+        </MotionConfig>
       </QueryClientProvider>
     </ThemeProvider>
   );

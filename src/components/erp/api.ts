@@ -5,6 +5,7 @@ import type {
   AppSettings,
   AttendanceResponse,
   DashboardResponse,
+  DigestResponse,
   ErpConnectFailure,
   ErpConnectSuccess,
   ErpStatus,
@@ -78,6 +79,8 @@ export const qk = {
 /* ---------- GET ---------- */
 
 export const fetchDashboard = () => api<DashboardResponse>("/api/dashboard");
+export const fetchDigest = (days = 7) =>
+  api<DigestResponse>(`/api/digest?days=${days}`);
 export const fetchAttendance = () => api<AttendanceResponse>("/api/attendance");
 export const fetchHistory = () => api<HistoryResponse>("/api/history");
 export const fetchTimetable = () => api<TimetableResponse>("/api/timetable").then((r) => r.slots);

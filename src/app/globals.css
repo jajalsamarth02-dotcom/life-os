@@ -270,3 +270,30 @@
 [data-sonner-toaster] {
   --normal-offset: 4.5rem;
 }
+
+/* Emerald gradient hairline along the top edge of highlight cards */
+.erp-card-accent {
+  position: relative;
+}
+.erp-card-accent::before {
+  content: "";
+  position: absolute;
+  inset: 0 0 auto 0;
+  height: 2px;
+  border-radius: inherit;
+  background: linear-gradient(
+    90deg,
+    transparent 0%,
+    color-mix(in oklch, var(--color-emerald-500, #10b981) 70%, transparent) 30%,
+    color-mix(in oklch, var(--color-emerald-400, #34d399) 45%, transparent) 65%,
+    transparent 100%
+  );
+  opacity: 0.75;
+  pointer-events: none;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .erp-card-accent::before {
+    opacity: 0.45;
+  }
+}
