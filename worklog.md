@@ -1512,3 +1512,30 @@ Unresolved issues / risks & next-phase priorities:
 5. ALA rows whose code maps to a course NOT in the current subject list (BETCE15316 "ADVANCED WEB DEVELOPMENT") surface in the Reminders tab but never in any drawer — by design (no matching tracked subject); if the student wants those visible, a "unlinked deadlines" group in Reminders would be the place.
 6. Backlog unchanged: L/H/E columns folding (server-side parser, needs user consent), SMTP digest (needs credentials), TZ cosmetic, per-semester scoping (schema), weekly bunk-budget (needs timetable slots — still empty), backup restore (needs user consent for a write endpoint).
 7. Keeper cron 430680 must stay alive; worklog protocol: append-only, three-section handover.
+
+---
+Task ID: 30
+Agent: Z.ai Code (main orchestrator)
+Task: Round task 01:00+08 — status assessment, cold-load QA, subject↔deadline linkage: per-subject "N ALAs" chips on dashboard rows + attendance cards, ERP portal deep-links inside the drawer's Active-deadlines rows.
+
+Current project status / assessment:
+- Server healthy all round: 200s throughout; browser CLOSED after QA; 0 console errors on settled loads. Live data unchanged: overall 66.67% (2/3, target 75%), 8 subjects, 41 open ALAs (20+ overdue), title "(20) ERP Sync · 66.67%".
+- QA at round start confirmed Task 29 features live (interactive stat cards + drawer Active-deadlines). Gap analysis: the subject↔deadline link existed ONLY inside the drawer — dashboard subject rows and attendance cards gave no hint which subjects carry deadlines (e.g. RESPONSIVE-WEB-MOBILE quietly holds 11 open ALAs). Also the drawer's deadline rows could jump to Reminders but had no direct ERP portal link, unlike the dashboard's AlaDeadlinePanel rows (inconsistent). Chose a cohesive "complete the linkage" round.
+
+Completed modifications / verified:
+1. NEW — shared.tsx: `collectAlaStats(assignments, courseNames, now)` pure helper → Map<normalizedSubjectName, {open, overdue}> (bridges the slug-vs-BETCE code mismatch via the synced courseNames map; structural row typing, no Reminder import needed) + `AlaStatChip` — compact "N ALAs" pill, amber with dot when any overdue, muted otherwise, title explains "open the subject for the full list". Renders nothing for 0 open.
+2. NEW — dashboard SubjectRow: `alaStat` prop; chip rides the hint line (ml-auto), row aria-label now appends "— N open ALA deadlines, M overdue" for screen readers. DashboardTab holds ONE tab-level qk.assignments useQuery (deduped with the page badge poll — zero extra traffic) + useNow(60s)-keyed memo.
+3. NEW — attendance SubjectCard: same `alaStat` chip inline in the mono description line (after code + optional semester badge). AttendanceTab gets the same deduped query + memo.
+4. ENHANCEMENT — drawer SubjectDeadlines rows: restructured like AlaDeadlinePanel (flex items-stretch): main button (rounded-l) + separate ExternalLink <a> (rounded-r, border-l) that opens the ERP portal assignment page in a new tab when externalId is a verifiable erp:assign:{numericId}; honest "submissions happen there (this app is a read-only mirror)" title. Jump-to-Reminders behavior unchanged.
+5. GROUND-TRUTH verification: per-code overdue counts computed from /api/assignments + courseNames — chips match EXACTLY for all six mapped subjects: ADV-MOBILE 3/0 cold, ANALYSIS 4/3 hot, AI 5/0 cold, CN 6/6 hot, RESPONSIVE 11/0 cold, SE 6/5 hot; unlinked ADVANCED WEB DEVELOPMENT (6/6) correctly gets NO chip (no tracked subject). Drawer portal anchors verified live ("Open SE-Y1-ALA-3 in the ERP portal (new tab)").
+6. Verification: tsc --noEmit → zero errors under src/. agent-browser QA: 6 chips on dashboard rows + 6 on attendance cards; aria-label enriched; chip→row-click→drawer→deadlines chain still works (SE: 6 rows + 2+ portal anchors); light screenshots /tmp/qa-r30-rows.png + /tmp/qa-r30-cards2.png, dark /tmp/qa-r30-rows-dark.png — all clean; settled reload 0 console errors, title + 6 dash chips. Browser CLOSED; server 200.
+7. QA JOURNEY NOTE: an agent-browser eval that "closed" the Sheet actually hit the first deadline-row button (selector `[role=dialog] button` matches rows before the close X), triggering the jump chain (hash=reminders) — not a bug, but future QA should target the close button specifically (e.g. `[data-slot=sheet-close]` or the X icon button) and re-assert the hash before counting tab-scoped elements.
+
+Unresolved issues / risks & next-phase priorities:
+1. next.config.ts unrecognized turbopack/memoryLimit key — unchanged Task 17 guidance (pre-existing non-src tsc noise).
+2. User decisions still pending: 2nd free notification channel (Telegram ⭐ / ntfy / Discord / email) and optional fixed daily WhatsApp digest time (digestTime unset — never send test/digest to the real phone during QA).
+3. MilestoneCelebration real target-crossing still pending live data (needs 1 more attended class → 3/4 = 75%).
+4. Dashboard subject sparklines still dormant — activates automatically at ≥2 snapshots.
+5. Unlinked-course ALAs (BETCE15316 ADVANCED WEB DEVELOPMENT, 6 open/6 overdue) intentionally get no chip; they remain visible in the Reminders tab list and dashboard AlaDeadlinePanel only.
+6. Backlog unchanged: L/H/E columns folding (needs user consent), SMTP digest (needs credentials), TZ cosmetic, per-semester scoping (schema), weekly bunk-budget (timetable slots still empty), backup restore (needs user consent for a write endpoint).
+7. Keeper cron 430680 must stay alive; worklog protocol: append-only, three-section handover.

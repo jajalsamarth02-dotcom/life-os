@@ -35,7 +35,7 @@ import { Separator } from "@/components/ui/separator";
 import { motion } from "framer-motion";
 import { cn } from "@/lib/utils";
 import { compactErrorText } from "@/lib/compact-error";
-import { fetchDashboard, fetchHistory, fetchSyncLogs, qk } from "./api";
+import { fetchAssignments, fetchDashboard, fetchHistory, fetchSyncLogs, qk } from "./api";
 import { WeeklyDigestDialog } from "./digest-dialog";
 import { MilestoneCelebration, MilestonesStrip } from "./milestones";
 import { SubjectDrawer } from "./subject-drawer";
@@ -58,6 +58,9 @@ import {
   StatusChip,
   TypeIcon,
   useNow,
+  AlaStatChip,
+  collectAlaStats,
+  type SubjectAlaStat,
 } from "./shared";
 import type { AlaUpcomingRow, ChangeEvent, HistoryPoint, Reminder, SubjectView } from "./types";
 import { Sparkline } from "./trend-chart";
@@ -629,12 +632,15 @@ function SubjectRow({
   onOpen,
   shimmer,
   spark,
+  alaStat,
 }: {
   s: SubjectView;
   onOpen: () => void;
   shimmer: boolean;
   /** Per-subject snapshot history — when ≥2 points, a mini trend line rides the row. */
   spark?: HistoryPoint[];
+  /** Open ALA/assignment deadlines for this subject (amber when any overdue). */
+  alaStat?: SubjectAlaStat;
 }) {
   const c = statusColors(s.status);
   const trend = (spark ?? []).map((p) => p.percentage);
@@ -646,7 +652,13 @@ function SubjectRow({
         "flex w-full items-center gap-3 rounded-lg border border-border/50 p-3 text-left transition-all hover:border-primary/40 hover:bg-muted/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
         s.status === "none" && "border-dashed bg-muted/20"
       )}
-      aria-label={`Open attendance details for ${s.name}`}
+      aria-label={`Open attendance details for ${s.name}${
+        alaStat && alaStat.open > 0
+          ? ` — ${alaStat.open} open ALA deadline${alaStat.open === 1 ? "" : "s"}${
+              alaStat.overdue > 0 ? `, ${alaStat.overdue} overdue` : ""
+            }`
+          : ""
+      }`}
     >
       <span className={cn("hidden shrink-0 rounded-md px-2 py-1 font-mono text-[11px] font-semibold sm:block", c.bg, c.text)}>
         {s.code}
@@ -679,6 +691,7 @@ function SubjectRow({
             </span>
           )}
           {s.hasCustomTarget && <CustomTargetChip target={s.targetPct} className="shrink-0" />}
+          <AlaStatChip stat={alaStat} className="ml-auto" />
         </div>
       </div>
       {trend.length >= 2 && (
@@ -778,6 +791,20 @@ export function DashboardTab({
     queryFn: fetchHistory,
     refetchInterval: 60_000,
   });
+  /* Full ALA queue — deduped with the page-level badge poll via the shared
+     qk.assignments cache. Feeds the per-subject "N ALAs" chips on subject rows
+     (amber when any deadline is overdue) that lead into the drawer's
+     Active-deadlines section. */
+  const alaQ = useQuery({
+    queryKey: qk.assignments,
+    queryFn: fetchAssignments,
+    refetchInterval: 60_000,
+  });
+  const now = useNow(60_000);
+  const alaStats = useMemo(
+    () => collectAlaStats(alaQ.data?.assignments, alaQ.data?.courseNames, now),
+    [alaQ.data, now]
+  );
 
   const weekDelta = useMemo(() => {
     const pts = history.data?.overall ?? [];
@@ -1252,6 +1279,7 @@ export function DashboardTab({
                   onOpen={() => setSelectedCode(s.code)}
                   shimmer={data.erp.sync.status === "syncing"}
                   spark={history.data?.subjects[s.code]}
+                  alaStat={alaStats.get(s.name.trim().toLowerCase())}
                 />
               ))}
             </div>

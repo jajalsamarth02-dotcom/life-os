@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { motion } from "framer-motion";
 import { CheckCircle2, GraduationCap, Inbox, PanelRightOpen, Target, TrendingUp, Users, XCircle, Zap } from "lucide-react";
@@ -10,11 +10,13 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Slider } from "@/components/ui/slider";
 import { cn } from "@/lib/utils";
 import { attendanceStatus, classesToReachTarget } from "@/lib/attendance";
-import { fetchAttendance, fetchHistory, qk } from "./api";
+import { fetchAssignments, fetchAttendance, fetchHistory, qk } from "./api";
 import { HistoryHeatmap } from "./history-heatmap";
 import { RecoveryPlan } from "./recovery-plan";
 import { SubjectDrawer } from "./subject-drawer";
 import {
+  AlaStatChip,
+  collectAlaStats,
   CustomTargetChip,
   EmptyHero,
   fmtPct2,
@@ -22,6 +24,8 @@ import {
   ProgressRing,
   statusColors,
   StatusChip,
+  useNow,
+  type SubjectAlaStat,
 } from "./shared";
 import { AnimatedNumber, ExportAttendanceButton, Sparkline, TrendSection } from "./trend-chart";
 import type { HistoryResponse, SubjectView } from "./types";
@@ -175,6 +179,7 @@ function SubjectCard({
   history,
   onOpen,
   showSemester,
+  alaStat,
 }: {
   s: SubjectView;
   target: number;
@@ -183,6 +188,8 @@ function SubjectCard({
   onOpen: () => void;
   /** When no semester partition is active, mixed semesters are labeled on each card. */
   showSemester: boolean;
+  /** Open ALA/assignment deadlines for this subject (amber when any overdue). */
+  alaStat?: SubjectAlaStat;
 }) {
   const c = statusColors(s.status);
   const safe = s.status === "safe";
@@ -212,6 +219,7 @@ function SubjectCard({
                     S{s.semester}
                   </span>
                 )}
+                <AlaStatChip stat={alaStat} />
               </CardDescription>
             </div>
             <div className="flex w-24 shrink-0 flex-col items-end gap-1">
@@ -328,6 +336,19 @@ export function AttendanceTab({ onOpenSettings }: { onOpenSettings: () => void }
     queryFn: fetchHistory,
     refetchInterval: 60_000,
   });
+  /* Full ALA queue — deduped with the page-level badge poll via the shared
+     qk.assignments cache. Feeds the per-subject "N ALAs" chips on subject cards
+     (amber when any deadline is overdue); each card's drawer lists them. */
+  const alaQ = useQuery({
+    queryKey: qk.assignments,
+    queryFn: fetchAssignments,
+    refetchInterval: 60_000,
+  });
+  const nowMs = useNow(60_000);
+  const alaStats = useMemo(
+    () => collectAlaStats(alaQ.data?.assignments, alaQ.data?.courseNames, nowMs),
+    [alaQ.data, nowMs]
+  );
 
   /* Command palette → open a subject's detail drawer. The code is stored and
      resolved against fetched data, so the drawer also opens when the event
@@ -496,6 +517,7 @@ export function AttendanceTab({ onOpenSettings }: { onOpenSettings: () => void }
             history={history.data}
             showSemester={!semesterActive}
             onOpen={() => setSelectedCode(s.code)}
+            alaStat={alaStats.get(s.name.trim().toLowerCase())}
           />
         ))}
       </div>

@@ -144,6 +144,78 @@ export function erpAssignmentUrl(externalId: string | null | undefined): string 
 }
 
 /* ------------------------------------------------------------------ */
+/* Per-subject ALA deadline stats (row chips → drawer deadlines)        */
+/* ------------------------------------------------------------------ */
+
+export interface SubjectAlaStat {
+  /** Open (ACTIVE) ALA/assignment rows linked to the subject. */
+  open: number;
+  /** How many of those are already past due. */
+  overdue: number;
+}
+
+/**
+ * Map normalized subject name → ALA deadline stats. ALA rows carry real ERP
+ * course codes (BETCE15315) while tracked subjects use slug codes, so matching
+ * goes through the synced `courseNames` (code → name) map — same bridge the
+ * subject drawer uses. Structural row typing keeps this decoupled from the
+ * full Reminder model.
+ */
+export function collectAlaStats(
+  assignments: { subjectCode: string | null; status: string; dueAt: string }[] | undefined,
+  courseNames: Record<string, string> | undefined,
+  now: number
+): Map<string, SubjectAlaStat> {
+  const map = new Map<string, SubjectAlaStat>();
+  if (!assignments?.length || !courseNames) return map;
+  // code → normalized subject name (drop entries that resolve to nothing)
+  const nameByCode = new Map<string, string>();
+  for (const [code, name] of Object.entries(courseNames)) {
+    const n = (name ?? "").trim().toLowerCase();
+    if (n) nameByCode.set(code, n);
+  }
+  for (const a of assignments) {
+    if (a.status !== "ACTIVE" || !a.subjectCode) continue;
+    const key = nameByCode.get(a.subjectCode);
+    if (!key) continue;
+    const stat = map.get(key) ?? { open: 0, overdue: 0 };
+    stat.open += 1;
+    if (new Date(a.dueAt).getTime() < now) stat.overdue += 1;
+    map.set(key, stat);
+  }
+  return map;
+}
+
+/** Compact "N ALAs" chip — amber when any are overdue, muted otherwise. */
+export function AlaStatChip({
+  stat,
+  className,
+}: {
+  stat: SubjectAlaStat | undefined;
+  className?: string;
+}) {
+  if (!stat || stat.open <= 0) return null;
+  const hot = stat.overdue > 0;
+  return (
+    <span
+      className={cn(
+        "inline-flex shrink-0 items-center gap-1 rounded-full px-1.5 py-0.5 text-[10px] font-semibold tabular-nums transition-colors",
+        hot
+          ? "bg-amber-500/10 text-amber-700 dark:text-amber-400"
+          : "bg-muted text-muted-foreground",
+        className
+      )}
+      title={`${stat.open} open ALA/assignment deadline${stat.open === 1 ? "" : "s"}${
+        hot ? ` · ${stat.overdue} overdue` : ""
+      } — open the subject for the full list`}
+    >
+      {hot && <span className="size-1 rounded-full bg-amber-500" aria-hidden="true" />}
+      {stat.open} {stat.open === 1 ? "ALA" : "ALAs"}
+    </span>
+  );
+}
+
+/* ------------------------------------------------------------------ */
 /* Status colors (emerald / amber / red — never blue)                  */
 /* ------------------------------------------------------------------ */
 

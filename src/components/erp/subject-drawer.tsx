@@ -10,6 +10,7 @@ import {
   CalendarPlus,
   CheckCircle2,
   ChevronRight,
+  ExternalLink,
   Footprints,
   History,
   Hourglass,
@@ -45,7 +46,7 @@ import { cn } from "@/lib/utils";
 import { classesCanSkip, classesToReachTarget } from "@/lib/attendance";
 import { ApiError, createSlot, fetchAssignments, fetchDashboard, fetchHistory, fetchTimetable, putSubjectTarget, qk, type SlotConflict } from "./api";
 import { AnimatedNumber } from "./trend-chart";
-import { CustomTargetChip, fmtDT, MiniBar, statusColors, StatusChip, useNow, ago } from "./shared";
+import { CustomTargetChip, erpAssignmentUrl, fmtDT, MiniBar, statusColors, StatusChip, useNow, ago } from "./shared";
 import type { AssignmentRow, AttendanceStatus, HistoryResponse, SubjectView, TimetableSlotRow } from "./types";
 
 const DAY_SHORT = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
@@ -112,48 +113,63 @@ function SubjectDeadlines({
             const due = new Date(a.dueAt).getTime();
             const isOverdue = due < now;
             const soon = !isOverdue && due - now <= 48 * 3_600_000;
+            const portalUrl = erpAssignmentUrl(a.externalId);
             return (
               <li key={a.id}>
-                <button
-                  type="button"
-                  onClick={() => onJump(a.title)}
-                  className={cn(
-                    "group/ala flex w-full items-start gap-2 rounded-lg border-l-2 bg-background/60 px-2.5 py-1.5 text-left transition-colors hover:bg-muted/60 focus-visible:outline-2 focus-visible:outline-primary",
-                    isOverdue ? "border-red-500/70" : soon ? "border-amber-500/70" : "border-border"
-                  )}
-                  title="Open in the Reminders tab"
-                >
-                  <span className="mt-0.5 shrink-0" aria-hidden="true">
-                    {isOverdue ? (
-                      <TriangleAlert className="size-3.5 text-red-500" />
-                    ) : soon ? (
-                      <Hourglass className="size-3.5 text-amber-500" />
-                    ) : (
-                      <CalendarDays className="size-3.5 text-muted-foreground" />
+                <div className="flex items-stretch">
+                  <button
+                    type="button"
+                    onClick={() => onJump(a.title)}
+                    className={cn(
+                      "group/ala flex min-w-0 flex-1 items-start gap-2 rounded-l-lg border-l-2 bg-background/60 px-2.5 py-1.5 text-left transition-colors hover:bg-muted/60 focus-visible:outline-2 focus-visible:outline-primary",
+                      isOverdue ? "border-red-500/70" : soon ? "border-amber-500/70" : "border-border"
                     )}
-                  </span>
-                  <span className="min-w-0 flex-1">
-                    <span className="block truncate text-xs font-medium text-foreground group-hover/ala:underline">
-                      {a.title}
-                    </span>
-                    <span
-                      className={cn(
-                        "mt-0.5 block text-[10px]",
-                        isOverdue
-                          ? "font-semibold text-red-600 dark:text-red-400"
-                          : soon
-                            ? "font-semibold text-amber-600 dark:text-amber-400"
-                            : "text-muted-foreground"
+                    title="Open in the Reminders tab"
+                  >
+                    <span className="mt-0.5 shrink-0" aria-hidden="true">
+                      {isOverdue ? (
+                        <TriangleAlert className="size-3.5 text-red-500" />
+                      ) : soon ? (
+                        <Hourglass className="size-3.5 text-amber-500" />
+                      ) : (
+                        <CalendarDays className="size-3.5 text-muted-foreground" />
                       )}
-                    >
-                      {isOverdue ? `Overdue · due ${fmtDT(a.dueAt)}` : soon ? `Due soon · ${fmtDT(a.dueAt)}` : `Due ${fmtDT(a.dueAt)}`}
                     </span>
-                  </span>
-                  <ChevronRight
-                    className="mt-0.5 size-3.5 shrink-0 text-muted-foreground/60 transition-transform group-hover/ala:translate-x-0.5"
-                    aria-hidden="true"
-                  />
-                </button>
+                    <span className="min-w-0 flex-1">
+                      <span className="block truncate text-xs font-medium text-foreground group-hover/ala:underline">
+                        {a.title}
+                      </span>
+                      <span
+                        className={cn(
+                          "mt-0.5 block text-[10px]",
+                          isOverdue
+                            ? "font-semibold text-red-600 dark:text-red-400"
+                            : soon
+                              ? "font-semibold text-amber-600 dark:text-amber-400"
+                              : "text-muted-foreground"
+                        )}
+                      >
+                        {isOverdue ? `Overdue · due ${fmtDT(a.dueAt)}` : soon ? `Due soon · ${fmtDT(a.dueAt)}` : `Due ${fmtDT(a.dueAt)}`}
+                      </span>
+                    </span>
+                    <ChevronRight
+                      className="mt-0.5 size-3.5 shrink-0 text-muted-foreground/60 transition-transform group-hover/ala:translate-x-0.5"
+                      aria-hidden="true"
+                    />
+                  </button>
+                  {portalUrl && (
+                    <a
+                      href={portalUrl}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      aria-label={`Open ${a.title} in the ERP portal (new tab)`}
+                      title="Open in the ERP portal — submissions happen there (this app is a read-only mirror)"
+                      className="flex w-9 shrink-0 items-center justify-center rounded-r-lg border-l border-border/40 bg-background/60 text-muted-foreground/70 transition-all hover:bg-primary/10 hover:text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring"
+                    >
+                      <ExternalLink className="size-3.5" aria-hidden="true" />
+                    </a>
+                  )}
+                </div>
               </li>
             );
           })}
