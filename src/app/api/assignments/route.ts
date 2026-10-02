@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { db } from "@/lib/db";
-import { getSettings } from "@/lib/settings";
+import { getSettings, getRawSetting, ERP_SEMESTER_KEY, semesterFilterOf } from "@/lib/settings";
 import { getSyncState, ASSIGNMENT_EXT_PREFIX } from "@/lib/sync/engine";
 import { withSubjectMeta } from "@/lib/reminders";
 
@@ -14,7 +14,7 @@ export const dynamic = "force-dynamic";
  */
 export async function GET() {
   try {
-    const [rows, settings, sync, namesRow] = await Promise.all([
+    const [rows, settings, sync, namesRow, rawDetected] = await Promise.all([
       db.reminder.findMany({
         where: { source: "ERP", type: "ASSIGNMENT", externalId: { startsWith: ASSIGNMENT_EXT_PREFIX } },
         orderBy: { dueAt: "asc" },
@@ -23,6 +23,7 @@ export async function GET() {
       getSettings(),
       getSyncState(),
       db.setting.findUnique({ where: { key: "erp.courseNames" } }),
+      getRawSetting(ERP_SEMESTER_KEY),
     ]);
 
     let courseNames: Record<string, string> = {};
@@ -38,6 +39,9 @@ export async function GET() {
       assignments: await withSubjectMeta(rows),
       courseNames,
       semester: settings.selectedSemester,
+      // Semester the ERP itself reported at sync time — ALA rows always belong
+      // to it, regardless of the app's semester partition (honest-origin note).
+      sourceSemester: semesterFilterOf(rawDetected),
       mode: settings.demoMode ? "demo" : connCount > 0 ? "live" : "none",
       sync: {
         status: sync.status,

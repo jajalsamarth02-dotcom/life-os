@@ -612,6 +612,8 @@ interface AlaGroup {
   items: Reminder[];
   submitted: number;
   nextPendingMs: number | null;
+  /** Open (ACTIVE) rows already past their End Date. */
+  overdue: number;
 }
 
 /** Compact relative-deadline label for an ALA row: "in 12d" / "due today" / "5d overdue". */
@@ -639,10 +641,13 @@ function AlaSubjectGroup({
   const total = group.items.length;
   const pending = total - group.submitted;
   const pct = total > 0 ? Math.round((group.submitted / total) * 100) : 0;
+  // Bar turns red once every open row is past due, amber while some hope remains.
+  const barClass =
+    pending === 0 ? "bg-emerald-500" : group.overdue >= pending ? "bg-red-500" : "bg-amber-500";
 
   return (
     <Collapsible open={open} onOpenChange={onOpenChange}>
-      <div className="overflow-hidden rounded-xl border border-border/50 bg-card/40 transition-colors hover:border-border/80">
+      <div className="overflow-hidden rounded-xl border border-border/50 bg-card/40 shadow-none transition-all duration-200 hover:border-border/90 hover:shadow-sm">
         <CollapsibleTrigger asChild>
           <button
             type="button"
@@ -676,16 +681,18 @@ function AlaSubjectGroup({
                   className="h-1 w-24 shrink-0 overflow-hidden rounded-full bg-muted"
                 >
                   <div
-                    className={cn(
-                      "h-full rounded-full transition-all",
-                      pending === 0 ? "bg-emerald-500" : "bg-amber-500"
-                    )}
+                    className={cn("h-full rounded-full transition-all", barClass)}
                     style={{ width: `${pct}%` }}
                   />
                 </div>
                 <span className="text-[11px] tabular-nums text-muted-foreground">
                   {group.submitted}/{total} submitted
                 </span>
+                {group.overdue > 0 && (
+                  <span className="rounded-full bg-red-500/10 px-1.5 py-0.5 text-[10px] font-semibold tabular-nums text-red-600 dark:text-red-400">
+                    {group.overdue} overdue
+                  </span>
+                )}
                 {pending > 0 && group.nextPendingMs != null && (
                   <span
                     className={cn(
@@ -835,6 +842,148 @@ const ALA_STATUS_META: { key: AlaStatusFilter; label: string; activeClass: strin
   { key: "submitted", label: "Submitted", activeClass: "bg-emerald-500/15 text-emerald-700 dark:text-emerald-300 border-emerald-500/50" },
 ];
 
+/* ------------------------------------------------------------------ */
+
+/** Plain-text overdue digest — paste-ready for classmates / notes / email. */
+function buildDigestText(groups: AlaGroup[], now: number): string {
+  const overdueGroups = groups.filter((g) => g.overdue > 0);
+  const totalOverdue = overdueGroups.reduce((n, g) => n + g.overdue, 0);
+  const lines: string[] = [];
+  lines.push(`ALA & assignment digest — ${fmtDay(new Date(now).toISOString())}`);
+  lines.push(
+    `${totalOverdue} overdue across ${overdueGroups.length} of ${groups.length} subjects`
+  );
+  for (const g of overdueGroups) {
+    const lastMs = g.nextPendingMs ?? 0;
+    lines.push(
+      `  ${g.name ?? g.code} (${g.code}) — ${g.overdue} overdue, last date ${fmtDay(new Date(lastMs).toISOString())}`
+    );
+  }
+  const upcoming = groups
+    .flatMap((g) => g.items)
+    .filter((a) => a.status === "ACTIVE" && new Date(a.dueAt).getTime() >= now)
+    .sort((a, b) => new Date(a.dueAt).getTime() - new Date(b.dueAt).getTime())
+    .slice(0, 3);
+  if (upcoming.length > 0) {
+    lines.push("Next upcoming:");
+    for (const a of upcoming) {
+      lines.push(
+        `  ${a.subjectCode ? `${a.subjectCode} · ` : ""}${a.title} — ${fmtDay(a.dueAt)} (${relDue(new Date(a.dueAt).getTime(), now)})`
+      );
+    }
+  }
+  return lines.join("\n");
+}
+
+async function copyText(text: string): Promise<boolean> {
+  try {
+    await navigator.clipboard.writeText(text);
+    return true;
+  } catch {
+    try {
+      const ta = document.createElement("textarea");
+      ta.value = text;
+      ta.style.position = "fixed";
+      ta.style.opacity = "0";
+      document.body.appendChild(ta);
+      ta.select();
+      const ok = document.execCommand("copy");
+      ta.remove();
+      return ok;
+    } catch {
+      return false;
+    }
+  }
+}
+
+/** Red digest banner summarizing the overdue wall — with a copyable text digest. */
+function AlaOverdueDigest({
+  groups,
+  onViewOverdue,
+}: {
+  groups: AlaGroup[];
+  onViewOverdue: () => void;
+}) {
+  const [copied, setCopied] = useState(false);
+  const now = useNow();
+
+  const overdueGroups = groups.filter((g) => g.overdue > 0);
+  const totalOverdue = overdueGroups.reduce((n, g) => n + g.overdue, 0);
+  if (totalOverdue === 0) return null;
+  const worst = [...overdueGroups].sort((a, b) => b.overdue - a.overdue)[0];
+  const nextUp = groups
+    .flatMap((g) => g.items)
+    .filter((a) => a.status === "ACTIVE" && new Date(a.dueAt).getTime() >= now)
+    .sort((a, b) => new Date(a.dueAt).getTime() - new Date(b.dueAt).getTime())[0];
+
+  const copy = async () => {
+    const ok = await copyText(buildDigestText(groups, now));
+    if (ok) {
+      setCopied(true);
+      toast.success("Digest copied to clipboard", {
+        description: `${totalOverdue} overdue across ${overdueGroups.length} subjects — paste it anywhere.`,
+      });
+      setTimeout(() => setCopied(false), 2000);
+    } else {
+      toast.error("Could not access the clipboard");
+    }
+  };
+
+  return (
+    <motion.div
+      initial={{ opacity: 0, y: -6 }}
+      animate={{ opacity: 1, y: 0 }}
+      transition={{ duration: 0.25 }}
+      role="status"
+      aria-label={`Overdue digest: ${totalOverdue} overdue across ${overdueGroups.length} subjects`}
+      className="flex flex-col gap-2.5 rounded-xl border border-red-500/30 bg-gradient-to-r from-red-500/[0.09] via-amber-500/[0.05] to-transparent p-3 sm:flex-row sm:items-center"
+    >
+      <div className="flex min-w-0 flex-1 items-start gap-2.5">
+        <span className="mt-0.5 flex size-7 shrink-0 items-center justify-center rounded-full bg-red-500/15 text-red-600 dark:text-red-400">
+          <TriangleAlert className="size-4" aria-hidden="true" />
+        </span>
+        <div className="min-w-0">
+          <p className="text-sm font-semibold leading-tight text-red-700 dark:text-red-300">
+            {totalOverdue} overdue across {overdueGroups.length} subject
+            {overdueGroups.length === 1 ? "" : "s"}
+          </p>
+          <p className="mt-0.5 truncate text-[11px] text-muted-foreground">
+            Worst: {worst.name ?? worst.code} ({worst.overdue})
+            {nextUp
+              ? ` · next open deadline ${fmtDay(nextUp.dueAt)} (${relDue(new Date(nextUp.dueAt).getTime(), now)})`
+              : " · nothing upcoming"}
+          </p>
+        </div>
+      </div>
+      <div className="flex shrink-0 items-center gap-1.5 pl-9 sm:pl-0">
+        <Button
+          variant="outline"
+          size="sm"
+          className="h-7 gap-1 border-red-500/40 px-2.5 text-xs text-red-700 hover:bg-red-500/10 hover:text-red-800 dark:text-red-300 dark:hover:text-red-200"
+          onClick={copy}
+          aria-label="Copy the overdue digest as text"
+        >
+          {copied ? (
+            <Check className="size-3.5" aria-hidden="true" />
+          ) : (
+            <ClipboardList className="size-3.5" aria-hidden="true" />
+          )}
+          {copied ? "Copied" : "Copy digest"}
+        </Button>
+        <Button
+          variant="ghost"
+          size="sm"
+          className="h-7 px-2.5 text-xs"
+          onClick={onViewOverdue}
+          aria-label="Show only overdue rows"
+        >
+          View
+        </Button>
+      </div>
+    </motion.div>
+  );
+}
+
 function AlaSection() {
   const { data, isPending, isError, error } = useQuery({
     queryKey: qk.assignments,
@@ -862,6 +1011,7 @@ function AlaSection() {
           items: [],
           submitted: 0,
           nextPendingMs: null,
+          overdue: 0,
         };
         map.set(code, g);
       }
@@ -875,6 +1025,7 @@ function AlaSection() {
         .filter((i) => i.status === "ACTIVE")
         .map((i) => new Date(i.dueAt).getTime());
       g.nextPendingMs = pend.length > 0 ? Math.min(...pend) : null;
+      g.overdue = pend.filter((ms) => ms < now).length;
     }
     // Groups with the nearest pending deadline first; done-only groups last.
     return list.sort((x, y) => {
@@ -882,7 +1033,7 @@ function AlaSection() {
       const yp = y.nextPendingMs ?? Number.POSITIVE_INFINITY;
       return xp - yp || (x.name ?? x.code).localeCompare(y.name ?? y.code);
     });
-  }, [data]);
+  }, [data, now]);
 
   /* Live counts for the filter chips (computed from the unfiltered set). */
   const counts = useMemo(() => {
@@ -933,7 +1084,13 @@ function AlaSection() {
           const pend = items
             .filter((a) => a.status === "ACTIVE")
             .map((a) => new Date(a.dueAt).getTime());
-          return { ...g, items, submitted: submittedCount, nextPendingMs: pend.length > 0 ? Math.min(...pend) : null } satisfies AlaGroup;
+          return {
+            ...g,
+            items,
+            submitted: submittedCount,
+            nextPendingMs: pend.length > 0 ? Math.min(...pend) : null,
+            overdue: pend.filter((ms) => ms < now).length,
+          } satisfies AlaGroup;
         })
         .filter((g): g is AlaGroup => g !== null);
     }
@@ -980,9 +1137,19 @@ function AlaSection() {
           <CardTitle className="flex items-center gap-2 text-base tracking-tight">
             <ClipboardList className="size-4.5 text-primary" aria-hidden="true" />
             ALA &amp; Assignments
+            {data?.sourceSemester != null && data?.semester !== String(data.sourceSemester) && (
+              <Badge
+                variant="outline"
+                className="border-amber-500/50 bg-amber-500/10 px-1.5 py-0 text-[9px] font-bold uppercase tracking-wider text-amber-700 dark:text-amber-400"
+                title="The ERP only publishes assignments for its current semester, so this list stays the same no matter which semester partition is selected."
+              >
+                Synced for Sem {data.sourceSemester} · ERP current
+              </Badge>
+            )}
           </CardTitle>
           <CardDescription className="text-xs">
             Subject-wise, synced from the ERP Assignments page — read-only mirror
+            {data?.sourceSemester != null && ` · Sem ${data.sourceSemester} (ERP current)`}
           </CardDescription>
         </div>
         {total > 0 && (
@@ -1142,6 +1309,11 @@ function AlaSection() {
                 );
               })}
             </div>
+
+            {/* Overdue digest — collapses to nothing the moment no row is overdue */}
+            {!searching && (
+              <AlaOverdueDigest groups={groups} onViewOverdue={() => setStatus("overdue")} />
+            )}
 
             {visibleGroups.length === 0 ? (
               <div className="flex flex-col items-center gap-1.5 rounded-xl border border-dashed border-border/80 bg-card/40 px-6 py-8 text-center">

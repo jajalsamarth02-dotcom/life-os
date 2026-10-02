@@ -198,6 +198,8 @@ export interface AssignmentsResponse {
   /** ERP course-code → course-name map resolved from assignment detail pages. */
   courseNames: Record<string, string>;
   semester: string;
+  /** Semester the ERP itself reported at sync time (the ALA list's true origin). */
+  sourceSemester: number | null;
   mode: AppMode;
   sync: { status: SyncStatus; lastSuccessAt: string | null };
 }

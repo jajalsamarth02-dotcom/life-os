@@ -36,11 +36,19 @@ function pad(n: number): string {
   return String(n).padStart(2, "0");
 }
 
-/** Floating local datetime, e.g. 20261002T090000 */
+/** Floating local datetime, e.g. 20261002T090000 (timetable weekly pattern). */
 function icsLocal(d: Date, minutes: number): string {
   return (
     `${d.getFullYear()}${pad(d.getMonth() + 1)}${pad(d.getDate())}` +
     `T${pad(Math.floor(minutes / 60))}${pad(minutes % 60)}00`
+  );
+}
+
+/** UTC datetime with Z suffix, e.g. 20261002T093000Z — absolute instants (deadlines). */
+function icsUtc(d: Date): string {
+  return (
+    `${d.getUTCFullYear()}${pad(d.getUTCMonth() + 1)}${pad(d.getUTCDate())}` +
+    `T${pad(d.getUTCHours())}${pad(d.getUTCMinutes())}${pad(d.getUTCSeconds())}Z`
   );
 }
 
@@ -153,12 +161,20 @@ function durationMinutesFor(type: string): number {
   return 30;
 }
 
-/** Build a VCALENDAR of timed events from active reminders. */
+/**
+ * Build a VCALENDAR of timed events from active reminders.
+ *
+ * TZ-aware: deadline due dates are absolute instants, so DTSTART/DTEND/DTSTAMP
+ * are emitted in UTC (Z suffix). Calendar apps then render each deadline at the
+ * correct local time regardless of the importing device's timezone — unlike the
+ * weekly timetable export, which intentionally stays floating (recurring pattern
+ * meant to follow whatever timezone the student is in).
+ */
 export function buildRemindersIcs(
   reminders: IcsReminder[],
   calendarName = "Deadlines & exams (ERP Sync)"
 ): string {
-  const nowStamp = icsLocal(new Date(), new Date().getHours() * 60 + new Date().getMinutes());
+  const nowStamp = icsUtc(new Date());
 
   const events = [...reminders]
     .sort((a, b) => a.dueAt.localeCompare(b.dueAt))
@@ -175,8 +191,8 @@ export function buildRemindersIcs(
         "BEGIN:VEVENT",
         `UID:erp-sync-rem-${r.id}@erp-sync.local`,
         `DTSTAMP:${nowStamp}`,
-        `DTSTART:${icsLocal(start, start.getHours() * 60 + start.getMinutes())}`,
-        `DTEND:${icsLocal(end, end.getHours() * 60 + end.getMinutes())}`,
+        `DTSTART:${icsUtc(start)}`,
+        `DTEND:${icsUtc(end)}`,
         `SUMMARY:${escapeText(r.title)}`,
         `DESCRIPTION:${escapeText(description)}`,
         `CATEGORIES:${escapeText(r.type)}`,

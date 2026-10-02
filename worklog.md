@@ -905,3 +905,63 @@ Unresolved issues / risks & next-phase priorities:
    calendar events; per-semester scoping stored on slots themselves (schema change → controlled
    dev-server restart after client regen).
 4. dev-server-keeper cron (job 430680) must stay alive; preview Caddy 502 self-heals ≤5 min.
+
+---
+Task ID: 13 (webDevReview round 9, trace 1a0fc2dd5ff09b15-cron-agent-loop-202610022021)
+Agent: Z.ai Code (main orchestrator)
+Task: Status assessment + agent-browser QA, then backlog features: ALA overdue digest (+copyable text), TZ-aware .ics export, semester-origin honesty badge, ALA group styling polish.
+
+Current project status / assessment:
+- LIVE mode healthy (real account, demo OFF, partition Sem 5 = ERP current, 8 subjects, overall
+  66.67% = 2/3, sync idle 0 failures, freshness green). Pre-work QA sweep: all four tabs 0 console
+  errors, /api/dashboard + /api/erp/status + /api/assignments consistent (47 ALA rows, 41 pending),
+  mobile 390px scrollWidth 390/390. No regressions → no bug fixes needed this round; proceeded to
+  backlog features (Task 12 risks #1–#3).
+
+Completed modifications / verified:
+1. FEATURE — OVERDUE DIGEST BANNER (AlaOverdueDigest in reminders-tab.tsx; closes Task 12 risk #2
+   without SMTP): red gradient banner between filter chips and groups, shown only when overdue>0
+   and no search/filter active. Headline "N overdue across M subjects" + sub-line "Worst: <group>
+   (k) · next open deadline <d MMM> (in Xd)". Actions: "Copy digest" (plain-text digest via
+   navigator.clipboard with execCommand fallback → toast + 2s "Copied" state; digest text = date
+   header, totals, per-overdue-subject lines with last dates, next 3 upcoming) and "View" (jumps
+   to the Overdue filter chip). framer-motion entrance; role=status; disappears when the wall is
+   cleared. Per-group overdue counts added to AlaGroup (computed in both groups and visibleGroups
+   memos, filter-aware).
+2. FEATURE — TZ-AWARE .ICS (lib/ics.ts; closes Task 12 risk #3): reminder/deadline exports now
+   emit DTSTART/DTEND/DTSTAMP in UTC with Z suffix (new icsUtc()) — deadlines are absolute
+   instants, so every calendar app renders the exact instant the app's countdowns use, regardless
+   of importing-device timezone. Timetable export intentionally unchanged (floating = recurring
+   weekly pattern follows the student's current TZ — documented in file header). Verified: 41
+   VEVENTs, all DTSTART Z-suffixed, e.g. 20260716T120000Z matches stored dueAt exactly. Note: the
+   parser's date-only anchor stays 12:00Z (documented TZ-neutral choice: stable date display in
+   any TZ, overdue flips late) — the export is now self-consistent with it.
+3. FEATURE — SEMESTER-ORIGIN HONESTY BADGE (closes Task 12 risk #1): /api/assignments now returns
+   sourceSemester (from Setting erp.currentSemester via getRawSetting+semesterFilterOf). When the
+   app's partition ≠ ERP-current, the ALA card title shows an amber "Synced for Sem N · ERP
+   current" badge (tooltip explains the ERP publishes only its current semester); description
+   always appends "· Sem N (ERP current)" when known. E2E: partition switched to Sem 4 → badge
+   appeared; reverted to 5 → clean.
+4. STYLING (mandatory): AlaSubjectGroup header gained a red "N overdue" chip (chips sum = banner
+   total); mini progress bar now red when ALL open rows are past due (amber otherwise, emerald
+   when done) — the "no hope" state is visible at a glance; group containers get hover:shadow-sm +
+   transition-all lift; digest banner gradient red→amber with alert chip.
+
+Verification results:
+- bun run lint: clean. agent-browser E2E on Reminders: banner "20 overdue across 4 subjects /
+  Worst: COMPUTER NETWORKS (6) · next open deadline 6 Oct 2026 (in 3d)"; Copy digest → toast
+  "Digest copied to clipboard" + button flips to Copied (headless clipboard read is
+  permission-blocked, write path verified via resolved promise); View → Overdue chip becomes the
+  single aria-pressed=true; group chips 5/6/6/3 sum to 20; screenshots light+dark at 1280 clean;
+  mobile 390 scrollWidth 390/390; 0 console errors after sweeping all four tabs. Partition
+  revert confirmed via /api/assignments (semester:5, sourceSemester:5).
+- No dev-server restart, no production build, next-server untouched; keeper cron 430680 active.
+
+Unresolved issues / risks & next-phase priorities:
+1. L/H/E columns still not folded into totals (needs real rows of that shape to test against).
+2. Digest email delivery still needs SMTP; the copyable digest is the interim workaround.
+3. Parser date-only anchor 12:00Z vs IST noon: cosmetic only (17:30 IST wall-clock in imported
+   calendars); a migration of 47 stored instants + parse change would fix if it ever bothers.
+4. Per-semester scoping stored on slots themselves (schema change → controlled dev-server restart
+   after Prisma client regen, per Task 11 ops playbook).
+5. dev-server-keeper cron (job 430680) must stay alive; preview Caddy 502 self-heals ≤5 min.
