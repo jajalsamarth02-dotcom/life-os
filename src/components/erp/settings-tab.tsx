@@ -1339,6 +1339,30 @@ function readLocalStamp(key: string): string | null {
   }
 }
 
+/** Days since the last full backup on this device; null = never backed up here. */
+function daysSinceLastBackup(): number | null {
+  try {
+    const raw = localStorage.getItem(LAST_BACKUP_KEY);
+    if (!raw) return null;
+    return (Date.now() - new Date(raw).getTime()) / 86_400_000;
+  } catch {
+    return null;
+  }
+}
+
+/** Download any text payload as a file (JSON notes export). */
+function downloadJson(filename: string, text: string) {
+  const blob = new Blob([text], { type: "application/json;charset=utf-8" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  URL.revokeObjectURL(url);
+}
+
 /** One staged restore candidate, parsed client-side before the write. */
 interface StagedRestore {
   fileName: string;
@@ -1390,15 +1414,18 @@ function DataBackupCard() {
   const [busy, setBusy] = useState<null | "backup" | "csv" | "restore">(null);
   const [staged, setStaged] = useState<StagedRestore | null>(null);
   const [dragOver, setDragOver] = useState(false);
+  const [staleDays, setStaleDays] = useState<number | null>(null);
   const [stamps, setStamps] = useState<{ backup: string | null; restore: string | null }>({
     backup: null,
     restore: null,
   });
   const fileInputRef = React.useRef<HTMLInputElement>(null);
 
-  /* Surface persisted "last backup / restore" stamps on mount. */
+  /* Surface persisted "last backup / restore" stamps on mount (+ staleness). */
   React.useEffect(() => {
     setStamps({ backup: readLocalStamp(LAST_BACKUP_KEY), restore: readLocalStamp(LAST_RESTORE_KEY) });
+    const days = daysSinceLastBackup();
+    setStaleDays(days !== null && days >= 7 ? Math.floor(days) : null);
   }, []);
 
   /* Full JSON backup via GET /api/export — the portable copy of everything the
@@ -1410,6 +1437,7 @@ function DataBackupCard() {
       const filename = await downloadBackup();
       localStorage.setItem(LAST_BACKUP_KEY, new Date().toISOString());
       setStamps((s) => ({ ...s, backup: new Date().toLocaleString() }));
+      setStaleDays(null);
       toast.success("Backup downloaded", { description: filename });
     } catch (e) {
       toast.error("Backup failed", {
@@ -1470,6 +1498,38 @@ function DataBackupCard() {
     }
   };
 
+  /* Lightweight notes-layer export — the file the restore dropzone accepts. */
+  const exportNotesOnly = () => {
+    if (!notes || notes.length === 0) return;
+    const stamp = new Date().toISOString().slice(0, 16).replace(/[:T]/g, "-");
+    const filename = `erp-sync-ala-notes-${stamp}.json`;
+    downloadJson(
+      filename,
+      JSON.stringify(
+        {
+          meta: {
+            app: "erp-sync",
+            schemaVersion: 1,
+            exportedAt: new Date().toISOString(),
+            note: "Private ALA notes & priority flags (local overlay only). Restorable via Settings → Data & backups.",
+          },
+          notes: notes.map((n) => ({
+            externalId: n.externalId,
+            note: n.note,
+            priority: n.priority,
+            createdAt: n.createdAt,
+            updatedAt: n.updatedAt,
+          })),
+        },
+        null,
+        2
+      )
+    );
+    toast.success(`Exported ${notes.length} noted ${notes.length === 1 ? "ALA" : "ALAs"}`, {
+      description: filename,
+    });
+  };
+
   /* The actual write — only runs after the user confirms the dialog. */
   const runRestore = async () => {
     if (!staged) return;
@@ -1509,13 +1569,25 @@ function DataBackupCard() {
         <CardDescription>Your data is yours — take a portable copy any time</CardDescription>
       </CardHeader>
       <CardContent className="space-y-3">
+        {staleDays !== null && (
+          <p className="flex items-center gap-1.5 rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs font-medium text-amber-700 dark:text-amber-400" role="status">
+            <TriangleAlert className="size-3.5 shrink-0" aria-hidden="true" />
+            Last backup was {staleDays} {staleDays === 1 ? "day" : "days"} ago — take a fresh copy below.
+          </p>
+        )}
+
         <div className="flex items-start justify-between gap-3 rounded-lg border border-border/50 p-3 transition-colors hover:bg-muted/40">
-          <div className="min-w-0 space-y-0.5">
-            <p className="text-sm font-medium">Full backup (JSON)</p>
-            <p className="text-xs leading-relaxed text-muted-foreground">
-              Subjects, ALAs &amp; reminders, private ALA notes, timetable, sync logs, change events,
-              notifications and settings — one portable file.
-            </p>
+          <div className="flex min-w-0 items-start gap-2.5">
+            <span className="mt-0.5 flex size-8 shrink-0 items-center justify-center rounded-md bg-primary/10 text-primary">
+              <Database className="size-4" aria-hidden="true" />
+            </span>
+            <div className="min-w-0 space-y-0.5">
+              <p className="text-sm font-medium">Full backup (JSON)</p>
+              <p className="text-xs leading-relaxed text-muted-foreground">
+                Subjects, ALAs &amp; reminders, private ALA notes, timetable, sync logs, change events,
+                notifications and settings — one portable file.
+              </p>
+            </div>
           </div>
           <Button
             variant="outline"
@@ -1535,11 +1607,16 @@ function DataBackupCard() {
         </div>
 
         <div className="flex items-start justify-between gap-3 rounded-lg border border-border/50 p-3 transition-colors hover:bg-muted/40">
-          <div className="min-w-0 space-y-0.5">
-            <p className="text-sm font-medium">Subjects (CSV)</p>
-            <p className="text-xs leading-relaxed text-muted-foreground">
-              One row per subject with attendance, target and status — opens in Excel or Sheets.
-            </p>
+          <div className="flex min-w-0 items-start gap-2.5">
+            <span className="mt-0.5 flex size-8 shrink-0 items-center justify-center rounded-md bg-emerald-500/10 text-emerald-600 dark:text-emerald-400">
+              <FileSpreadsheet className="size-4" aria-hidden="true" />
+            </span>
+            <div className="min-w-0 space-y-0.5">
+              <p className="text-sm font-medium">Subjects (CSV)</p>
+              <p className="text-xs leading-relaxed text-muted-foreground">
+                One row per subject with attendance, target and status — opens in Excel or Sheets.
+              </p>
+            </div>
           </div>
           <Button
             variant="outline"
@@ -1638,6 +1715,27 @@ function DataBackupCard() {
             }}
           />
         </div>
+
+        {/* Notes-only export — completes the loop: this exact file feeds the dropzone. */}
+        {notedCount > 0 && (
+          <div className="flex items-center justify-between gap-3 rounded-lg bg-muted/40 px-3 py-2">
+            <p className="min-w-0 text-xs leading-relaxed text-muted-foreground">
+              <span className="font-medium text-foreground">{notedCount} noted</span> on this device — a
+              notes-only JSON keeps them safe without the full backup.
+            </p>
+            <Button
+              variant="ghost"
+              size="sm"
+              className="h-7 shrink-0 gap-1.5 text-xs"
+              onClick={exportNotesOnly}
+              disabled={busy !== null}
+              aria-label={`Export the ${notedCount} noted ALAs as a notes-only JSON file`}
+            >
+              <Download className="size-3.5" aria-hidden="true" />
+              Export notes
+            </Button>
+          </div>
+        )}
 
         {(stamps.backup || stamps.restore) && (
           <p className="flex flex-wrap items-center gap-x-3 gap-y-0.5 text-[11px] leading-relaxed text-muted-foreground/70">
