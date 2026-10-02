@@ -1184,3 +1184,19 @@ Unresolved issues / risks & next-phase priorities:
 5. Backlog unchanged: L/H/E columns folding, SMTP email digest, TZ anchor cosmetic, per-semester slot scoping.
 6. User freeze: NO code changes unless a fresh-load-reproducible bug appears or the user asks.
 7. dev-server-keeper cron (430680) must stay alive; preview Caddy 502 self-heals ≤5 min.
+
+---
+Task ID: 16-OPS (incident addendum, 2026-10-02 21:20-21:40 IST)
+Agent: Z.ai Code (main orchestrator)
+Task: User reported "Application error: a client-side exception" + "not working pls help". Root-cause the dev-server crash loop and restore the app WITHOUT app-code changes (user freeze in effect).
+
+Current project status / assessment:
+- ROOT CAUSE CHAIN (proven with live instrumentation): (1) one real cgroup OOM at ~21:05 (next-server 1.9GB RSS + leftover headless Chromium; oom_kill counter went 0->1, dmesg confirmed) -> (2) afterwards the sandbox supervisor began silently SIGTERM-ing next-server every few minutes ("Terminated" captured in stderr; no kernel OOM, no JS trace, catch blocks never ran), kill threshold observed anywhere between 1.24-1.64GB RSS (not a fixed line — host under memory pressure); (3) every keeper restart re-truncated its own log (`>/tmp/devsrv.log`, `tee dev.log`), erasing the death traces, which is why the loop looked mysterious; (4) processes spawned from agent Bash sessions (even setsid'd watchdogs) were also reaped.
+- FIXES APPLIED (all ops-level, zero app-code changes): purged the bloated Turbopack .next cache (776MB on disk -> 0; cache loads into RAM on boot and was inflating RSS by ~300-400MB); relaunched with NODE_OPTIONS="--max-old-space-size=900" via plain nohup+disown (not setsid); marked the orphaned 'running' SyncLog row as failed (honest history). Attempted but ineffective: turbopack.memoryLimit in next.config.ts is an UNRECOGNIZED key in Next 16 (warning only — remove it on next natural restart); setsid-spawned watchdog (scripts/dev-watchdog.sh) got reaped by the same reaper — do not rely on it.
+- RESULT: fresh instance stable 5+ min (200 OK, RSS steady 1.27-1.29GB with GC oscillation, /api/dashboard serving live data 66.67%). Keeper cron 430680 remains the backstop at 5-min cadence.
+
+Unresolved issues / risks & next-phase priorities:
+1. If the crash loop returns: FIRST `rm -rf .next` (cache regrows over days and re-inflates boot RSS), then relaunch with the 900MB cap via nohup+disown. Do NOT let headless Chromium linger — close agent-browser after every QA pass.
+2. next.config.ts still carries the unrecognized turbopack.memoryLimit key — harmless warning; remove during a quiet window.
+3. User-facing guidance: preview errors = server was reaped; wait ~15s, refresh; keeper/watchdog restores automatically.
+4. All app data safe (SQLite integrity ok, WhatsApp config intact, sync state clean).
