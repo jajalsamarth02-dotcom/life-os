@@ -2,14 +2,19 @@ import { NextResponse } from "next/server";
 import { db } from "@/lib/db";
 import { getSettings, semesterFilterOf } from "@/lib/settings";
 import { getSyncState, ASSIGNMENT_EXT_PREFIX } from "@/lib/sync/engine";
+import { kickSyncIfStalled } from "@/lib/sync/watchdog";
 import { getSubjectViews, overallWithTarget } from "@/lib/views";
 
 export const dynamic = "force-dynamic";
 
 /**
  * GET /api/dashboard — one aggregated payload for the Dashboard tab.
+ * Hosts the scheduler watchdog (with /api/sync): if the background tick
+ * loop ever stalls, the first dashboard poll after the 2-minute grace
+ * window kicks the overdue scheduled sync — the UI self-heals.
  */
 export async function GET() {
+  void kickSyncIfStalled();
   try {
     const settings = await getSettings();
     const state = await getSyncState();

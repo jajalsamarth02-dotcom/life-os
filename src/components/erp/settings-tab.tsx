@@ -93,7 +93,9 @@ import {
   downloadBackup,
   fetchAttendance,
   fetchAlaNotes,
+  fetchAssignments,
   fetchErpStatus,
+  fetchReminders,
   fetchSemesters,
   fetchSettings,
   fetchSyncLogs,
@@ -108,9 +110,10 @@ import {
   ApiError,
   qk,
 } from "./api";
-import { CustomTargetChip, fmtDT, syncLogIcon } from "./shared";
+import { CustomTargetChip, erpAssignmentUrl, fmtDT, syncLogIcon } from "./shared";
 import { TextSizeCard } from "./text-size-card";
 import { downloadCsv } from "./trend-chart";
+import { alaUid, buildDeadlineIcs, reminderUid } from "./ics";
 import type { AppSettings, ErpConnectFailure, SubjectView } from "./types";
 
 /* ------------------------------------------------------------------ */
@@ -1363,6 +1366,19 @@ function downloadJson(filename: string, text: string) {
   URL.revokeObjectURL(url);
 }
 
+/** Download any text payload with an explicit MIME type (iCalendar export). */
+function downloadText(filename: string, text: string, mime: string) {
+  const blob = new Blob([text], { type: `${mime};charset=utf-8` });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  URL.revokeObjectURL(url);
+}
+
 /** One staged restore candidate, parsed client-side before the write. */
 interface StagedRestore {
   fileName: string;
@@ -1411,7 +1427,16 @@ function DataBackupCard() {
   const { data: att } = useQuery({ queryKey: qk.attendance, queryFn: fetchAttendance });
   const { data: notes } = useQuery({ queryKey: qk.alaNotes, queryFn: fetchAlaNotes });
   const notedCount = notes?.length ?? 0;
-  const [busy, setBusy] = useState<null | "backup" | "csv" | "restore">(null);
+  /* Deadline calendar sources — shared caches (assignments also feed the
+     dashboard chips, reminders feed the Reminders tab) so this card adds
+     no extra network traffic once either was fetched this session. */
+  const alaQ = useQuery({ queryKey: qk.assignments, queryFn: fetchAssignments, staleTime: 30_000 });
+  const remQ = useQuery({
+    queryKey: qk.reminders("all", false),
+    queryFn: () => fetchReminders("all", false),
+    staleTime: 30_000,
+  });
+  const [busy, setBusy] = useState<null | "backup" | "csv" | "ics" | "restore">(null);
   const [staged, setStaged] = useState<StagedRestore | null>(null);
   const [dragOver, setDragOver] = useState(false);
   const [staleDays, setStaleDays] = useState<number | null>(null);
@@ -1495,6 +1520,60 @@ function DataBackupCard() {
     } finally {
       setBusy(null);
       if (fileInputRef.current) fileInputRef.current.value = "";
+    }
+  };
+
+  /* Deadline calendar (.ics): active ALA deadlines + dated reminders as
+     VEVENTs with stable UIDs (re-import updates, never duplicates). */
+  const icsEvents = React.useMemo(() => {
+    const items: { uid: string; title: string; description: string | null; dueAt: string; url: string | null }[] = [];
+    const courseNames = alaQ.data?.courseNames;
+    for (const a of alaQ.data?.assignments ?? []) {
+      if (a.status !== "ACTIVE") continue;
+      if (!a.externalId || !a.externalId.startsWith("erp:assign:")) continue;
+      const subject = a.subjectName ?? (a.subjectCode ? courseNames?.[a.subjectCode] : undefined) ?? null;
+      items.push({
+        uid: alaUid(a.externalId),
+        title: a.subjectCode ? `[${a.subjectCode}] ${a.title}` : a.title,
+        description: subject ? `ALA / assignment deadline from the ERP.\nSubject: ${subject}` : "ALA / assignment deadline from the ERP.",
+        dueAt: a.dueAt,
+        url: erpAssignmentUrl(a.externalId),
+      });
+    }
+    for (const r of remQ.data ?? []) {
+      if (r.status !== "ACTIVE") continue;
+      // ALA rows are already covered above — never emit them twice.
+      if (r.externalId?.startsWith("erp:assign:")) continue;
+      const kind = r.source === "PERSONAL" ? "Personal reminder" : "From the ERP";
+      items.push({
+        uid: reminderUid(r.externalId, r.id),
+        title: r.subjectCode ? `[${r.subjectCode}] ${r.title}` : r.title,
+        description: [kind, r.description?.trim() || null, r.subjectName ? `Subject: ${r.subjectName}` : null]
+          .filter(Boolean)
+          .join("\n"),
+        dueAt: r.dueAt,
+        url: null,
+      });
+    }
+    return items;
+  }, [alaQ.data, remQ.data]);
+
+  const runIcs = () => {
+    if (icsEvents.length === 0) return;
+    setBusy("ics");
+    try {
+      const { text, total, future, past } = buildDeadlineIcs(icsEvents);
+      const stamp = new Date().toISOString().slice(0, 10);
+      const filename = `erp-sync-deadlines-${stamp}.ics`;
+      downloadText(filename, text, "text/calendar");
+      toast.success(`Calendar exported — ${total} event${total === 1 ? "" : "s"}`, {
+        description:
+          future + past === total
+            ? `${filename} · ${future} upcoming, ${past} already past — alarms on upcoming ones only.`
+            : filename,
+      });
+    } finally {
+      setBusy(null);
     }
   };
 
@@ -1630,6 +1709,37 @@ function DataBackupCard() {
               <Loader2 className="size-3.5 animate-spin" aria-hidden="true" />
             ) : (
               <FileSpreadsheet className="size-3.5" aria-hidden="true" />
+            )}
+            Export
+          </Button>
+        </div>
+
+        <div className="flex items-start justify-between gap-3 rounded-lg border border-border/50 p-3 transition-colors hover:bg-muted/40">
+          <div className="flex min-w-0 items-start gap-2.5">
+            <span className="mt-0.5 flex size-8 shrink-0 items-center justify-center rounded-md bg-violet-500/10 text-violet-600 dark:text-violet-400">
+              <CalendarClock className="size-4" aria-hidden="true" />
+            </span>
+            <div className="min-w-0 space-y-0.5">
+              <p className="text-sm font-medium">Deadlines calendar (.ics)</p>
+              <p className="text-xs leading-relaxed text-muted-foreground">
+                {icsEvents.length > 0
+                  ? `${icsEvents.length} dated item${icsEvents.length === 1 ? "" : "s"} right now — active ALA deadlines + reminders, 24-hour alarms included. Imports into Google, Apple or Outlook; re-importing updates the same events.`
+                  : "Exports every active ALA deadline and reminder as calendar events for Google, Apple or Outlook — nothing dated to export yet."}
+              </p>
+            </div>
+          </div>
+          <Button
+            variant="outline"
+            size="sm"
+            className="h-8 shrink-0 gap-1.5"
+            onClick={runIcs}
+            disabled={busy !== null || icsEvents.length === 0}
+            aria-label="Export active deadlines and reminders as an iCalendar file"
+          >
+            {busy === "ics" ? (
+              <Loader2 className="size-3.5 animate-spin" aria-hidden="true" />
+            ) : (
+              <CalendarClock className="size-3.5" aria-hidden="true" />
             )}
             Export
           </Button>
