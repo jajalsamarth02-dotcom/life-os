@@ -1,0 +1,181 @@
+/**
+ * Client-side types mirroring the verified API contracts.
+ * (Kept separate from @/lib/views.ts, which imports the server-only DB client.)
+ */
+
+export type AttendanceStatus = "safe" | "warning" | "danger" | "none";
+export type AppMode = "demo" | "live" | "none";
+export type SyncStatus = "idle" | "syncing" | "failed" | "never_synced";
+
+export interface AttendanceView {
+  present: number;
+  total: number;
+  absent: number;
+  percentage: number;
+  status: AttendanceStatus;
+  classesToTarget: number;
+  canSkip: number;
+}
+
+export interface SubjectView extends AttendanceView {
+  id: string;
+  code: string;
+  name: string;
+  updatedAt: string;
+}
+
+export type ReminderSource = "ERP" | "PERSONAL";
+export type RemindersFilter = "all" | "erp" | "personal";
+export type ReminderType =
+  | "EXAM"
+  | "PRACTICAL_EXAM"
+  | "VIVA"
+  | "ASSIGNMENT"
+  | "SUBMISSION"
+  | "ATTENDANCE_WARNING"
+  | "OTHER";
+export type ReminderStatus = "ACTIVE" | "DONE" | "DISMISSED";
+
+export interface Reminder {
+  id: string;
+  source: ReminderSource;
+  externalId: string | null;
+  type: ReminderType;
+  title: string;
+  description: string | null;
+  dueAt: string;
+  status: ReminderStatus;
+  createdAt: string;
+  updatedAt?: string;
+}
+
+export interface SyncState {
+  status: SyncStatus;
+  mode: AppMode;
+  lastSyncAt: string | null;
+  lastSuccessAt: string | null;
+  consecutiveFailures: number;
+  lastErrorCode: string | null;
+  lastErrorMessage: string | null;
+  nextScheduledSyncAt: string | null;
+}
+
+export type SyncLogStatus = "success" | "failed" | "running" | "skipped";
+export type SyncTrigger = "scheduled" | "manual" | "startup";
+
+export interface SyncLog {
+  id: string;
+  status: SyncLogStatus;
+  trigger: SyncTrigger;
+  mode: AppMode | string;
+  changes: number;
+  durationMs: number;
+  summary: string | null;
+  errorDetails: string | null;
+  startedAt: string;
+  finishedAt: string | null;
+}
+
+export type ChangeKind =
+  | "ATTENDANCE_UPDATED"
+  | "SUBJECT_ADDED"
+  | "SUBJECT_REMOVED"
+  | "REMINDER_UPSERTED"
+  | "REMINDER_DATE_CHANGED"
+  | "REMINDER_REMOVED";
+
+export interface ChangeEvent {
+  id: string;
+  kind: ChangeKind;
+  subjectCode: string | null;
+  detail: string;
+  createdAt: string;
+}
+
+export type NotificationSeverity = "info" | "success" | "warning" | "critical";
+
+export interface AppNotification {
+  id: string;
+  type: string;
+  title: string;
+  message: string;
+  severity: NotificationSeverity;
+  read: boolean;
+  createdAt: string;
+}
+
+export interface ErpSyncEnvelope {
+  connected: boolean;
+  username: string | null;
+  connectionStatus: string | null;
+  demoMode?: boolean;
+  sync: SyncState;
+}
+
+export interface ErpStatus extends ErpSyncEnvelope {
+  lastVerifiedAt: string | null;
+  liveAvailable: "unknown" | "yes" | "no";
+}
+
+export interface DashboardResponse {
+  target: number;
+  mode: AppMode;
+  overall: AttendanceView;
+  subjects: SubjectView[];
+  warningSubjects: number;
+  reminders: {
+    items: Reminder[];
+    todayCount: number;
+    weekCount: number;
+  };
+  erp: ErpSyncEnvelope;
+  notifications: AppNotification[];
+  unreadCount: number;
+  changes: ChangeEvent[];
+}
+
+export interface AttendanceResponse {
+  target: number;
+  overall: AttendanceView;
+  subjects: SubjectView[];
+}
+
+export interface AppSettings {
+  targetPercentage: number;
+  syncIntervalMinutes: number;
+  autoSyncEnabled: boolean;
+  demoMode: boolean;
+  minLiveSyncGapMinutes: number;
+}
+
+export interface SyncResponse {
+  ok: boolean;
+  mode?: AppMode | string;
+  changes?: number;
+  message?: string;
+  errorCode?: string;
+  error?: string;
+}
+
+export interface SyncLogsResponse {
+  state: SyncState;
+  logs: SyncLog[];
+}
+
+export interface SyncEventsResponse {
+  events: ChangeEvent[];
+}
+
+export interface ErpConnectSuccess {
+  ok: true;
+  username: string;
+  snapshotSubjects: number;
+  sync: SyncState;
+}
+
+export interface ErpConnectFailure {
+  ok: false;
+  errorCode: string;
+  error: string;
+  details?: string | null;
+}
