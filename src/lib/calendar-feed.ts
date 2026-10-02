@@ -2,6 +2,7 @@ import { randomBytes } from "crypto";
 import { db } from "@/lib/db";
 import { ASSIGNMENT_EXT_PREFIX } from "@/lib/sync/engine";
 import { withSubjectMeta } from "@/lib/reminders";
+import { applyBatchPicks, BATCH_PICKS_KEY, parseBatchPicks, validatePicks } from "@/lib/batch-picks";
 import { alaUid, buildClassEvents, buildDeadlineIcs, reminderUid, type IcsEventInput } from "@/components/erp/ics";
 
 /**
@@ -151,13 +152,19 @@ export async function buildCalendarFeed(now: Date = new Date()): Promise<Calenda
 
   // Pass 3 — weekly class slots from the synced ERP Class Routine (RRULE
   // FREQ=WEEKLY, floating IST wall times, no alarms). Shares buildClassEvents
-  // with the Settings one-shot export so event identity (UID, time, rule)
-  // can never drift between the two paths. Dedupe lives inside the builder
-  // (parallel batches can share a wall time).
-  const slotRows = await db.timetableSlot.findMany({ orderBy: [{ dayOfWeek: "asc" }, { startMin: "asc" }] });
+  // AND the batch-pick math with the Settings one-shot export so event
+  // identity (UID, time, rule) and the EVENT SET can never drift between the
+  // two paths: same-batch duplicates collapsed, parallel windows trimmed to
+  // the student's picks (validated against the current routine — stale picks
+  // from a resync drop out silently). Dedupe lives inside the builder too.
+  const [slotRows, picksRow] = await Promise.all([
+    db.timetableSlot.findMany({ orderBy: [{ dayOfWeek: "asc" }, { startMin: "asc" }] }),
+    db.setting.findUnique({ where: { key: BATCH_PICKS_KEY } }),
+  ]);
+  const picks = validatePicks(parseBatchPicks(picksRow?.value), slotRows);
   items.push(
     ...buildClassEvents(
-      slotRows,
+      applyBatchPicks(slotRows, picks).attending,
       (code) => subjectNameByCode.get(code) ?? courseNames[code] ?? null,
       now
     )

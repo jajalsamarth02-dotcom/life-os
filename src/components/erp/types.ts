@@ -198,6 +198,12 @@ export interface TimetableSlotRow {
 
 export interface TimetableResponse {
   slots: TimetableSlotRow[];
+  /**
+   * Parallel-class picks: "<day>-<startMin>-<endMin>" → the subjectCode the
+   * student actually attends in that window. Validated server-side against
+   * the current routine (stale entries dropped on every read).
+   */
+  picks: Record<string, string>;
 }
 
 /**

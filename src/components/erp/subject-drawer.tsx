@@ -847,7 +847,7 @@ export function SubjectDrawer({
 
   if (!subject) return null;
   const c = statusColors(subject.status);
-  const mySlots = (timetable.data ?? []).filter((s) => s.subjectCode === subject.code);
+  const mySlots = (timetable.data?.slots ?? []).filter((s) => s.subjectCode === subject.code);
 
   return (
     <Sheet open={open} onOpenChange={onOpenChange}>

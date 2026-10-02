@@ -6,11 +6,13 @@ import { motion, AnimatePresence } from "framer-motion";
 import {
   CalendarDays,
   CalendarPlus,
+  Check,
   ChevronDown,
   CircleDot,
   Clock,
   CloudCog,
   Download,
+  GitMerge,
   Loader2,
   Play,
   Settings2,
@@ -40,7 +42,8 @@ import {
 } from "@/components/ui/select";
 import { cn } from "@/lib/utils";
 import { downloadTimetableIcs } from "@/lib/ics";
-import { createSlot, deleteSlot, fetchTimetable, qk, ApiError, type SlotConflict } from "./api";
+import { applyBatchPicks, parallelCells } from "@/lib/batch-picks";
+import { createSlot, deleteSlot, fetchTimetable, setBatchPick, qk, ApiError, type SlotConflict } from "./api";
 import { useNow } from "./shared";
 import type { AppMode, SubjectView, TimetableSlotRow } from "./types";
 
@@ -121,6 +124,120 @@ function SlotChip({
 
 /* ------------------------------------------------------------------ */
 
+/**
+ * Parallel classes — the "which one do you actually attend?" picker.
+ *
+ * The ERP routine lists lab groups / batch options as separate rows sharing
+ * one wall-time window. Unresolved windows count EVERY option in the week
+ * plan (disclosed there); this section resolves them once: tap the class
+ * you attend, and the plan, today card, next-class chips and both calendar
+ * paths all count only yours (one shared applyBatchPicks math, zero drift).
+ * Picks are content-derived (day + wall time → subject code), so routine
+ * resyncs that keep the schedule keep the picks.
+ */
+function ParallelClassesSection({
+  slots,
+  picks,
+}: {
+  slots: TimetableSlotRow[];
+  picks: Record<string, string>;
+}) {
+  const qc = useQueryClient();
+  const cells = useMemo(() => parallelCells(slots), [slots]);
+
+  const setPick = useMutation({
+    mutationFn: (v: { cellKey: string; subjectCode: string | null }) => setBatchPick(v.cellKey, v.subjectCode),
+    onSuccess: (_res, v) => {
+      qc.invalidateQueries({ queryKey: qk.timetable });
+      qc.invalidateQueries({ queryKey: qk.dashboard });
+      toast.success(
+        v.subjectCode
+          ? `Marked as attending ${v.subjectCode} in that window`
+          : "Pick cleared — the plan counts every option again"
+      );
+    },
+    onError: (e) => toast.error("Could not save the pick", { description: e.message }),
+  });
+
+  if (cells.length === 0) return null;
+
+  return (
+    <div className="rounded-xl border border-border/60 p-3" data-testid="parallel-classes">
+      <p className="mb-1 flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+        <GitMerge className="size-3.5" aria-hidden="true" /> Parallel classes
+        <span className="rounded-full bg-muted px-1.5 py-0.5 text-[10px] font-semibold normal-case tabular-nums">
+          {cells.length} {cells.length === 1 ? "window" : "windows"}
+        </span>
+      </p>
+      <p className="mb-2.5 text-[11px] leading-snug text-muted-foreground">
+        The routine lists several classes in these windows (lab groups / batches). Tap the one you actually attend —
+        the week plan, today card and calendar then count only yours.
+      </p>
+      <ul className="space-y-2">
+        {cells.map((c) => {
+          const picked = picks[c.key];
+          const range = `${hhmm(c.startMin)}–${hhmm(c.endMin)}`;
+          return (
+            <li key={c.key} className="rounded-lg border border-border/50 bg-muted/20 px-2.5 py-2">
+              <div className="flex items-center justify-between gap-2">
+                <span className="text-[11px] font-semibold">
+                  {DAY_NAMES[c.dayOfWeek]}{" "}
+                  <span className="tabular-nums text-muted-foreground">{range}</span>
+                </span>
+                {picked ? (
+                  <button
+                    type="button"
+                    disabled={setPick.isPending}
+                    onClick={() => setPick.mutate({ cellKey: c.key, subjectCode: null })}
+                    className="rounded-md px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground transition-colors hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                    aria-label={`Clear the pick for ${DAY_NAMES[c.dayOfWeek]} ${range} and count every option again`}
+                  >
+                    count all
+                  </button>
+                ) : (
+                  <span className="text-[10px] font-medium text-amber-600/90 dark:text-amber-400/80">
+                    unresolved · counting all
+                  </span>
+                )}
+              </div>
+              <div
+                className="mt-1.5 flex flex-wrap gap-1.5"
+                role="group"
+                aria-label={`Pick the class you attend on ${DAY_NAMES[c.dayOfWeek]}, ${range}`}
+              >
+                {c.options.map((code) => {
+                  const isPicked = picked === code;
+                  return (
+                    <button
+                      key={code}
+                      type="button"
+                      disabled={setPick.isPending}
+                      onClick={() => setPick.mutate({ cellKey: c.key, subjectCode: isPicked ? null : code })}
+                      aria-pressed={isPicked}
+                      className={cn(
+                        "inline-flex items-center gap-1 rounded-md border px-2 py-1 font-mono text-[11px] transition-colors",
+                        "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+                        isPicked
+                          ? "border-emerald-500/60 bg-emerald-500/15 font-semibold text-emerald-700 dark:text-emerald-300"
+                          : "border-border/70 bg-card text-muted-foreground hover:border-emerald-500/40 hover:text-foreground"
+                      )}
+                    >
+                      {isPicked && <Check className="size-3 shrink-0" aria-hidden="true" />}
+                      {code}
+                    </button>
+                  );
+                })}
+              </div>
+            </li>
+          );
+        })}
+      </ul>
+    </div>
+  );
+}
+
+/* ------------------------------------------------------------------ */
+
 function ManageTimetableDialog({
   subjects,
   mode = "demo",
@@ -174,7 +291,10 @@ function ManageTimetableDialog({
     onError: (e) => toast.error("Could not remove class", { description: e.message }),
   });
 
-  const slots = data ?? [];
+  const tt = data;
+  const slots = tt?.slots ?? [];
+  const picks = tt?.picks ?? {};
+  const cellByKey = useMemo(() => new Map(parallelCells(slots).map((c) => [c.key, c])), [slots]);
 
   return (
     <Dialog open={open} onOpenChange={setOpen}>
@@ -307,6 +427,7 @@ function ManageTimetableDialog({
         </div>
 
         <div className="space-y-2.5">
+          <ParallelClassesSection slots={slots} picks={picks} />
           {WEEK_ORDER.map((d) => {
             const daySlots = slots.filter((s) => s.dayOfWeek === d);
             if (daySlots.length === 0) return null;
@@ -314,12 +435,33 @@ function ManageTimetableDialog({
               <div key={d}>
                 <p className="mb-1 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">{DAY_NAMES[d]}</p>
                 <ul className="space-y-1">
-                  {daySlots.map((s) => (
-                    <li key={s.id} className="flex items-center gap-2 rounded-lg border border-border/50 px-2.5 py-1.5">
-                      <span className="size-2 shrink-0 rounded-full" style={{ backgroundColor: colorForCode(s.subjectCode, subjects) }} aria-hidden="true" />
-                      <span className="font-mono text-xs font-semibold">{s.subjectCode}</span>
-                      <span className="text-xs tabular-nums text-muted-foreground">{hhmm(s.startMin)}–{hhmm(s.endMin)}</span>
-                      {s.source === "demo" && <Badge variant="outline" className="ml-1 px-1.5 py-0 text-[10px]">demo</Badge>}
+                  {daySlots.map((s) => {
+                    const cell = cellByKey.get(`${s.dayOfWeek}-${s.startMin}-${s.endMin}`);
+                    const pick = cell ? picks[cell.key] : undefined;
+                    const pickedRow = pick === s.subjectCode;
+                    const altRow = pick !== undefined && !pickedRow;
+                    return (
+                      <li
+                        key={s.id}
+                        className={cn(
+                          "flex items-center gap-2 rounded-lg border border-border/50 px-2.5 py-1.5 transition-opacity",
+                          altRow && "opacity-55"
+                        )}
+                      >
+                        <span className="size-2 shrink-0 rounded-full" style={{ backgroundColor: colorForCode(s.subjectCode, subjects) }} aria-hidden="true" />
+                        <span className="font-mono text-xs font-semibold">{s.subjectCode}</span>
+                        <span className="text-xs tabular-nums text-muted-foreground">{hhmm(s.startMin)}–{hhmm(s.endMin)}</span>
+                        {pickedRow && (
+                          <Badge variant="outline" className="ml-1 border-emerald-500/40 px-1.5 py-0 text-[10px] text-emerald-600 dark:text-emerald-400">
+                            attending
+                          </Badge>
+                        )}
+                        {altRow && (
+                          <Badge variant="outline" className="ml-1 px-1.5 py-0 text-[10px] text-muted-foreground">
+                            alternative
+                          </Badge>
+                        )}
+                        {s.source === "demo" && <Badge variant="outline" className="ml-1 px-1.5 py-0 text-[10px]">demo</Badge>}
                       {s.source === "erp" && (
                         <Badge variant="outline" className="ml-1 border-indigo-500/40 px-1.5 py-0 text-[10px] text-indigo-600 dark:text-indigo-400">
                           ERP
@@ -343,8 +485,9 @@ function ManageTimetableDialog({
                           {remove.isPending ? <Loader2 className="size-3.5 animate-spin" aria-hidden="true" /> : <Trash2 className="size-3.5" aria-hidden="true" />}
                         </button>
                       )}
-                    </li>
-                  ))}
+                      </li>
+                    );
+                  })}
                 </ul>
               </div>
             );
@@ -386,11 +529,17 @@ export function TimetableCard({
     retry: 2,
   });
 
-  const slots = data ?? [];
+  const tt = data;
+  const slots = tt?.slots ?? [];
+  // Today's schedule shows the student's REAL day: same-batch duplicates
+  // collapsed + parallel windows trimmed to the picked class. Hidden
+  // alternatives are disclosed below the list — never silently dropped.
+  const batch = useMemo(() => applyBatchPicks(slots, tt?.picks ?? {}), [slots, tt?.picks]);
   const todaySlots = useMemo(
-    () => slots.filter((s) => s.dayOfWeek === nowDay),
-    [slots, nowDay]
+    () => batch.attending.filter((s) => s.dayOfWeek === nowDay),
+    [batch, nowDay]
   );
+  const hiddenToday = batch.excluded.filter((s) => s.dayOfWeek === nowDay).length;
   const ongoing = todaySlots.find((s) => nowMin >= s.startMin && nowMin < s.endMin);
   const next = todaySlots.find((s) => s.startMin > nowMin);
 
@@ -517,6 +666,12 @@ export function TimetableCard({
                 );
               })}
             </AnimatePresence>
+            {hiddenToday > 0 && (
+              <p className="pt-0.5 text-[10px] leading-snug text-muted-foreground/70">
+                {hiddenToday} parallel alternative{hiddenToday === 1 ? "" : "s"} hidden — you picked a different class
+                for that window (Manage → Parallel classes).
+              </p>
+            )}
           </div>
         )}
 

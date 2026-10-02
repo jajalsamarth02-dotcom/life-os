@@ -35,6 +35,7 @@ import {
   TooltipTrigger,
 } from "@/components/ui/tooltip";
 import { cn } from "@/lib/utils";
+import { applyBatchPicks } from "@/lib/batch-picks";
 import { promptInstall, useCanInstall } from "./install-prompt";
 import { fetchDashboard, fetchTimetable, markAllNotificationsRead, postSync, qk } from "./api";
 import { ago, fmtDT, useNow } from "./shared";
@@ -287,7 +288,8 @@ function NextClassChip({ subjects }: { subjects: { code: string; name: string }[
     refetchInterval: 120_000,
   });
 
-  const slots = timetable.data ?? [];
+  const batch = applyBatchPicks(timetable.data?.slots ?? [], timetable.data?.picks ?? {});
+  const slots = batch.attending;
   const d = new Date(now);
   const today = d.getDay();
   const nowMin = d.getHours() * 60 + d.getMinutes();

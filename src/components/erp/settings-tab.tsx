@@ -90,6 +90,7 @@ import {
   setEnabled as setBrowserRemindersEnabled,
   type PermissionState,
 } from "@/lib/browser-reminders";
+import { applyBatchPicks } from "@/lib/batch-picks";
 import {
   connectErp,
   disconnectErp,
@@ -1583,8 +1584,17 @@ function DataBackupCard() {
       });
     }
     const datedCount = items.length;
-    const classEvents = buildClassEvents(slotsQ.data ?? [], (code) => courseNames?.[code] ?? null);
-    return { events: [...items, ...classEvents], datedCount, classCount: classEvents.length };
+    // Same batch-pick math as the live feed: same-batch duplicates collapsed,
+    // parallel windows trimmed to the picked classes — the export and the
+    // subscription stay an exact mirror of each other AND of the week plan.
+    const batch = applyBatchPicks(slotsQ.data?.slots ?? [], slotsQ.data?.picks ?? {});
+    const classEvents = buildClassEvents(batch.attending, (code) => courseNames?.[code] ?? null);
+    return {
+      events: [...items, ...classEvents],
+      datedCount,
+      classCount: classEvents.length,
+      alternativesHidden: batch.excluded.length,
+    };
   }, [alaQ.data, remQ.data, slotsQ.data]);
   const icsEvents = icsBuild.events;
 
@@ -1794,7 +1804,7 @@ function DataBackupCard() {
               <p className="text-sm font-medium">Deadlines & classes calendar (.ics)</p>
               <p className="text-xs leading-relaxed text-muted-foreground">
                 {icsEvents.length > 0
-                  ? `${icsBuild.datedCount} dated item${icsBuild.datedCount === 1 ? "" : "s"} + ${icsBuild.classCount} weekly class${icsBuild.classCount === 1 ? "" : "es"} right now. 24-hour alarms on deadlines only — classes repeat silently every week. Imports into Google, Apple or Outlook; re-importing updates the same events.`
+                  ? `${icsBuild.datedCount} dated item${icsBuild.datedCount === 1 ? "" : "s"} + ${icsBuild.classCount} weekly class${icsBuild.classCount === 1 ? "" : "es"} right now${icsBuild.alternativesHidden > 0 ? ` — your parallel picks applied (${icsBuild.alternativesHidden} alternative${icsBuild.alternativesHidden === 1 ? "" : "s"} not yours skipped)` : ""}. 24-hour alarms on deadlines only — classes repeat silently every week. Imports into Google, Apple or Outlook; re-importing updates the same events.`
                   : "Exports every active ALA deadline, reminder and weekly class as calendar events for Google, Apple or Outlook — nothing to export yet."}
               </p>
             </div>

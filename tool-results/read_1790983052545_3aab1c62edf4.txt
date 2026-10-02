@@ -1,0 +1,587 @@
+     1→"use client";
+     2→
+     3→import { useMemo, useState } from "react";
+     4→import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+     5→import { motion, AnimatePresence } from "framer-motion";
+     6→import {
+     7→  CalendarDays,
+     8→  CalendarPlus,
+     9→  ChevronDown,
+    10→  CircleDot,
+    11→  Clock,
+    12→  CloudCog,
+    13→  Download,
+    14→  Loader2,
+    15→  Play,
+    16→  Settings2,
+    17→  Trash2,
+    18→  TriangleAlert,
+    19→} from "lucide-react";
+    20→import { toast } from "sonner";
+    21→import { Badge } from "@/components/ui/badge";
+    22→import { Button } from "@/components/ui/button";
+    23→import { Card, CardContent } from "@/components/ui/card";
+    24→import {
+    25→  Dialog,
+    26→  DialogContent,
+    27→  DialogDescription,
+    28→  DialogHeader,
+    29→  DialogTitle,
+    30→  DialogTrigger,
+    31→} from "@/components/ui/dialog";
+    32→import { Input } from "@/components/ui/input";
+    33→import { Label } from "@/components/ui/label";
+    34→import {
+    35→  Select,
+    36→  SelectContent,
+    37→  SelectItem,
+    38→  SelectTrigger,
+    39→  SelectValue,
+    40→} from "@/components/ui/select";
+    41→import { cn } from "@/lib/utils";
+    42→import { downloadTimetableIcs } from "@/lib/ics";
+    43→import { createSlot, deleteSlot, fetchTimetable, qk, ApiError, type SlotConflict } from "./api";
+    44→import { useNow } from "./shared";
+    45→import type { AppMode, SubjectView, TimetableSlotRow } from "./types";
+    46→
+    47→const DAY_NAMES = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
+    48→const WEEK_ORDER = [1, 2, 3, 4, 5, 6, 0]; // Mon → Sun
+    49→
+    50→const CHIP_COLORS = ["#10b981", "#f59e0b", "#84cc16", "#f97316", "#14b8a6", "#a8a29e", "#ef4444"];
+    51→
+    52→function colorForCode(code: string, subjects: SubjectView[]): string {
+    53→  const idx = subjects.findIndex((s) => s.code === code);
+    54→  return CHIP_COLORS[(idx < 0 ? 0 : idx) % CHIP_COLORS.length];
+    55→}
+    56→
+    57→function hhmm(min: number): string {
+    58→  return `${String(Math.floor(min / 60)).padStart(2, "0")}:${String(min % 60).padStart(2, "0")}`;
+    59→}
+    60→
+    61→/** Live status label for a slot relative to now. */
+    62→function slotStatus(
+    63→  slot: TimetableSlotRow,
+    64→  nowDay: number,
+    65→  nowMin: number
+    66→): { key: "ongoing" | "upcoming" | "done" | "other"; label?: string } {
+    67→  if (slot.dayOfWeek !== nowDay) return { key: "other" };
+    68→  if (nowMin >= slot.startMin && nowMin < slot.endMin) {
+    69→    return { key: "ongoing", label: `ends in ${slot.endMin - nowMin} min` };
+    70→  }
+    71→  if (nowMin < slot.startMin) {
+    72→    return { key: "upcoming", label: `starts in ${slot.startMin - nowMin} min` };
+    73→  }
+    74→  return { key: "done" };
+    75→}
+    76→
+    77→/* ------------------------------------------------------------------ */
+    78→
+    79→function SlotChip({
+    80→  slot,
+    81→  color,
+    82→  nowDay,
+    83→  nowMin,
+    84→  compact = false,
+    85→}: {
+    86→  slot: TimetableSlotRow;
+    87→  color: string;
+    88→  nowDay: number;
+    89→  nowMin: number;
+    90→  compact?: boolean;
+    91→}) {
+    92→  const st = slotStatus(slot, nowDay, nowMin);
+    93→  const ongoing = st.key === "ongoing";
+    94→  return (
+    95→    <div
+    96→      className={cn(
+    97→        "group rounded-lg border px-2 py-1.5 text-left transition-colors",
+    98→        ongoing
+    99→          ? "border-emerald-500/50 bg-emerald-500/10"
+   100→          : st.key === "done"
+   101→            ? "border-border/40 bg-muted/30 opacity-55"
+   102→            : "border-border/60 bg-card hover:bg-muted/40"
+   103→      )}
+   104→    >
+   105→      <div className="flex items-center gap-1.5">
+   106→        <span className="size-2 shrink-0 rounded-full" style={{ backgroundColor: color }} aria-hidden="true" />
+   107→        <span className="min-w-0 flex-1 truncate font-mono text-[11px] font-semibold">{slot.subjectCode}</span>
+   108→        {ongoing && <CircleDot className="size-3 shrink-0 animate-pulse text-emerald-500" aria-hidden="true" />}
+   109→      </div>
+   110→      <p className="mt-0.5 text-[11px] tabular-nums text-muted-foreground">
+   111→        {hhmm(slot.startMin)}–{hhmm(slot.endMin)}
+   112→      </p>
+   113→      {!compact && st.label && (
+   114→        <p className={cn("mt-0.5 text-[10px] font-medium", ongoing ? "text-emerald-600 dark:text-emerald-400" : "text-muted-foreground")}>
+   115→          {st.label}
+   116→        </p>
+   117→      )}
+   118→    </div>
+   119→  );
+   120→}
+   121→
+   122→/* ------------------------------------------------------------------ */
+   123→
+   124→function ManageTimetableDialog({
+   125→  subjects,
+   126→  mode = "demo",
+   127→}: {
+   128→  subjects: SubjectView[];
+   129→  mode?: AppMode;
+   130→}) {
+   131→  const qc = useQueryClient();
+   132→  const [open, setOpen] = useState(false);
+   133→  const [day, setDay] = useState("1");
+   134→  const [start, setStart] = useState("09:00");
+   135→  const [end, setEnd] = useState("09:50");
+   136→  const [code, setCode] = useState(subjects[0]?.code ?? "");
+   137→  const [conflicts, setConflicts] = useState<SlotConflict[] | null>(null);
+   138→
+   139→  const { data } = useQuery({
+   140→    queryKey: qk.timetable,
+   141→    queryFn: fetchTimetable,
+   142→    enabled: open,
+   143→  });
+   144→
+   145→  const add = useMutation({
+   146→    mutationFn: (force: boolean) =>
+   147→      createSlot({ dayOfWeek: Number(day), start, end, subjectCode: code, force }),
+   148→    onSuccess: (_res, force) => {
+   149→      qc.invalidateQueries({ queryKey: qk.timetable });
+   150→      qc.invalidateQueries({ queryKey: qk.dashboard });
+   151→      setConflicts(null);
+   152→      toast.success(
+   153→        force ? "Class added (overlap accepted)" : "Class added to your timetable"
+   154→      );
+   155→    },
+   156→    onError: (e) => {
+   157→      if (e instanceof ApiError && e.status === 409 && Array.isArray(e.body.conflicts)) {
+   158→        setConflicts(e.body.conflicts as SlotConflict[]);
+   159→        return;
+   160→      }
+   161→      setConflicts(null);
+   162→      toast.error("Could not add class", { description: e instanceof ApiError ? e.message : e.message });
+   163→    },
+   164→  });
+   165→
+   166→  const resetConflicts = () => setConflicts(null);
+   167→
+   168→  const remove = useMutation({
+   169→    mutationFn: deleteSlot,
+   170→    onSuccess: () => {
+   171→      qc.invalidateQueries({ queryKey: qk.timetable });
+   172→      toast.success("Class removed");
+   173→    },
+   174→    onError: (e) => toast.error("Could not remove class", { description: e.message }),
+   175→  });
+   176→
+   177→  const slots = data ?? [];
+   178→
+   179→  return (
+   180→    <Dialog open={open} onOpenChange={setOpen}>
+   181→      <DialogTrigger asChild>
+   182→        <Button variant="outline" size="sm" className="h-8 gap-1.5 text-xs print:hidden">
+   183→          <Settings2 className="size-3.5" aria-hidden="true" />
+   184→          Manage
+   185→        </Button>
+   186→      </DialogTrigger>
+   187→      <DialogContent className="max-h-[85vh] overflow-y-auto rounded-xl sm:max-w-lg">
+   188→        <DialogHeader>
+   189→          <DialogTitle className="flex items-center gap-2 pr-8 tracking-tight">
+   190→            Weekly timetable
+   191→            <Button
+   192→              variant="outline"
+   193→              size="sm"
+   194→              className="ml-auto h-7 gap-1.5 px-2.5 text-[11px]"
+   195→              disabled={slots.length === 0}
+   196→              onClick={() => {
+   197→                const filename = downloadTimetableIcs(slots, subjects);
+   198→                toast.success(`${filename} downloaded`, {
+   199→                  description: "Import it into Google Calendar / Apple Calendar / Outlook — classes repeat weekly.",
+   200→                });
+   201→              }}
+   202→              aria-label="Export the weekly timetable as a calendar (.ics) file"
+   203→            >
+   204→              <Download className="size-3.5" aria-hidden="true" />
+   205→              .ics
+   206→            </Button>
+   207→          </DialogTitle>
+   208→          <DialogDescription className="text-xs">
+   209→            {mode === "live"
+   210→              ? "Your weekly classes sync automatically from the ERP's Class Routine page — ERP rows refresh on every sync (marked ERP). Personal slots you add persist independently."
+   211→              : "The demo ERP seeded a sample schedule — adjust it to match your real classes. Personal slots persist independently of synchronization."}
+   212→          </DialogDescription>
+   213→        </DialogHeader>
+   214→
+   215→        <div className="rounded-xl border border-border/60 p-3">
+   216→          <p className="mb-2.5 flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+   217→            <CalendarPlus className="size-3.5" aria-hidden="true" /> Add a class
+   218→          </p>
+   219→          <div className="grid grid-cols-2 gap-2.5 sm:grid-cols-4">
+   220→            <div className="space-y-1">
+   221→              <Label htmlFor="tt-day" className="text-[11px]">Day</Label>
+   222→              <Select value={day} onValueChange={(v) => { setDay(v); resetConflicts(); }}>
+   223→                <SelectTrigger id="tt-day" className="h-9 text-xs"><SelectValue /></SelectTrigger>
+   224→                <SelectContent>
+   225→                  {WEEK_ORDER.map((d) => (
+   226→                    <SelectItem key={d} value={String(d)} className="text-xs">{DAY_NAMES[d]}</SelectItem>
+   227→                  ))}
+   228→                </SelectContent>
+   229→              </Select>
+   230→            </div>
+   231→            <div className="space-y-1">
+   232→              <Label htmlFor="tt-subject" className="text-[11px]">Subject</Label>
+   233→              <Select value={code} onValueChange={(v) => { setCode(v); resetConflicts(); }}>
+   234→                <SelectTrigger id="tt-subject" className="h-9 text-xs"><SelectValue /></SelectTrigger>
+   235→                <SelectContent>
+   236→                  {subjects.map((s) => (
+   237→                    <SelectItem key={s.code} value={s.code} className="text-xs">{s.code}</SelectItem>
+   238→                  ))}
+   239→                </SelectContent>
+   240→              </Select>
+   241→            </div>
+   242→            <div className="space-y-1">
+   243→              <Label htmlFor="tt-start" className="text-[11px]">Starts</Label>
+   244→              <Input id="tt-start" type="time" value={start} onChange={(e) => { setStart(e.target.value); resetConflicts(); }} className="h-9 text-xs" />
+   245→            </div>
+   246→            <div className="space-y-1">
+   247→              <Label htmlFor="tt-end" className="text-[11px]">Ends</Label>
+   248→              <Input id="tt-end" type="time" value={end} onChange={(e) => { setEnd(e.target.value); resetConflicts(); }} className="h-9 text-xs" />
+   249→            </div>
+   250→          </div>
+   251→
+   252→          {conflicts && conflicts.length > 0 && (
+   253→            <div
+   254→              role="alert"
+   255→              className="mt-2.5 rounded-lg border border-amber-500/50 bg-amber-500/[0.08] p-2.5"
+   256→            >
+   257→              <p className="flex items-center gap-1.5 text-[11px] font-semibold text-amber-700 dark:text-amber-400">
+   258→                <TriangleAlert className="size-3.5 shrink-0" aria-hidden="true" />
+   259→                Time conflict — overlaps {conflicts.length === 1 ? "1 class" : `${conflicts.length} classes`}
+   260→              </p>
+   261→              <ul className="mt-1.5 space-y-1">
+   262→                {conflicts.map((c) => (
+   263→                  <li key={c.id} className="flex items-center gap-1.5 text-[11px] text-amber-800 dark:text-amber-300/90">
+   264→                    <span className="size-1.5 shrink-0 rounded-full bg-amber-500" aria-hidden="true" />
+   265→                    <span className="font-mono font-semibold">{c.subjectCode}</span>
+   266→                    <span className="tabular-nums">{c.start}–{c.end}</span>
+   267→                    {c.source === "demo" && <span className="text-amber-700/60 dark:text-amber-400/50">· demo</span>}
+   268→                    {c.source === "erp" && <span className="text-indigo-600/70 dark:text-indigo-400/70">· ERP</span>}
+   269→                  </li>
+   270→                ))}
+   271→              </ul>
+   272→              <p className="mt-1.5 text-[11px] leading-snug text-amber-800/80 dark:text-amber-300/70">
+   273→                Pick a different time, or add it anyway if these genuinely share a window.
+   274→              </p>
+   275→              <div className="mt-2 flex gap-1.5">
+   276→                <Button
+   277→                  size="sm"
+   278→                  variant="outline"
+   279→                  className="h-7 gap-1 border-amber-500/50 px-2.5 text-[11px] text-amber-700 hover:bg-amber-500/15 dark:text-amber-400"
+   280→                  disabled={add.isPending}
+   281→                  onClick={() => add.mutate(true)}
+   282→                >
+   283→                  {add.isPending ? <Loader2 className="size-3 animate-spin" aria-hidden="true" /> : <CalendarPlus className="size-3" aria-hidden="true" />}
+   284→                  Add anyway
+   285→                </Button>
+   286→                <Button
+   287→                  size="sm"
+   288→                  variant="ghost"
+   289→                  className="h-7 px-2.5 text-[11px] text-muted-foreground"
+   290→                  onClick={resetConflicts}
+   291→                >
+   292→                  Pick another time
+   293→                </Button>
+   294→              </div>
+   295→            </div>
+   296→          )}
+   297→
+   298→          <Button
+   299→            size="sm"
+   300→            className="mt-2.5 h-8 gap-1.5 text-xs"
+   301→            onClick={() => add.mutate(false)}
+   302→            disabled={add.isPending || !code}
+   303→          >
+   304→            {add.isPending ? <Loader2 className="size-3.5 animate-spin" aria-hidden="true" /> : <CalendarPlus className="size-3.5" aria-hidden="true" />}
+   305→            Add class
+   306→          </Button>
+   307→        </div>
+   308→
+   309→        <div className="space-y-2.5">
+   310→          {WEEK_ORDER.map((d) => {
+   311→            const daySlots = slots.filter((s) => s.dayOfWeek === d);
+   312→            if (daySlots.length === 0) return null;
+   313→            return (
+   314→              <div key={d}>
+   315→                <p className="mb-1 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">{DAY_NAMES[d]}</p>
+   316→                <ul className="space-y-1">
+   317→                  {daySlots.map((s) => (
+   318→                    <li key={s.id} className="flex items-center gap-2 rounded-lg border border-border/50 px-2.5 py-1.5">
+   319→                      <span className="size-2 shrink-0 rounded-full" style={{ backgroundColor: colorForCode(s.subjectCode, subjects) }} aria-hidden="true" />
+   320→                      <span className="font-mono text-xs font-semibold">{s.subjectCode}</span>
+   321→                      <span className="text-xs tabular-nums text-muted-foreground">{hhmm(s.startMin)}–{hhmm(s.endMin)}</span>
+   322→                      {s.source === "demo" && <Badge variant="outline" className="ml-1 px-1.5 py-0 text-[10px]">demo</Badge>}
+   323→                      {s.source === "erp" && (
+   324→                        <Badge variant="outline" className="ml-1 border-indigo-500/40 px-1.5 py-0 text-[10px] text-indigo-600 dark:text-indigo-400">
+   325→                          ERP
+   326→                        </Badge>
+   327→                      )}
+   328→                      {s.source === "erp" ? (
+   329→                        <span
+   330→                          className="ml-auto flex items-center gap-1 rounded-md px-1.5 py-1 text-[10px] font-medium text-indigo-500/80 dark:text-indigo-400/80"
+   331→                          title="Synced from the ERP Class Routine — managed automatically, edits happen on the ERP"
+   332→                        >
+   333→                          <CloudCog className="size-3.5 shrink-0" aria-hidden="true" />
+   334→                          managed
+   335→                        </span>
+   336→                      ) : (
+   337→                        <button
+   338→                          type="button"
+   339→                          onClick={() => remove.mutate(s.id)}
+   340→                          className="ml-auto rounded-md p-1 text-muted-foreground transition-colors hover:bg-red-500/10 hover:text-red-600 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+   341→                          aria-label={`Remove ${s.subjectCode} on ${DAY_NAMES[d]} at ${hhmm(s.startMin)}`}
+   342→                        >
+   343→                          {remove.isPending ? <Loader2 className="size-3.5 animate-spin" aria-hidden="true" /> : <Trash2 className="size-3.5" aria-hidden="true" />}
+   344→                        </button>
+   345→                      )}
+   346→                    </li>
+   347→                  ))}
+   348→                </ul>
+   349→              </div>
+   350→            );
+   351→          })}
+   352→          {slots.length === 0 && (
+   353→            <div className="flex flex-col items-center gap-1.5 py-6 text-center">
+   354→              <CalendarDays className="size-5 text-muted-foreground/60" aria-hidden="true" />
+   355→              <p className="text-sm font-medium text-foreground/80">No classes scheduled yet</p>
+   356→              <p className="max-w-xs text-xs leading-relaxed text-muted-foreground">
+   357→                The ERP doesn&apos;t publish a timetable — add your real class times with the pickers above to unlock
+   358→                today&apos;s-schedule highlights, ongoing-class badges and weekly planning.
+   359→              </p>
+   360→            </div>
+   361→          )}
+   362→        </div>
+   363→      </DialogContent>
+   364→    </Dialog>
+   365→  );
+   366→}
+   367→
+   368→/* ------------------------------------------------------------------ */
+   369→
+   370→export function TimetableCard({
+   371→  subjects,
+   372→  mode = "demo",
+   373→}: {
+   374→  subjects: SubjectView[];
+   375→  mode?: AppMode;
+   376→}) {
+   377→  const now = useNow(30_000);
+   378→  const nowDay = new Date(now).getDay();
+   379→  const nowMin = new Date(now).getHours() * 60 + new Date(now).getMinutes();
+   380→  const [weekOpen, setWeekOpen] = useState(false);
+   381→
+   382→  const { data, isPending, isError } = useQuery({
+   383→    queryKey: qk.timetable,
+   384→    queryFn: fetchTimetable,
+   385→    refetchInterval: 60_000,
+   386→    retry: 2,
+   387→  });
+   388→
+   389→  const slots = data ?? [];
+   390→  const todaySlots = useMemo(
+   391→    () => slots.filter((s) => s.dayOfWeek === nowDay),
+   392→    [slots, nowDay]
+   393→  );
+   394→  const ongoing = todaySlots.find((s) => nowMin >= s.startMin && nowMin < s.endMin);
+   395→  const next = todaySlots.find((s) => s.startMin > nowMin);
+   396→
+   397→  return (
+   398→    <Card className="rounded-xl border-border/60 transition-shadow hover:shadow-md">
+   399→      <div className="flex flex-row items-center justify-between gap-2 px-6 pt-6 pb-2">
+   400→        <div>
+   401→          <h3 className="flex items-center gap-2 text-base font-semibold tracking-tight">
+   402→            <CalendarDays className="size-4 text-emerald-500" aria-hidden="true" />
+   403→            Today&apos;s schedule
+   404→            <Badge variant="secondary" className="text-[11px] font-medium">{DAY_NAMES[nowDay]}</Badge>
+   405→          </h3>
+   406→          <p className="mt-0.5 text-xs text-muted-foreground">
+   407→            {todaySlots.length === 0 ? "Nothing planned" : `${todaySlots.length} class${todaySlots.length === 1 ? "" : "es"} today`}
+   408→          </p>
+   409→        </div>
+   410→        <ManageTimetableDialog subjects={subjects} mode={mode} />
+   411→        <Button
+   412→          variant="ghost"
+   413→          size="icon"
+   414→          className="size-8 shrink-0 text-muted-foreground print:hidden"
+   415→          disabled={slots.length === 0}
+   416→          onClick={() => {
+   417→            const filename = downloadTimetableIcs(slots, subjects);
+   418→            toast.success(`${filename} downloaded`, {
+   419→              description: "Classes repeat weekly — import into your calendar app.",
+   420→            });
+   421→          }}
+   422→          aria-label="Export the weekly timetable as a calendar (.ics) file"
+   423→        >
+   424→          <Download className="size-4" aria-hidden="true" />
+   425→        </Button>
+   426→      </div>
+   427→      <CardContent>
+   428→        {isPending ? (
+   429→          <div className="space-y-2">
+   430→            {Array.from({ length: 3 }).map((_, i) => (
+   431→              <div key={i} className="h-12 animate-pulse rounded-lg bg-muted" />
+   432→            ))}
+   433→          </div>
+   434→        ) : isError ? (
+   435→          <div className="flex flex-col items-center gap-1.5 rounded-xl border border-dashed border-red-500/40 py-8 text-center">
+   436→            <CalendarDays className="size-6 text-red-500/60" aria-hidden="true" />
+   437→            <p className="text-sm font-medium">Could not load the timetable</p>
+   438→            <p className="text-xs text-muted-foreground">It will retry automatically in a moment.</p>
+   439→          </div>
+   440→        ) : todaySlots.length === 0 ? (
+   441→          <div className="flex flex-col items-center gap-1.5 rounded-xl border border-dashed border-border/70 py-8 text-center">
+   442→            <CalendarDays className="size-6 text-muted-foreground/60" aria-hidden="true" />
+   443→            <p className="text-sm font-medium">No classes today</p>
+   444→            <p className="max-w-xs text-xs text-muted-foreground">
+   445→              {mode === "live" && slots.length === 0
+   446→                ? "Your weekly schedule is empty — the ERP doesn’t publish one, so add your real classes via Manage."
+   447→                : "Enjoy the free day — or add your classes via Manage."}
+   448→            </p>
+   449→          </div>
+   450→        ) : (
+   451→          <div className="space-y-2">
+   452→            {ongoing && (
+   453→              <div className="mb-2.5 flex items-center gap-2.5 rounded-xl border border-emerald-500/40 bg-emerald-500/[0.07] px-3.5 py-2.5">
+   454→                <span className="flex size-8 shrink-0 items-center justify-center rounded-lg bg-emerald-500/15 text-emerald-600 dark:text-emerald-400">
+   455→                  <Play className="size-4" aria-hidden="true" />
+   456→                </span>
+   457→                <div className="min-w-0 flex-1">
+   458→                  <p className="text-[11px] font-semibold uppercase tracking-wide text-emerald-600 dark:text-emerald-400">Happening now</p>
+   459→                  <p className="truncate text-sm font-semibold">
+   460→                    {ongoing.subjectCode} · {hhmm(ongoing.startMin)}–{hhmm(ongoing.endMin)}
+   461→                  </p>
+   462→                </div>
+   463→                <Badge className="shrink-0 border-emerald-500/40 bg-emerald-500/15 text-emerald-700 dark:text-emerald-400" variant="outline">
+   464→                  {ongoing.endMin - nowMin} min left
+   465→                </Badge>
+   466→              </div>
+   467→            )}
+   468→            <AnimatePresence initial={false}>
+   469→              {todaySlots.map((s, i) => {
+   470→                const st = slotStatus(s, nowDay, nowMin);
+   471→                const isNext = next?.id === s.id;
+   472→                return (
+   473→                  <motion.div
+   474→                    key={s.id}
+   475→                    initial={{ opacity: 0, y: 6 }}
+   476→                    animate={{ opacity: 1, y: 0 }}
+   477→                    transition={{ duration: 0.25, delay: Math.min(i * 0.04, 0.2) }}
+   478→                  >
+   479→                    <div
+   480→                      className={cn(
+   481→                        "flex items-center gap-3 rounded-lg border p-2.5 transition-colors",
+   482→                        st.key === "ongoing"
+   483→                          ? "border-emerald-500/40 bg-emerald-500/[0.06]"
+   484→                          : st.key === "done"
+   485→                            ? "border-border/40 opacity-55"
+   486→                            : "border-border/50 hover:bg-muted/30"
+   487→                      )}
+   488→                    >
+   489→                      <span
+   490→                        className="flex size-9 shrink-0 flex-col items-center justify-center rounded-lg text-[10px] font-bold leading-none"
+   491→                        style={{ backgroundColor: `${colorForCode(s.subjectCode, subjects)}1a`, color: colorForCode(s.subjectCode, subjects) }}
+   492→                      >
+   493→                        {hhmm(s.startMin).slice(0, 2)}
+   494→                        <span className="mt-0.5">{hhmm(s.startMin).slice(3)}</span>
+   495→                      </span>
+   496→                      <div className="min-w-0 flex-1">
+   497→                        <p className="truncate text-sm font-medium">{s.subjectCode}</p>
+   498→                        <p className="text-xs tabular-nums text-muted-foreground">
+   499→                          {hhmm(s.startMin)} – {hhmm(s.endMin)}
+   500→                          {s.source === "demo" && " · demo"}
+   501→                          {s.source === "erp" && " · synced from ERP"}
+   502→                        </p>
+   503→                      </div>
+   504→                      {st.key === "ongoing" ? (
+   505→                        <Badge variant="outline" className="shrink-0 border-emerald-500/40 text-emerald-700 dark:text-emerald-400">
+   506→                          <CircleDot className="size-3 animate-pulse" aria-hidden="true" /> now
+   507→                        </Badge>
+   508→                      ) : isNext && st.label ? (
+   509→                        <Badge variant="outline" className="shrink-0 border-amber-500/40 text-amber-700 dark:text-amber-400">
+   510→                          <Clock className="size-3" aria-hidden="true" /> {st.label}
+   511→                        </Badge>
+   512→                      ) : st.key === "done" ? (
+   513→                        <Badge variant="outline" className="shrink-0 border-border/40 text-muted-foreground">done</Badge>
+   514→                      ) : null}
+   515→                    </div>
+   516→                  </motion.div>
+   517→                );
+   518→              })}
+   519→            </AnimatePresence>
+   520→          </div>
+   521→        )}
+   522→
+   523→        {/* Full week */}
+   524→        {slots.length > 0 && (
+   525→          <div className="mt-3">
+   526→            <button
+   527→              type="button"
+   528→              onClick={() => setWeekOpen((v) => !v)}
+   529→              className="flex w-full items-center gap-1.5 rounded-lg px-1 py-1 text-xs font-semibold uppercase tracking-wide text-muted-foreground transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+   530→              aria-expanded={weekOpen}
+   531→            >
+   532→              <ChevronDown className={cn("size-3.5 transition-transform", weekOpen && "rotate-180")} aria-hidden="true" />
+   533→              Full week
+   534→            </button>
+   535→            <AnimatePresence initial={false}>
+   536→              {weekOpen && (
+   537→                <motion.div
+   538→                  initial={{ height: 0, opacity: 0 }}
+   539→                  animate={{ height: "auto", opacity: 1 }}
+   540→                  exit={{ height: 0, opacity: 0 }}
+   541→                  transition={{ duration: 0.25 }}
+   542→                  className="overflow-hidden"
+   543→                >
+   544→                  <div className="mt-2 grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-6">
+   545→                    {WEEK_ORDER.map((d) => {
+   546→                      const daySlots = slots.filter((s) => s.dayOfWeek === d);
+   547→                      return (
+   548→                        <div
+   549→                          key={d}
+   550→                          className={cn(
+   551→                            "rounded-xl border p-2",
+   552→                            d === nowDay ? "border-primary/40 bg-primary/[0.04]" : "border-border/50"
+   553→                          )}
+   554→                        >
+   555→                          <p className={cn("mb-1.5 text-[11px] font-semibold uppercase tracking-wide", d === nowDay ? "text-primary" : "text-muted-foreground")}>
+   556→                            {DAY_NAMES[d].slice(0, 3)}
+   557→                          </p>
+   558→                          <div className="space-y-1.5">
+   559→                            {daySlots.length === 0 ? (
+   560→                              <p className="py-2 text-center text-[10px] text-muted-foreground/60">—</p>
+   561→                            ) : (
+   562→                              daySlots.map((s) => (
+   563→                                <SlotChip
+   564→                                  key={s.id}
+   565→                                  slot={s}
+   566→                                  color={colorForCode(s.subjectCode, subjects)}
+   567→                                  nowDay={nowDay}
+   568→                                  nowMin={nowMin}
+   569→                                  compact={d !== nowDay}
+   570→                                />
+   571→                              ))
+   572→                            )}
+   573→                          </div>
+   574→                        </div>
+   575→                      );
+   576→                    })}
+   577→                  </div>
+   578→                </motion.div>
+   579→              )}
+   580→            </AnimatePresence>
+   581→          </div>
+   582→        )}
+   583→      </CardContent>
+   584→    </Card>
+   585→  );
+   586→}
+   587→

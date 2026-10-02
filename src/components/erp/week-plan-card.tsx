@@ -21,7 +21,10 @@
  * ceiling; this card is the weekly decision surface. Slots whose
  * subject is not on the attendance sheet yet (held back by the sync
  * engine) are counted in the day strip but disclosed — never silently
- * budgeted as if their attendance were free.
+ * budgeted as if their attendance were free. Parallel-batch windows
+ * (lab groups sharing one wall time) collapse to the student's pick
+ * via lib/batch-picks — unresolved windows count every option and say
+ * so, never silently.
  *
  * Weeks run Monday → Sunday (same WEEK_ORDER as the timetable card);
  * "remaining" is computed in device-local time to match every other
@@ -31,10 +34,11 @@
 import { useQuery } from "@tanstack/react-query";
 import { useMemo } from "react";
 import { motion } from "framer-motion";
-import { CalendarRange, Info, MousePointerClick, PartyPopper } from "lucide-react";
+import { CalendarRange, CheckCircle2, GitMerge, Info, MousePointerClick, PartyPopper } from "lucide-react";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { cn } from "@/lib/utils";
 import { classesToReachTarget } from "@/lib/attendance";
+import { applyBatchPicks } from "@/lib/batch-picks";
 import { fetchTimetable, qk } from "./api";
 import { AnimatedNumber } from "./trend-chart";
 import { hueColors, SkipPips } from "./shared";
@@ -81,7 +85,9 @@ export function WeekPlanCard({
   className?: string;
 }) {
   const slotsQuery = useQuery({ queryKey: qk.timetable, queryFn: fetchTimetable });
-  const slots = slotsQuery.data;
+  const tt = slotsQuery.data;
+  const slots = tt?.slots;
+  const picks = tt?.picks ?? {};
   const now = Date.now();
   const nowDay = new Date(now).getDay();
   const nowMin = new Date(now).getHours() * 60 + new Date(now).getMinutes();
@@ -91,14 +97,20 @@ export function WeekPlanCard({
     if (!slots) return null;
     if (slots.length === 0) return { kind: "empty" as const };
 
+    // The student's real week: same-batch duplicates collapsed, picked
+    // windows trimmed to the chosen class. Unpicked windows keep every
+    // option (counted + disclosed below — never silent).
+    const batch = applyBatchPicks(slots, picks);
+    const attending = batch.attending;
+
     const isRemaining = (s: TimetableSlotRow) =>
       s.dayOfWeek === nowDay ? s.endMin > nowMin : weekOffset(s.dayOfWeek) > nowOff;
 
-    const remaining = slots.filter(isRemaining);
+    const remaining = attending.filter(isRemaining);
     // Full-week shape for the day strip (past days show what the week held).
     const dayCounts: number[] = [];
     for (const d of WEEK_ORDER) {
-      dayCounts.push(slots.filter((s) => s.dayOfWeek === d).length);
+      dayCounts.push(attending.filter((s) => s.dayOfWeek === d).length);
     }
 
     const byCode = new Map<string, TimetableSlotRow[]>();
@@ -147,8 +159,17 @@ export function WeekPlanCard({
         a.subject.name.localeCompare(b.subject.name)
     );
 
-    return { kind: "plan" as const, remaining, dayCounts, rows, unmapped };
-  }, [slots, subjects, nowDay, nowMin, nowOff]);
+    return {
+      kind: "plan" as const,
+      remaining,
+      dayCounts,
+      rows,
+      unmapped,
+      unresolvedCount: batch.unresolvedCells.length,
+      resolvedCount: batch.resolvedCells.length,
+      excludedCount: batch.excluded.length,
+    };
+  }, [slots, picks, subjects, nowDay, nowMin, nowOff]);
 
   if (slotsQuery.isPending || slotsQuery.isError || !plan) return null;
   if (plan.kind === "empty") return null;
@@ -183,7 +204,7 @@ export function WeekPlanCard({
             </span>
             <p className="text-xs leading-snug text-muted-foreground">
               <span className="font-semibold text-foreground">That&apos;s the week — no classes left on the routine.</span>{" "}
-              {slots!.length > 0 ? "The plan resets when the next one starts." : null}
+              {tt && tt.slots.length > 0 ? "The plan resets when the next one starts." : null}
             </p>
           </div>
         ) : (
@@ -334,6 +355,20 @@ export function WeekPlanCard({
               </p>
             )}
 
+            {plan.unresolvedCount > 0 && (
+              <div className="flex items-start gap-2.5 rounded-lg border border-dashed border-amber-500/40 bg-amber-500/[0.05] px-3 py-2.5">
+                <GitMerge className="mt-0.5 size-3.5 shrink-0 text-amber-600 dark:text-amber-400" aria-hidden="true" />
+                <p className="text-[11px] leading-snug text-amber-800/90 dark:text-amber-300/80">
+                  <span className="font-semibold">
+                    {plan.unresolvedCount} parallel time {plan.unresolvedCount === 1 ? "window" : "windows"}
+                  </span>{" "}
+                  {plan.unresolvedCount === 1 ? "lists" : "list"} multiple classes (lab groups / batches) — the plan
+                  counts every option until you pick yours in{" "}
+                  <span className="font-semibold">Manage → Parallel classes</span>.
+                </p>
+              </div>
+            )}
+
             <p className="flex flex-wrap items-center gap-x-1.5 gap-y-0.5 text-[10px] leading-tight text-muted-foreground/70">
               <Info className="size-3 shrink-0" aria-hidden="true" />
               <span>
@@ -345,6 +380,15 @@ export function WeekPlanCard({
               {plan.unmapped > 0 && plan.rows.length > 0 && (
                 <span className="text-muted-foreground/60">
                   · {plan.unmapped} unmapped {plan.unmapped === 1 ? "slot" : "slots"} not budgeted yet.
+                </span>
+              )}
+              {plan.resolvedCount > 0 && (
+                <span className="inline-flex items-center gap-1 text-emerald-700/80 dark:text-emerald-400/70">
+                  <CheckCircle2 className="size-3 shrink-0" aria-hidden="true" />
+                  attending your pick in {plan.resolvedCount} parallel {plan.resolvedCount === 1 ? "window" : "windows"}
+                  {plan.excludedCount > 0
+                    ? ` · ${plan.excludedCount} alternative${plan.excludedCount === 1 ? "" : "s"} hidden.`
+                    : ""}
                 </span>
               )}
               <span className="inline-flex items-center gap-1">

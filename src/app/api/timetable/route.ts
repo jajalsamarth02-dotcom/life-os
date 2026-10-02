@@ -1,17 +1,30 @@
 import { NextResponse } from "next/server";
 import { db } from "@/lib/db";
 import { ensureDemoTimetable, listSlots, minutesFromHHMM, HHMMFromMinutes } from "@/lib/timetable";
+import {
+  BATCH_PICKS_KEY,
+  parseBatchPicks,
+  validatePicks,
+} from "@/lib/batch-picks";
+import { getRawSetting } from "@/lib/settings";
 
 export const dynamic = "force-dynamic";
 
 /**
- * GET /api/timetable — the weekly schedule (demo-seeded + personal slots).
+ * GET /api/timetable — the weekly schedule (demo-seeded + personal slots)
+ * plus the student's parallel-class picks (validated against the current
+ * routine; stale entries from a resync are dropped server-side so every
+ * consumer of the shared cache sees the same clean map).
  */
 export async function GET() {
   try {
     await ensureDemoTimetable();
-    const slots = await listSlots();
-    return NextResponse.json({ slots });
+    const [slots, picksRaw] = await Promise.all([
+      listSlots(),
+      getRawSetting(BATCH_PICKS_KEY),
+    ]);
+    const picks = validatePicks(parseBatchPicks(picksRaw), slots);
+    return NextResponse.json({ slots, picks });
   } catch (e) {
     return NextResponse.json(
       { error: e instanceof Error ? e.message : "Failed to load timetable" },

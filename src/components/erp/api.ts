@@ -93,7 +93,18 @@ export const fetchDigest = (days = 7) =>
   api<DigestResponse>(`/api/digest?days=${days}`);
 export const fetchAttendance = () => api<AttendanceResponse>("/api/attendance");
 export const fetchHistory = () => api<HistoryResponse>("/api/history");
-export const fetchTimetable = () => api<TimetableResponse>("/api/timetable").then((r) => r.slots);
+/** The weekly routine + the student's parallel-class picks (one shared cache). */
+export const fetchTimetable = () => api<TimetableResponse>("/api/timetable");
+
+/**
+ * Resolve (or clear with null) ONE parallel class window — the routine lists
+ * ≥2 classes in the same wall time and the student attends exactly one.
+ */
+export const setBatchPick = (cellKey: string, subjectCode: string | null) =>
+  api<{ picks: Record<string, string> }>("/api/timetable/picks", {
+    method: "PUT",
+    body: JSON.stringify({ cellKey, subjectCode }),
+  });
 export const createSlot = (payload: {
   dayOfWeek: number;
   start: string;

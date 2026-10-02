@@ -37,6 +37,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Separator } from "@/components/ui/separator";
 import { motion } from "framer-motion";
 import { cn } from "@/lib/utils";
+import { applyBatchPicks } from "@/lib/batch-picks";
 import { compactErrorText } from "@/lib/compact-error";
 import { fetchAssignments, fetchDashboard, fetchHistory, fetchSyncLogs, fetchAlaNotes, fetchTimetable, qk } from "./api";
 import { WeeklyDigestDialog } from "./digest-dialog";
@@ -444,12 +445,15 @@ function NextUpStrip({
 }) {
   const now = useNow();
   /* Next class TODAY from the synced routine — shares the timetable query
-     cache with the week plan + timetable cards, so no extra request. */
-  const { data: slotRows } = useQuery({ queryKey: qk.timetable, queryFn: fetchTimetable });
+     cache with the week plan + timetable cards, so no extra request. The
+     batch-pick math (same-batch collapse + parallel picks) matches the
+     week plan exactly, so the chip and the plan can never disagree. */
+  const { data: ttRows } = useQuery({ queryKey: qk.timetable, queryFn: fetchTimetable });
   const nowDay = new Date(now).getDay();
   const nowMin = new Date(now).getHours() * 60 + new Date(now).getMinutes();
   const classInfo = useMemo(() => {
-    const today = (slotRows ?? []).filter((s) => s.dayOfWeek === nowDay);
+    const attending = applyBatchPicks(ttRows?.slots ?? [], ttRows?.picks ?? {}).attending;
+    const today = attending.filter((s) => s.dayOfWeek === nowDay);
     const left = today
       .filter((s) => s.endMin > nowMin)
       .sort((a, b) => a.startMin - b.startMin);
@@ -459,7 +463,7 @@ function NextUpStrip({
       ongoing: next !== null && next.startMin <= nowMin,
       allDone: next === null && today.length > 0,
     };
-  }, [slotRows, nowDay, nowMin]);
+  }, [ttRows, nowDay, nowMin]);
   const upcoming = items
     .filter((r) => r.status === "ACTIVE" && r.type !== "ATTENDANCE_WARNING")
     .sort((a, b) => new Date(a.dueAt).getTime() - new Date(b.dueAt).getTime());
