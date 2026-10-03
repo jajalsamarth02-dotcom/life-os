@@ -2795,3 +2795,24 @@ Unresolved issues / risks & next-phase priorities:
 3. Feature residuals: dashboard strip >60 humanize case live-unverified (format pinned); SMS bubble raw ASCII deliberate; aria-live=polite on the banner announces per-minute badge text changes during class — deliberate (live region), revisit only if noisy.
 4. QA notes carried: aria-labels are STATE-DEPENDENT; header chip is a span not a button; dashboard violet jump button intentionally tone-neutral; progressbar needs label filtering; old-format tests → exit code; tsc scoped to src/.
 5. Keeper cron 430680 alive; worklog protocol unchanged.
+
+---
+Task ID: 79
+Agent: Super Z (dev cron 430711)
+Task: Round 79 — classProgress climb verification COMPLETE (2→13%, rate exact) + symmetric "wrapping up" on the row + row-bar gradient coherence.
+
+Work Log:
+1. STATUS: no parallel entries above 78. RSS AT START: 1986MB (GC relief — back under the 2.0GB line that r78 ended over; lean round declared anyway, 2 loads, single file). Clock 11:15 IST, 45 min into RWM.
+2. LIVE QA — CLIMB VERIFICATION COMPLETE: T3 = 13% at 11:15:34 vs T2 = 2% at 11:02:25 → +11 points / 13.2 min = 0.85%/min actual vs 0.83%/min predicted (120-min class). Both class bars (banner + row) report the SAME aria-valuenow (13) — no drift between surfaces. Screenshot /tmp/qa-r79-progress.png.
+3. FEATURE — symmetric "wrapping up" on the today-row ongoing badge: last JUST_ENDED_WINDOW_MIN (≤15 min left) flips the emerald "now" badge to amber "wrapping up" (CircleDot keeps pulsing), matching the r78 banner badge flip. The class lifecycle now speaks ONE symmetric language across row + banner: imminent(≤10 to start) → now → wrapping up(≤15 to end) → just ended(≤15 after end) → done. All five states amber-or-emerald by the same honesty rules.
+4. STYLE — row progress bar fill upgraded flat bg-emerald-500/60 → the banner's bg-gradient-to-r from-emerald-500/45 to-emerald-500 (r74 language): both bars now brighten toward "full" identically. Live-verified: 2/2 bars with gradient fills at 11:16 IST.
+5. TESTS: no new pure function (renderer ternary over pinned JUST_ENDED_WINDOW_MIN; gradient is CSS). ALL 20 test files pass by EXIT CODE. tsc src/ ZERO errors.
+6. BROWSER QA (load 2, 11:16 IST): gradientFills 2/2, "now" badge present + emerald (wrapping-up correctly OFF at 44 min left), console+errors cleared → reload → ZERO fresh errors. Screenshot /tmp/qa-r79-rowbar.png. End state PRISTINE: notify untouched, no sync clicks, ZERO sends ever.
+7. RSS AFTER ROUND: 1979MB (−7 from 1986 — net-negative round as mandated after r78 crossed the line).
+
+Unresolved issues / risks & next-phase priorities:
+1. ⚠️⚠️ MEMORY: see measured value above (r78 ended 2011 — over the line; GC pulled it back to 1986 by this round's start). Keeper-side restart proposal STILL UNAPPROVED. Discipline: net-negative pattern whenever start ≥2.0GB, ≤3 loads otherwise.
+2. TIME WINDOW — next rounds: 14:00 +08 (11:30 IST) → mid-class calm; 14:15 +08 (11:45 IST) → FIRST LIVE "wrapping up" observation (row badge amber + banner badge amber "15m left") — screenshot both; 14:30 +08 (12:00 IST) → class ends → just-ended badge live on rows AND week-grid chips; 14:45 +08 → post-sync honest QA (the 15-min auto-sync should record RWM — attendance counts may move 2/4→3/5 IF the student attended; display-only, no clicks, never assume attendance changed without data).
+3. Feature residuals: dashboard strip >60 humanize case live-unverified; SMS bubble raw ASCII deliberate; the five-state lifecycle (imminent/now/wrapping up/just ended/done) is now fully live-verified except wrapping-up + just-ended (both land today 11:45–12:15 IST).
+4. QA notes carried: aria-labels state-dependent; header chip is a span; progressbar needs aria-label filtering; old-format tests → exit code; tsc scoped to src/.
+5. Keeper cron 430680 alive; worklog protocol unchanged.

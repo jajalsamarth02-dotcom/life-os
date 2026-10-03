@@ -976,7 +976,7 @@ export function TimetableCard({
                             aria-label={`Class progress — ${Math.round(prog)}% through`}
                           >
                             <div
-                              className="h-full rounded-full bg-emerald-500/60 transition-[width] duration-1000 ease-linear"
+                              className="h-full rounded-full bg-gradient-to-r from-emerald-500/45 to-emerald-500 transition-[width] duration-1000 ease-linear"
                               style={{ width: `${prog}%` }}
                             />
                           </div>
@@ -992,9 +992,20 @@ export function TimetableCard({
                         )}
                       </div>
                       {st.key === "ongoing" ? (
-                        <Badge variant="outline" className="shrink-0 border-emerald-500/40 text-emerald-700 dark:text-emerald-400">
-                          <CircleDot className="size-3 animate-pulse" aria-hidden="true" /> now
-                        </Badge>
+                        /* r79: symmetric urgency on the row — the last
+                           JUST_ENDED_WINDOW_MIN reads amber "wrapping up",
+                           matching the r78 banner badge flip (starts-in ≤10
+                           imminent / ends-in ≤15 wrapping up — one language,
+                           both ends). */
+                        s.endMin - nowMin <= JUST_ENDED_WINDOW_MIN ? (
+                          <Badge variant="outline" className="shrink-0 border-amber-500/40 text-amber-700 dark:text-amber-400">
+                            <CircleDot className="size-3 animate-pulse" aria-hidden="true" /> wrapping up
+                          </Badge>
+                        ) : (
+                          <Badge variant="outline" className="shrink-0 border-emerald-500/40 text-emerald-700 dark:text-emerald-400">
+                            <CircleDot className="size-3 animate-pulse" aria-hidden="true" /> now
+                          </Badge>
+                        )
                       ) : isNext && st.label ? (
                         <Badge variant="outline" className="shrink-0 border-amber-500/40 text-amber-700 dark:text-amber-400">
                           <Clock className="size-3" aria-hidden="true" /> {st.label}
