@@ -2687,3 +2687,25 @@ Unresolved issues / risks & next-phase priorities:
 3. Feature residuals: drawer retry-story data-hidden (namespace split — revisit only on future data overlap); SMS bubble keeps raw ASCII (deliberate, do not humanize there).
 4. QA notes carried: Radix tabs need snapshot+click-by-ref; MultiEdit partial-apply → re-READ; enabled:false useQuery needs explicit generic; old-format test scripts → count by exit code.
 5. Keeper cron 430680 alive; worklog protocol unchanged.
+
+---
+Task ID: 74
+Agent: Super Z (dev cron 430711)
+Task: Round 74 — net-negative in-class readiness prep (timetable "Happening now" banner upgrade).
+
+Work Log:
+1. STATUS: no parallel entries above 73. RSS AT START: 2038MB — over 2.0GB → r72 net-negative pattern declared: single file (timetable-card.tsx), 2 page loads, everything else same-page evals. Clock: 10:00 IST, RWM class at 11:00 (59 min out) — NOT in class; banner live-QA deliberately deferred to the 13:30+08 round.
+2. FEATURE — "Happening now" banner progress fraction made VISIBLE: the classProgress bar was aria-only (aria-valuenow, no paint of the number); now a flex row = gradient bar + a tabular "N%" caption on the right. A glance answers "how far in am I?" with zero clock math. Bar fill upgraded flat emerald-500/60 → gradient from-emerald-500/45 → to-emerald-500 (motion toward "full" reads as brighter).
+3. FEATURE/LANGUAGE — humanizeMins (r73) now reaches the timetable: slotStatus labels ("ends in 1h 5m" / "starts in 1h 5m", was raw "65 min") and the banner's left-badge ("1h left", was "60 min left"). ALL countdown surfaces (header chip, today-card chip, timetable rows+banner) now speak ONE humanized language — the cohesion contract holds app-wide.
+4. STYLE (mandatory): gradient progress fill + visible % caption (above); consistent with the emerald banner family; no layout shift (badge width is stable under tabular-nums for <60, "1h"/"2h" cases measured).
+5. TESTS: no new pure function (classProgress unchanged — already pinned in test-today-r65; humanizeMins pinned r73; slotStatus is a private renderer). Regression: ALL 19 test files pass by exit code; r72 45/45 + r73 22/22 spot-verified. tsc src/ ZERO errors.
+6. BROWSER QA (2 loads, LIVE, honest scope): at 10:01 IST every live countdown is <60 min → humanize output is IDENTICAL text for today's data ("starts in 59 min" renders, no crash) and the banner is correctly ABSENT (class not started — honest null path). The >60/humanized-difference + % caption + gradient bar become LIVE-visible only in-class: 13:30+08 round MUST screenshot the banner (badge will read "1h left" — the first >60 humanize case observable live).
+7. End state PRISTINE: notify path untouched, no sync clicks, display-only language intact. ZERO sends ever.
+8. RSS AFTER ROUND: 1920MB (−118 from 2038 — BIGGEST net-negative round yet; 2-load discipline + dev GC). Back under 2.0GB with ~280MB headroom to OOM.
+
+Unresolved issues / risks & next-phase priorities:
+1. ⚠️⚠️ MEMORY: 1920MB — net-negative ratchet working (r69 1989 → r71 1986 → r72 1963→…→r74 1920). Keeper-side restart proposal STILL UNAPPROVED — keep discipline instead: ≤3 loads/round while >1.8GB, net-negative round whenever start ≥2.0GB.
+2. TIME WINDOW — IN-CLASS QA (the main event): 13:30 +08 = 11:00 IST = RWM class start. PRIORITY ORDER for that round: (a) screenshot the "Happening now" banner WITH progress bar+% caption+humanized badge live; (b) header + today-card chips flip ongoing-amber ~11:00, imminent-amber ~10:50 (13:50+08 round catches the imminent flip live); (c) classProgress % should climb ~1.4%/min for a 72-min class — verify aria-valuenow moves between two evals a few minutes apart; (d) milestone window runs to 13:00 IST (15:30+08) — celebration honest QA if attended.
+3. Feature residuals: drawer retry-story data-hidden (namespace split); SMS bubble raw ASCII deliberate.
+4. QA notes carried: Radix tabs snapshot+click-by-ref; MultiEdit partial-apply → re-READ; enabled:false generic; old-format tests → exit code.
+5. Keeper cron 430680 alive; worklog protocol unchanged.

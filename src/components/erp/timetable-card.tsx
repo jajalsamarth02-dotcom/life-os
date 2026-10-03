@@ -45,7 +45,7 @@ import { cn } from "@/lib/utils";
 import { downloadTimetableIcs } from "@/lib/ics";
 import { applyBatchPicks, parallelCells } from "@/lib/batch-picks";
 import { createSlot, deleteSlot, fetchTimetable, setBatchPick, qk, ApiError, type SlotConflict } from "./api";
-import { istNow, useNow } from "./shared";
+import { humanizeMins, istNow, useNow } from "./shared";
 import type { AppMode, AttendanceView, SubjectView, TimetableSlotRow } from "./types";
 
 const DAY_NAMES = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
@@ -73,7 +73,9 @@ function hhmm(min: number): string {
   return `${String(Math.floor(min / 60)).padStart(2, "0")}:${String(min % 60).padStart(2, "0")}`;
 }
 
-/** Live status label for a slot relative to now. */
+/** Live status label for a slot relative to now — countdowns humanized
+ *  (r74): "ends in 1h 5m", not "ends in 65 min" — same language the header
+ *  and today-card chips speak since r73. */
 function slotStatus(
   slot: TimetableSlotRow,
   nowDay: number,
@@ -81,10 +83,10 @@ function slotStatus(
 ): { key: "ongoing" | "upcoming" | "done" | "other"; label?: string } {
   if (slot.dayOfWeek !== nowDay) return { key: "other" };
   if (nowMin >= slot.startMin && nowMin < slot.endMin) {
-    return { key: "ongoing", label: `ends in ${slot.endMin - nowMin} min` };
+    return { key: "ongoing", label: `ends in ${humanizeMins(slot.endMin - nowMin)}` };
   }
   if (nowMin < slot.startMin) {
-    return { key: "upcoming", label: `starts in ${slot.startMin - nowMin} min` };
+    return { key: "upcoming", label: `starts in ${humanizeMins(slot.startMin - nowMin)}` };
   }
   return { key: "done" };
 }
@@ -811,24 +813,35 @@ export function TimetableCard({
                   {(() => {
                     const prog = classProgress(ongoing.startMin, ongoing.endMin, nowMin);
                     return prog !== null ? (
-                      <div
-                        className="mt-1.5 h-1 w-full overflow-hidden rounded-full bg-emerald-500/15"
-                        role="progressbar"
-                        aria-valuemin={0}
-                        aria-valuemax={100}
-                        aria-valuenow={Math.round(prog)}
-                        aria-label={`Class progress — ${Math.round(prog)}% through`}
-                      >
+                      <div className="mt-1.5 flex items-center gap-2">
                         <div
-                          className="h-full rounded-full bg-emerald-500/60 transition-[width] duration-1000 ease-linear"
-                          style={{ width: `${prog}%` }}
-                        />
+                          className="h-1 w-full overflow-hidden rounded-full bg-emerald-500/15"
+                          role="progressbar"
+                          aria-valuemin={0}
+                          aria-valuemax={100}
+                          aria-valuenow={Math.round(prog)}
+                          aria-label={`Class progress — ${Math.round(prog)}% through`}
+                        >
+                          <div
+                            className="h-full rounded-full bg-gradient-to-r from-emerald-500/45 to-emerald-500 transition-[width] duration-1000 ease-linear"
+                            style={{ width: `${prog}%` }}
+                          />
+                        </div>
+                        {/* r74: the fraction is now VISIBLE, not just an aria
+                            value — a glance answers "how far in am I?" without
+                            doing clock math in the head. */}
+                        <span
+                          className="shrink-0 text-[10px] font-semibold tabular-nums text-emerald-600/90 dark:text-emerald-400/90"
+                          aria-hidden="true"
+                        >
+                          {Math.round(prog)}%
+                        </span>
                       </div>
                     ) : null;
                   })()}
                 </div>
                 <Badge className="shrink-0 border-emerald-500/40 bg-emerald-500/15 text-emerald-700 dark:text-emerald-400" variant="outline">
-                  {ongoing.endMin - nowMin} min left
+                  {humanizeMins(ongoing.endMin - nowMin)} left
                 </Badge>
               </div>
             )}
