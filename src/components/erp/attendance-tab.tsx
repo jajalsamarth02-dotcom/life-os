@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { motion } from "framer-motion";
 import { GraduationCap, Inbox, PanelRightOpen, Target, TrendingUp, Users, XCircle, Zap } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
@@ -10,7 +10,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Slider } from "@/components/ui/slider";
 import { cn } from "@/lib/utils";
 import { attendanceStatus, classesToReachTarget } from "@/lib/attendance";
-import { fetchAssignments, fetchAttendance, fetchHistory, qk } from "./api";
+import { fetchAssignments, fetchAttendance, fetchHistory, qk, type SubjectFocusHandoff } from "./api";
 import { HistoryHeatmap } from "./history-heatmap";
 import { RecoveryPlan } from "./recovery-plan";
 import { SubjectDrawer } from "./subject-drawer";
@@ -335,6 +335,23 @@ function SubjectCard({
 
 export function AttendanceTab({ onOpenSettings }: { onOpenSettings: () => void }) {
   const [selectedCode, setSelectedCode] = useState<string | null>(null);
+  /* Command palette → open a subject's detail drawer via the qk.subjectFocus
+     handoff (READ-ONLY join, enabled:false never fetches). Unlike the old
+     window CustomEvent this survives tab unmounts: the palette writes the
+     handoff even before this tab mounts, and the effect consumes it on
+     arrival — no more dropped "open subject" commands. */
+  const subjectFocus = useQuery<SubjectFocusHandoff | null>({
+    queryKey: qk.subjectFocus,
+    queryFn: () => null,
+    enabled: false,
+  });
+  const queryClient = useQueryClient();
+  useEffect(() => {
+    const handoff = subjectFocus.data;
+    if (!handoff) return;
+    setSelectedCode(handoff.code);
+    queryClient.setQueryData(qk.subjectFocus, null);
+  }, [subjectFocus.data, queryClient]);
   // Day focused jointly by the trend chart and the history heatmap.
   const [focusDay, setFocusDay] = useState<string | null>(null);
   const { data, isPending, isError, error } = useQuery({
@@ -361,17 +378,8 @@ export function AttendanceTab({ onOpenSettings }: { onOpenSettings: () => void }
     [alaQ.data, nowMs]
   );
 
-  /* Command palette → open a subject's detail drawer. The code is stored and
-     resolved against fetched data, so the drawer also opens when the event
-     arrives before the query has finished. */
-  useEffect(() => {
-    const handler = (e: Event) => {
-      const code = (e as CustomEvent<string>).detail;
-      if (typeof code === "string") setSelectedCode(code);
-    };
-    window.addEventListener("erp:open-subject", handler);
-    return () => window.removeEventListener("erp:open-subject", handler);
-  }, []);
+  /* (The old erp:open-subject CustomEvent listener was replaced by the
+     qk.subjectFocus handoff above — the palette is its only sender.) */
 
   /* Command palette → deep-link to the overall what-if simulator: scroll it
      into view and flash the card ring so the target is obvious. */

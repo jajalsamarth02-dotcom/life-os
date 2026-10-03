@@ -6,6 +6,7 @@ import { format } from "date-fns";
 import { toast } from "sonner";
 import {
   Activity,
+  ArrowRight,
   CalendarDays,
   CalendarPlus,
   CheckCircle2,
@@ -24,6 +25,7 @@ import {
   Zap,
 } from "lucide-react";
 import { applyBatchPicks } from "@/lib/batch-picks";
+import { matchStoryCode, subjectStories } from "@/lib/results-summary";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -45,10 +47,10 @@ import {
 import { Slider } from "@/components/ui/slider";
 import { cn } from "@/lib/utils";
 import { classesCanSkip, classesToReachTarget } from "@/lib/attendance";
-import { ApiError, createSlot, fetchAssignments, fetchDashboard, fetchHistory, fetchTimetable, putSubjectTarget, qk, type SlotConflict } from "./api";
+import { ApiError, createSlot, fetchAssignments, fetchDashboard, fetchHistory, fetchResults, fetchTimetable, putSubjectTarget, qk, type RetryFocusHandoff, type SlotConflict } from "./api";
 import { AnimatedNumber } from "./trend-chart";
 import { CustomTargetChip, erpAssignmentUrl, fmtDT, istNow, MiniBar, SkipPips, statusColors, StatusChip, useNow, ago } from "./shared";
-import type { AssignmentRow, AttendanceStatus, HistoryResponse, SubjectView, TimetableSlotRow } from "./types";
+import type { AssignmentRow, AttendanceStatus, HistoryResponse, ResultsResponse, SubjectView, TimetableSlotRow } from "./types";
 
 const DAY_SHORT = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
 const TARGET_PRESETS = [60, 65, 70, 75, 80, 85];
@@ -882,6 +884,24 @@ export function SubjectDrawer({
     () => new Set(applyBatchPicks(timetable.data?.slots ?? [], timetable.data?.picks ?? {}).excluded.map((s) => s.id)),
     [timetable.data]
   );
+  /* Retry-story awareness — READ-ONLY cache join (enabled:false never
+     fetches): the dashboard's academic-record card already loaded the exam
+     results, so this just asks "does THIS subject have a roll-up retry
+     story?". Drifted/unknown codes gate to null → no affordance, same
+     honesty contract as everywhere else. */
+  const resultsQ = useQuery<ResultsResponse | null>({
+    queryKey: qk.results,
+    queryFn: () => fetchResults(),
+    enabled: false,
+  });
+  const retryStory = useMemo(
+    () =>
+      subject && resultsQ.data
+        ? matchStoryCode(subject.code, subjectStories(resultsQ.data.exams))
+        : null,
+    [resultsQ.data, subject]
+  );
+  const queryClient = useQueryClient();
 
   if (!subject) return null;
   const c = statusColors(subject.status);
@@ -1002,6 +1022,42 @@ export function SubjectDrawer({
               </p>
             </div>
           </div>
+
+          {/* Retry story — this subject's published grade timeline lives in
+              the academic-record card. Only shown when the gate finds the
+              story (exact code match); the jump closes the drawer, then
+              hands off via the shared cache so the card opens + spotlights. */}
+          {retryStory && (
+            <button
+              type="button"
+              onClick={() => {
+                onOpenChange(false);
+                window.setTimeout(() => {
+                  queryClient.setQueryData<RetryFocusHandoff>(qk.retryFocus, {
+                    code: retryStory.code,
+                    nonce: Date.now(),
+                  });
+                }, 120);
+              }}
+              aria-label={`Open the retry story for ${subject.code} in the academic record card — grade timeline, oldest to latest`}
+              className="group flex w-full items-center gap-2.5 rounded-lg border border-violet-500/30 bg-violet-500/5 px-3 py-2 text-left transition-colors hover:bg-violet-500/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-violet-500/40"
+            >
+              <History className="size-3.5 shrink-0 text-violet-600 dark:text-violet-400" aria-hidden="true" />
+              <span className="min-w-0 flex-1 text-xs leading-snug">
+                <span className="font-medium text-violet-700 dark:text-violet-300">Retry story</span>
+                <span className="text-muted-foreground">
+                  {" "}
+                  — {retryStory.attempts.length} attempt{retryStory.attempts.length === 1 ? "" : "s"}, latest{" "}
+                  {retryStory.latestGrade ?? "—"}
+                  {retryStory.cleared ? " · cleared" : " · not cleared"}
+                </span>
+              </span>
+              <ArrowRight
+                className="size-3.5 shrink-0 text-violet-500 opacity-0 transition-opacity duration-150 group-hover:opacity-60 group-focus-visible:opacity-60"
+                aria-hidden="true"
+              />
+            </button>
+          )}
 
           <SubjectDeadlines
             items={myDeadlines}

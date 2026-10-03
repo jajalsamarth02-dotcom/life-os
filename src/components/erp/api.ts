@@ -86,6 +86,10 @@ export const qk = {
      {code, nonce} here and the results card consumes it on mount/effect —
      survives tab unmounts, unlike a window CustomEvent (no missed events). */
   retryFocus: ["retry-story-focus"] as const,
+  /* Same pattern for palette → subject-drawer deep-links: the palette writes
+     {code, nonce} and the attendance tab opens the drawer when it mounts —
+     no more dropped commands when the tab wasn't mounted yet. */
+  subjectFocus: ["subject-focus"] as const,
   erpStatus: ["erp-status"] as const,
   waStatus: ["wa-status"] as const,
   ntfyStatus: ["ntfy-status"] as const,
@@ -97,6 +101,14 @@ export interface RetryFocusHandoff {
   /** Subject code to spotlight — null = generic "open retry history". */
   code: string | null;
   /** Monotonic bump so repeat commands re-flash even with the same code. */
+  nonce: number;
+}
+
+/** Payload for the qk.subjectFocus handoff (command palette → attendance tab). */
+export interface SubjectFocusHandoff {
+  /** Tracked subject code whose detail drawer should open. */
+  code: string;
+  /** Monotonic bump so the same subject can be re-commanded. */
   nonce: number;
 }
 

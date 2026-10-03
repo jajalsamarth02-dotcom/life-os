@@ -2616,3 +2616,29 @@ Unresolved issues / risks & next-phase priorities:
 4. Feature residuals: today-card istParts → istNow dedup (cosmetic); palette retry group currently caps at 6 (subjectStories pre-sorts open-first — fine for 7 stories; revisit only if the list grows).
 5. QA notes carried: replacing listeners — when swapping ONE event off a shared useEffect, diff the WHOLE effect (this round nearly shipped without erp:copy-summary); useQuery with enabled:false needs an explicit TData generic or TS infers {}.
 6. Keeper cron 430680 alive; worklog protocol unchanged.
+
+---
+Task ID: 71
+Agent: Z.ai Code (main orchestrator)
+Task: subject-drawer retry-story affordance + erp:open-subject cross-tab handoff migration (+ namespace-split honesty discovery)
+
+Work Log (Round 71 — 3 Oct, 11:45–11:58 +08):
+- Parallel protocol: only my Task 70 present (worklog mtime 03:42Z, no newer src activity) → clean round. Server 200. RSS at round start: 1946MB (+26 inter-round ratchet; re-stated keeper proposal) → frugal round (4 src files, 0 new test files, ~14 page loads).
+
+Completed modifications / verified:
+1. DISCOVERY (liveness QA caught it before shipping a dead UI): tracked attendance subjects use SLUG codes ("COMPUTER-NETWORKS") while results/subjects use ERP codes ("BETCE12302") — live /api/results vs /api/dashboard name comparison found ZERO overlap (even normalized). So the drawer retry-story affordance (subject.code → matchStoryCode gate) is honestly HIDDEN for this student's current data: drawer only opens for tracked subjects, none of which have stories. KEPT the infra (correct + future-proof for any student whose tracked subject has a failed history), did NOT add a fuzzy name bridge (false positives = wrong subject's story = dishonest).
+2. FEATURE (drawer infra): SubjectDrawer gains a read-only qk.results join (enabled:false, zero fetch) + matchStoryCode gate → violet "Retry story" section (stats-grid row: History icon + "N attempts, latest X · cleared/not" + ArrowRight fade-in, r69 arrow language) → click closes the drawer then writes the qk.retryFocus handoff (120ms convention) → academic-record card opens stories + spotlights. Hooks placed ABOVE the drawer's `if (!subject) return null` early return (the file's own crash-warning comment).
+3. FEATURE (robustness): erp:open-subject CustomEvent → qk.subjectFocus {code, nonce} handoff (same pattern as r70's retryFocus; Task 70 handover item #3). Palette openSubject now writes the handoff after the 120ms tab switch; attendance-tab consumes it in an effect (read-only join) and opens the drawer. Latent cross-tab race FIXED: the old event was lost whenever the attendance tab wasn't mounted when the palette dispatched. Old event fully removed (rg-clean, only an explanatory comment remains).
+4. STYLE (mandatory, visible): pending-row story History buttons now rest VIOLET (text-violet-500/70, dark /40) instead of muted — the jump affordance is discoverable before hover, still amber-row-compatible; spotlit story row's code chip turns violet + font-semibold while spotlit (cohesive with the r70 left-edge/bg). Palette retry-story cap 6 → 8 (7 live stories — the 7th was silently hidden).
+5. TESTS — no new pure function (gates reuse matchStoryCode, r70 file owns the contract); regression: r70 14/14, r65 41/41, batch-picks 39/39, r68 8/8, milestones 24/24, results-features 24/24, r58 27/27 → baseline 358 holds.
+6. tsc ×2: src/ ZERO errors (one intermediate: MultiEdit partial-apply on subject-drawer imports — the api import line differs from memory (fetchDashboard); re-diffed from file truth and re-applied. LESSON: after a failed MultiEdit, re-READ the file before retrying — never assume which edits landed).
+7. BROWSER QA ALL GREEN (LIVE): drawer regression (COMPUTER-NETWORKS opens cleanly, statsGrid=4, retryStoryShown=false, gateHonest=true); CROSS-TAB subject: reminders tab → palette "COMPUTER-NETWORKS" → auto-landed attendance tab + drawer open; retry spotlight re-verified on dashboard (BETCE12302 spotlit, codeViolet=true, flash=true); palette story group unchanged. Screenshots: /tmp/qa-r71-spotlight.png (light: violet edge + violet code chip + flash + accented exam row), /tmp/qa-r71-dark.png (dark spotlight elegant), /tmp/qa-r71-mobile.png (docW=390 hScroll=false, violet-at-rest story buttons visible). Console fresh-clear + reload → ZERO errors.
+8. End state PRISTINE: newest notification still 2026-10-02T22:37:41Z (06:07 IST, pre-r70) — zero sends, zero notify-path touches.
+9. RSS AFTER ROUND: 1986MB (+40 from 1946 start — net-positive round; the drawer/palette query joins are cheap but the tab-switch QA reloads cost).
+
+Unresolved issues / risks & next-phase priorities:
+1. ⚠️⚠️ MEMORY — 1986MB, ~130MB above the 1.8GB attention line, ratchet resumed (+26 then +40). STANDING USER PROPOSAL (keeper-side restart > 1.8GB, double-fork subshell) still UNAPPROVED — not added silently. If next round starts ≥ 2.0GB, consider a deliberately net-negative round (single-file, minimal page loads).
+2. Milestone watch: RWM 11:00–13:00 IST TODAY — round 71 ended 09:15 IST, class starts in ~105 min. If a round fires 11:00–13:00 IST (13:30–15:30 +08): FIRST live visual QA of the ongoing progress bar (classProgress). After 13:00 IST: milestone celebration honest QA if attended.
+3. Feature residuals: today-card istParts → istNow dedup (cosmetic); drawer retry-story button is data-hidden for THIS student (namespace split, item 1) — revisit only if a future sync introduces code/name overlap; palette subject-commands also benefit from subjectFocus (no change needed).
+4. QA notes carried: (a) controlled Radix tabs ignore synthetic .click() from eval — use snapshot + agent-browser click by ref; (b) MultiEdit failures may PARTIALLY apply — re-read the file, don't guess; (c) enabled:false useQuery needs explicit TData generic.
+5. Keeper cron 430680 alive; worklog protocol unchanged.

@@ -43,7 +43,7 @@ import {
 } from "@/components/ui/command";
 import { cn } from "@/lib/utils";
 import { cycleTextSize, TEXT_SIZES } from "@/lib/text-size";
-import { fetchAlaNotes, fetchAssignments, fetchResults, postDemoEvolve, postSync, putSelectedSemester, qk, type RetryFocusHandoff } from "./api";
+import { fetchAlaNotes, fetchAssignments, fetchResults, postDemoEvolve, postSync, putSelectedSemester, qk, type RetryFocusHandoff, type SubjectFocusHandoff } from "./api";
 import { subjectStories } from "@/lib/results-summary";
 import { ERP_BASE } from "./shared";
 import { ALA_PRIORITY_META } from "./reminders-tab";
@@ -96,11 +96,17 @@ export function CommandPalette({
     window.setTimeout(fn, 60);
   };
 
+  /* Subject-drawer deep-link: navigate to the attendance tab, then write the
+     qk.subjectFocus handoff (same 120ms convention; the handoff survives the
+     tab mount either way — the drawer opens on arrival). */
   const openSubject = (code: string) => {
     run(() => {
       onNavigate("attendance");
       window.setTimeout(() => {
-        window.dispatchEvent(new CustomEvent("erp:open-subject", { detail: code }));
+        queryClient.setQueryData<SubjectFocusHandoff>(qk.subjectFocus, {
+          code,
+          nonce: Date.now(),
+        });
       }, 120);
     });
   };
@@ -159,7 +165,7 @@ export function CommandPalette({
     enabled: false,
   });
   const retryStories = React.useMemo(
-    () => (resultsQ.data ? subjectStories(resultsQ.data.exams).slice(0, 6) : []),
+    () => (resultsQ.data ? subjectStories(resultsQ.data.exams).slice(0, 8) : []),
     [resultsQ.data]
   );
   /* Local note overlay — powers the "Your flagged ALAs" palette group. */

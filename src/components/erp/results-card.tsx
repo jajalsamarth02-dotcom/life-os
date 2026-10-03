@@ -367,7 +367,7 @@ function PendingItem({
           onClick={() => onOpenStory(pending.code)}
           aria-label={`Open the retry story for ${pending.code} in the retry history below`}
           title="Open this subject's full retry story in Retry history"
-          className="mt-px shrink-0 rounded p-1 text-muted-foreground transition-colors hover:bg-violet-500/10 hover:text-violet-600 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-violet-500/40 dark:hover:text-violet-400"
+          className="mt-px shrink-0 rounded p-1 text-violet-500/70 transition-colors hover:bg-violet-500/10 hover:text-violet-600 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-violet-500/40 dark:text-violet-400/70 dark:hover:text-violet-400"
         >
           <History className="size-3.5" aria-hidden="true" />
         </button>
@@ -443,7 +443,14 @@ function StoryRow({
         flash && "ring-2 ring-violet-500/40"
       )}
     >
-      <span className="font-mono text-[10px] text-muted-foreground">{story.code}</span>
+      <span
+        className={cn(
+          "font-mono text-[10px]",
+          spotlit ? "font-semibold text-violet-600 dark:text-violet-400" : "text-muted-foreground"
+        )}
+      >
+        {story.code}
+      </span>
       <span className="min-w-0 flex-1 truncate">{story.name}</span>
       <span className="flex shrink-0 items-center gap-0.5" aria-label="grade timeline, oldest to latest">
         {story.attempts.map((a, i) => (
