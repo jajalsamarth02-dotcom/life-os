@@ -74,6 +74,51 @@ function colorForCode(code: string, subjects: SubjectView[]): string {
   return CHIP_COLORS[(idx < 0 ? 0 : idx) % CHIP_COLORS.length];
 }
 
+/* ------------------------------------------------------------------ */
+/* Week aggregate (r98)                                                */
+/* ------------------------------------------------------------------ */
+
+export interface WeekProgress {
+  done: number;
+  total: number;
+  left: number;
+  pct: number;
+  allDone: boolean;
+}
+
+/** r98: the Full-week grid's aggregate — "how much of THIS week is over?".
+ *  Deliberately the CALENDAR week (Monday-first — WEEK_ORDER's frame, the
+ *  same frame week-plan-card's audited math speaks) and NOT the rolling
+ *  +7 wrap the "next up this week" family uses: the r95 audit fixed that
+ *  these are two different honest questions ("left in this calendar week"
+ *  vs "when is the next one from NOW") and must never be unified. A slot
+ *  counts done when its day is earlier in the calendar week, or it is
+ *  today and has already ended (endMin <= nowMin, the same inclusive
+ *  boundary todayLiveClass speaks). The attending set is the caller's
+ *  honesty duty (pass batch.attending — dimmed alternatives and
+ *  same-batch duplicates must never count). Pure — pinned in tests (r98). */
+export function weekProgress(
+  slots: TimetableSlotRow[] | null | undefined,
+  now: number
+): WeekProgress | null {
+  if (!slots || slots.length === 0) return null;
+  const { day: today, min: nowMin } = istNow(now);
+  const todayMon = (today + 6) % 7; // Mon=0 … Sun=6 (the grid's frame)
+  let done = 0;
+  for (const s of slots) {
+    const sMon = (s.dayOfWeek + 6) % 7;
+    if (sMon < todayMon || (sMon === todayMon && s.endMin <= nowMin)) done += 1;
+  }
+  const total = slots.length;
+  return {
+    done,
+    total,
+    left: total - done,
+    pct: Math.round((done / total) * 100),
+    allDone: done === total,
+  };
+}
+
 /** The subject drawer deep-link only arms for codes the attendance data
  *  actually knows — a routine slot whose subject has no synced attendance
  *  (an elective before its first class, or a parse-drift code) stays plain
@@ -862,6 +907,11 @@ export function TimetableCard({
   const weekNextId = weekNext?.id ?? null;
   const weekNextD = weekNext ? daysAheadThisWeek(weekNext.dayOfWeek, now) : null;
   const weekNextLabel = weekNextD !== null ? daysAheadLabel(weekNextD) : null;
+  /* r98: the grid's own aggregate over the ATTENDING week — the calendar
+     (Mon–Sun) frame the grid below renders, fed batch.attending so dimmed
+     alternatives/duplicates never count. Distinct from the rolling
+     weekNext above by design (r95 audit: two honest questions). */
+  const weekProg = useMemo(() => weekProgress(batch.attending, now), [batch, now]);
   const ongoing = todaySlots.find((s) => nowMin >= s.startMin && nowMin < s.endMin);
   const next = todaySlots.find((s) => s.startMin > nowMin);
   /* Milestone stakes: rendered on the next/ongoing row only when attending
@@ -1243,6 +1293,64 @@ export function TimetableCard({
                   transition={{ duration: 0.25 }}
                   className="overflow-hidden"
                 >
+                  {weekProg && (
+                    <div
+                      className={cn(
+                        "mt-2 rounded-xl border px-3 py-2 transition-colors",
+                        weekProg.allDone
+                          ? "border-emerald-500/30 bg-emerald-500/[0.06]"
+                          : "border-border/50 bg-muted/20"
+                      )}
+                      title="Calendar week (Monday–Sunday) over the classes you attend — the same frame the grid below shows"
+                    >
+                      <div className="flex items-center gap-2 text-[11px]">
+                        <CalendarDays className="size-3 shrink-0 text-emerald-600 dark:text-emerald-400" aria-hidden="true" />
+                        <span className="font-semibold">This week</span>
+                        {ongoing && (
+                          <span className="relative flex size-1.5" aria-hidden="true">
+                            <span
+                              className="absolute inline-flex h-full w-full animate-ping rounded-full bg-emerald-500 opacity-60 motion-reduce:hidden"
+                              style={{ animationDuration: "2.2s" }}
+                            />
+                            <span className="relative inline-flex size-1.5 rounded-full bg-emerald-500" />
+                          </span>
+                        )}
+                        <span className="tabular-nums text-muted-foreground">
+                          {weekProg.done} of {weekProg.total} done{weekProg.left > 0 ? ` · ${weekProg.left} left` : ""}
+                        </span>
+                        {weekProg.allDone && (
+                          <span
+                            className="flex items-center gap-1 font-medium text-emerald-700 dark:text-emerald-400"
+                            title="Every class on this week's schedule has ended"
+                          >
+                            <Check className="size-3 shrink-0" aria-hidden="true" /> week complete
+                          </span>
+                        )}
+                        <span
+                          className="ml-auto shrink-0 font-semibold tabular-nums text-emerald-700/90 dark:text-emerald-400/90"
+                          aria-hidden="true"
+                        >
+                          {weekProg.pct}%
+                        </span>
+                      </div>
+                      <div
+                        className="mt-1.5 h-1 w-full overflow-hidden rounded-full bg-emerald-500/15"
+                        role="progressbar"
+                        aria-valuemin={0}
+                        aria-valuemax={100}
+                        aria-valuenow={weekProg.pct}
+                        aria-label={`Week progress — ${weekProg.done} of ${weekProg.total} classes done`}
+                      >
+                        <div
+                          className={cn(
+                            "h-full rounded-full transition-[width] duration-1000 ease-linear",
+                            weekProg.pct > 0 && "bg-gradient-to-r from-emerald-500/45 to-emerald-500"
+                          )}
+                          style={{ width: `${weekProg.pct}%` }}
+                        />
+                      </div>
+                    </div>
+                  )}
                   <div className="mt-2 grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-6">
                     {WEEK_ORDER.map((d) => {
                       const daySlots = slots.filter((s) => s.dayOfWeek === d);
