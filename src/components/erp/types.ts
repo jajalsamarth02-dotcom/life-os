@@ -206,6 +206,56 @@ export interface TimetableResponse {
   picks: Record<string, string>;
 }
 
+/** GET /api/results — published exam results (Final Results), TTL-cached. */
+export interface ResultsResponse {
+  /** false = no ERP connection configured. */
+  available: boolean;
+  fetchedAt: string | null;
+  /** true = served a cached snapshot (fetch failed or past TTL). */
+  stale: boolean;
+  exams: ErpResultExam[];
+  note?: string;
+}
+
+/** Mirror of the ERP connector's parsed subject grade row (client copy). */
+export interface ErpResultSubjectRow {
+  code: string;
+  name: string;
+  credit: number | null;
+  eseAbsent: boolean;
+  seeTheory: string | null;
+  seePractical: string | null;
+  cceMid: string | null;
+  cceInternal: string | null;
+  cceViva: string | null;
+  grade: string | null;
+  creditPoint: number | null;
+}
+
+/** Mirror of one published exam result page (client copy). */
+export interface ErpResultExam {
+  typeId: string;
+  label: string;
+  examKind: "REGULAR" | "REMEDIAL" | "UNKNOWN";
+  semester: number | null;
+  examSession: string | null;
+  examDateKey: string | null;
+  examDateLabel: string | null;
+  academicYear: string | null;
+  studentName: string | null;
+  enrollment: string | null;
+  seatNo: string | null;
+  subjects: ErpResultSubjectRow[];
+  backlogBySem: (number | null)[];
+  offeredCredit: number | null;
+  earnedCredit: number | null;
+  sgpa: number | null;
+  totalOfferedCredit: number | null;
+  totalEarnedCredit: number | null;
+  cgpa: number | null;
+  result: string | null;
+}
+
 /**
  * One ERP-synced ALA/assignment row (Reminder with externalId `erp:assign:*`),
  * joined with the resolved ERP course name for subject-wise grouping.

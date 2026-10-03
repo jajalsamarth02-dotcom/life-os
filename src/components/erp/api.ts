@@ -15,6 +15,7 @@ import type {
   HistoryResponse,
   Reminder,
   RemindersFilter,
+  ResultsResponse,
   SemestersResponse,
   SyncEventsResponse,
   SyncLogsResponse,
@@ -80,6 +81,7 @@ export const qk = {
   settings: ["settings"] as const,
   semesters: ["semesters"] as const,
   sync: ["sync"] as const,
+  results: ["results"] as const,
   erpStatus: ["erp-status"] as const,
   waStatus: ["wa-status"] as const,
   ntfyStatus: ["ntfy-status"] as const,
@@ -95,6 +97,14 @@ export const fetchAttendance = () => api<AttendanceResponse>("/api/attendance");
 export const fetchHistory = () => api<HistoryResponse>("/api/history");
 /** The weekly routine + the student's parallel-class picks (one shared cache). */
 export const fetchTimetable = () => api<TimetableResponse>("/api/timetable");
+
+/**
+ * Published exam results (Final Results). TTL-cached server-side; the first
+ * load after a cache miss walks the ERP read-only and can take a while —
+ * pass `refresh` to force a live walk (the card's refresh button).
+ */
+export const fetchResults = (refresh = false) =>
+  api<ResultsResponse>(`/api/results${refresh ? "?refresh=1" : ""}`);
 
 /**
  * Resolve (or clear with null) ONE parallel class window — the routine lists

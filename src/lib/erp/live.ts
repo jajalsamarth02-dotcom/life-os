@@ -1,5 +1,7 @@
 import {
   ErpAssignmentSnapshot,
+  ErpResultExam,
+  ErpResultIndexEntry,
   ErpRoutineSlot,
   ErpSnapshot,
   ErpSubjectSnapshot,
@@ -514,6 +516,208 @@ export function parseGmiuClassRoutine(
   });
 
   return { slots, unknownNames: [...unknownNames] };
+}
+
+/* ------------------------------------------------------------------ */
+/* Final Results (/student/result)                                     */
+/* ------------------------------------------------------------------ */
+
+const RESULT_PATH = "/student/result";
+
+const RESULT_MONTHS: Record<string, string> = {
+  january: "01", february: "02", march: "03", april: "04", may: "05", june: "06",
+  july: "07", august: "08", september: "09", october: "10", november: "11", december: "12",
+};
+
+/** All rows of table N as stripped cell-text arrays (th and td alike). */
+function resultTableRows(tableHtml: string): string[][] {
+  return (tableHtml.match(/<tr[\s\S]*?<\/tr>/gi) ?? []).map((r) =>
+    [...r.matchAll(/<t[dh][^>]*>([\s\S]*?)<\/t[dh]>/gi)].map((c) =>
+      c[1]
+        .replace(/<[^>]+>/g, " ")
+        .replace(/&nbsp;/gi, " ")
+        .replace(/\s+/g, " ")
+        .trim()
+    )
+  );
+}
+
+function resultNum(v: string | undefined): number | null {
+  if (v === undefined) return null;
+  const n = Number(v);
+  return Number.isFinite(n) ? n : null;
+}
+
+/** "-" (and blanks) mean "not applicable" in the ERP's grade cells. */
+function resultGrade(v: string | undefined): string | null {
+  if (!v) return null;
+  const t = v.trim().toUpperCase();
+  return t === "" || t === "-" ? null : t;
+}
+
+/** "May-2026" / "December 2024" → "2026-05"; null when unparseable. */
+function resultDateKey(raw: string): string | null {
+  const m = raw.trim().match(/^([A-Za-z]+)[\s\-]+(\d{4})$/);
+  if (!m) return null;
+  const mm = RESULT_MONTHS[m[1].toLowerCase()];
+  return mm ? `${m[2]}-${mm}` : null;
+}
+
+/**
+ * Parse the exam picker on /student/result (the only `name="type"` select).
+ * Returns null when the page doesn't match the expected shape (structure
+ * change / not the results page); [] when found but no exam is published.
+ */
+export function parseGmiuResultIndex(html: string): ErpResultIndexEntry[] | null {
+  const sel = (html.match(/<select[^>]*name="type"[\s\S]*?<\/select>/i) ?? [])[0];
+  if (!sel) return null;
+  const out: ErpResultIndexEntry[] = [];
+  for (const m of sel.matchAll(/<option\s+value="(\d+)"[^>]*>([\s\S]*?)<\/option>/gi)) {
+    const label = stripTags(m[2]).replace(/\s+/g, " ").trim();
+    if (label) out.push({ typeId: m[1], label });
+  }
+  return out;
+}
+
+/**
+ * Parse one exam result page (/student/result?type=N — verified structure:
+ * 8 fixed tables). Columns of the subject table are colspan-defined and
+ * always 11 cells: code | name | credit | ESE-Absent | SEE(T,P) | CCE(M,I,V)
+ * | grade | credit-point; the backlog table's 8 data cells map to Sem 1–8
+ * (the rowspan "Backlog" header owns an empty cell); the summary row is
+ * offered/earned credit + points, SGPA, career totals, CGPA, verdict.
+ * Returns null when the expected tables are missing (never invents data).
+ */
+export function parseGmiuResult(html: string, entry: ErpResultIndexEntry): ErpResultExam | null {
+  const tables = [...html.matchAll(/<table[\s\S]*?<\/table>/gi)].map((t) => t[0]);
+  if (tables.length < 6) return null;
+
+  const meta = resultTableRows(tables[0]);
+  const who = resultTableRows(tables[2]);
+  const subjRows = resultTableRows(tables[3]);
+  const backRows = resultTableRows(tables[4]);
+  const summRows = resultTableRows(tables[5]);
+  // identity + subject + summary tables must all be present and populated
+  if (meta.length < 2 || who.length < 2 || subjRows.length < 3 || backRows.length < 2 || summRows.length < 2) {
+    return null;
+  }
+
+  const label = entry.label;
+  const semMatch = label.match(/SEMESTER\s*-?\s*(\d+)/i);
+  const sessionMatch = label.match(/\b(WINTER|SUMMER|MONSOON|SPRING|FALL)[\s\-]*(\d{4})/i);
+  const examKind = /REMEDIAL/i.test(label) ? "REMEDIAL" : /REGULAR/i.test(label) ? "REGULAR" : "UNKNOWN";
+
+  const subjects: ErpResultExam["subjects"] = [];
+  // rows 0/1 are the two header rows; every data row is a fixed 11 cells
+  for (let i = 2; i < subjRows.length; i++) {
+    const c = subjRows[i];
+    if (c.length !== 11) continue;
+    if (!/^[A-Z]{2,6}[A-Z0-9]*$/.test(c[0])) continue; // not a course-code row
+    subjects.push({
+      code: c[0],
+      name: c[1],
+      credit: resultNum(c[2]),
+      eseAbsent: resultGrade(c[3]) !== null,
+      seeTheory: resultGrade(c[4]),
+      seePractical: resultGrade(c[5]),
+      cceMid: resultGrade(c[6]),
+      cceInternal: resultGrade(c[7]),
+      cceViva: resultGrade(c[8]),
+      grade: resultGrade(c[9]),
+      creditPoint: resultNum(c[10]),
+    });
+  }
+
+  // backlog row: the 8 data cells (row 1) map to Sem 1–8; "N/A" → null
+  const backlogBySem = backRows[1].slice(0, 8).map((v) => {
+    const t = v.trim().toUpperCase();
+    if (t === "" || t === "N/A") return null;
+    return resultNum(t);
+  });
+
+  const s = summRows[1];
+  const examDateLabel = meta[1][2] ?? null;
+  return {
+    typeId: entry.typeId,
+    label,
+    examKind,
+    semester: semMatch ? parseInt(semMatch[1], 10) : null,
+    examSession: sessionMatch ? `${sessionMatch[1].toUpperCase()} ${sessionMatch[2]}` : null,
+    examDateKey: examDateLabel ? resultDateKey(examDateLabel) : null,
+    examDateLabel,
+    academicYear: meta[1][0] ?? null,
+    studentName: who[1][0] ?? null,
+    enrollment: who[1][1] ?? null,
+    seatNo: who[1][2] ?? null,
+    subjects,
+    backlogBySem,
+    offeredCredit: resultNum(s[0]),
+    earnedCredit: resultNum(s[1]),
+    sgpa: resultNum(s[4]),
+    totalOfferedCredit: resultNum(s[5]),
+    totalEarnedCredit: resultNum(s[6]),
+    cgpa: resultNum(s[9]),
+    result: s[10] ?? null,
+  };
+}
+
+export interface LiveResultsResult {
+  exams: ErpResultExam[];
+  sessionCookie?: string;
+}
+
+/**
+ * Fetch every published exam result with an authenticated session (saved
+ * cookie first, full login fallback — the same gentle pattern as the sync
+ * and the ALA write-back). READ-ONLY: one GET for the exam picker, one GET
+ * per published exam, politely paced. An unparsable picker throws
+ * PARSE_FAILED; an empty picker honestly yields [] (nothing published).
+ */
+export async function fetchLiveResults(
+  username: string,
+  password: string,
+  savedCookie?: string | null,
+  opts?: { paceMs?: number }
+): Promise<LiveResultsResult> {
+  let cookies = new Map<string, string>();
+  if (savedCookie) {
+    for (const pair of savedCookie.split(";")) {
+      const i = pair.indexOf("=");
+      if (i > 0) cookies.set(pair.slice(0, i).trim(), pair.slice(i + 1).trim());
+    }
+  }
+  let page = await fetchWithSession(RESULT_PATH, cookies);
+  if (!page.html) {
+    const fresh = await login(username, password);
+    cookies = fresh.cookies;
+    page = await fetchWithSession(RESULT_PATH, cookies);
+    if (!page.html) {
+      throw new SyncError("AUTH_FAILED", "Could not open the results page with a fresh session.");
+    }
+  }
+  cookies = page.cookies;
+
+  const index = parseGmiuResultIndex(page.html);
+  if (index === null) {
+    throw new SyncError(
+      "PARSE_FAILED",
+      "Results page structure not recognized (no exam picker found).",
+      stripTags(page.html).slice(0, 300)
+    );
+  }
+
+  const exams: ErpResultExam[] = [];
+  const pace = opts?.paceMs ?? 350;
+  for (const entry of index) {
+    const detail = await fetchWithSession(`${RESULT_PATH}?type=${encodeURIComponent(entry.typeId)}`, cookies);
+    cookies = detail.cookies;
+    if (detail.html) {
+      const parsed = parseGmiuResult(detail.html, entry);
+      if (parsed) exams.push(parsed);
+    }
+    await new Promise((r) => setTimeout(r, pace)); // polite pacing between exam pages
+  }
+  return { exams, sessionCookie: cookieHeader(cookies) };
 }
 
 /** A submission counts as complete only when the ERP clearly says so. */

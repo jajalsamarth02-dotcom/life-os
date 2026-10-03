@@ -101,6 +101,78 @@ export interface ErpSnapshot {
   note?: string;
 }
 
+/* ------------------------------------------------------------------ */
+/* Exam results (/student/result — Final Results)                      */
+/* ------------------------------------------------------------------ */
+
+/** One option of the /student/result exam-type <select>. */
+export interface ErpResultIndexEntry {
+  /** ERP numeric exam id (the `type=` query value) — dedup key. */
+  typeId: string;
+  /** Full option label, e.g. "UNDER GRADUATION COMPUTER ENGINEERING SEMESTER - 4 REGULAR SUMMER - 2026". */
+  label: string;
+}
+
+/**
+ * One graded component of a subject row. The ERP renders a fixed 11-column
+ * table: code | name | credit | ESE-Absent | SEE(T,P) | CCE(M,I,V) | grade | CP.
+ * A component grade of "-" (not applicable) is normalized to null.
+ */
+export interface ErpResultSubjectRow {
+  code: string;
+  name: string;
+  credit: number | null;
+  /** true = the ERP flagged the student absent for the end-semester exam. */
+  eseAbsent: boolean;
+  seeTheory: string | null;
+  seePractical: string | null;
+  cceMid: string | null;
+  cceInternal: string | null;
+  cceViva: string | null;
+  /** Overall subject grade (O, A+, A, B+, B, C, P, F, …). */
+  grade: string | null;
+  /** Earned credit points (credit × grade point); 0 = subject not cleared. */
+  creditPoint: number | null;
+}
+
+/** One published exam result page (/student/result?type=N). */
+export interface ErpResultExam {
+  typeId: string;
+  label: string;
+  /** Derived from the label: REGULAR | REMEDIAL | UNKNOWN. */
+  examKind: "REGULAR" | "REMEDIAL" | "UNKNOWN";
+  /** Semester number parsed from the label ("SEMESTER - 4"); null when absent. */
+  semester: number | null;
+  /** Exam session parsed from the label tail ("SUMMER - 2026" → "SUMMER 2026"); null when absent. */
+  examSession: string | null;
+  /** Sortable exam date from the "Year of Examination" cell ("May-2026" → "2026-05"); null when unparseable. */
+  examDateKey: string | null;
+  /** Raw "Year of Examination" cell text (display form). */
+  examDateLabel: string | null;
+  academicYear: string | null;
+  studentName: string | null;
+  enrollment: string | null;
+  seatNo: string | null;
+  subjects: ErpResultSubjectRow[];
+  /** Pending backlogs per semester parsed from the backlog table — index 0 = Sem 1; null = N/A. */
+  backlogBySem: (number | null)[];
+  offeredCredit: number | null;
+  earnedCredit: number | null;
+  sgpa: number | null;
+  /** Career-cumulative line (only meaningful on REGULAR exam pages). */
+  totalOfferedCredit: number | null;
+  totalEarnedCredit: number | null;
+  cgpa: number | null;
+  /** ERP verdict: "Pass" | "Fail" | …. */
+  result: string | null;
+}
+
+/** Cached payload stored under the results Setting KV. */
+export interface ErpResultsPayload {
+  exams: ErpResultExam[];
+  fetchedAt: string;
+}
+
 export type SyncErrorCode =
   | "NO_CONNECTION" // no live credentials and demo mode off
   | "UNREACHABLE" // ERP site could not be reached

@@ -48,6 +48,7 @@ import { SetupChecklist } from "./setup-checklist";
 import { MilestoneCelebration, MilestonesStrip } from "./milestones";
 import { SubjectDrawer } from "./subject-drawer";
 import { TimetableCard } from "./timetable-card";
+import { ResultsCard } from "./results-card";
 import {
   ago,
   dueGroup,
@@ -1639,6 +1640,10 @@ export function DashboardTab({
         onOpenSubject={setSelectedCode}
         onResolvePicks={() => setParallelSignal(true)}
       />
+
+      {/* Row 1.7 — academic record: published exam results (TTL-cached,
+          read-only ERP walk on cache miss). Display-only, no notify paths. */}
+      <ResultsCard />
 
       {/* Row 2 — subject list */}
       <Card className="rounded-xl border-border/60 transition-shadow hover:shadow-md">
