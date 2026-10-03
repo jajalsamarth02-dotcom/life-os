@@ -58,6 +58,17 @@ function colorForCode(code: string, subjects: SubjectView[]): string {
   return CHIP_COLORS[(idx < 0 ? 0 : idx) % CHIP_COLORS.length];
 }
 
+/** The subject drawer deep-link only arms for codes the attendance data
+ *  actually knows — a routine slot whose subject has no synced attendance
+ *  (an elective before its first class, or a parse-drift code) stays plain
+ *  text instead of becoming a dead-end button. Exact-match by design: the
+ *  ERP emits uppercase codes, and silently case-folding a mismatch would
+ *  mask a real parse drift. Returns the canonical code (drawer key) or null. */
+export function knownSubjectCode(code: string, subjects: SubjectView[]): string | null {
+  const hit = subjects.find((s) => s.code === code);
+  return hit ? hit.code : null;
+}
+
 function hhmm(min: number): string {
   return `${String(Math.floor(min / 60)).padStart(2, "0")}:${String(min % 60).padStart(2, "0")}`;
 }
@@ -610,6 +621,7 @@ export function TimetableCard({
   focusSignal = 0,
   overall = null,
   target,
+  onOpenSubject,
 }: {
   subjects: SubjectView[];
   mode?: AppMode;
@@ -628,6 +640,12 @@ export function TimetableCard({
    *  surfaced where the decision actually happens). */
   overall?: AttendanceView | null;
   target?: number;
+  /** Deep-link to the subject drawer (dashboard-tab owns it): when provided,
+   *  a row's subject code becomes a quiet violet button that opens the
+   *  attendance details for that subject. Violet = the deep-link language
+   *  (same family as the focus spotlight), so both "jump" affordances read
+   *  as one system. Absent → plain text, exactly as before. */
+  onOpenSubject?: (code: string) => void;
 }) {
   const now = useNow(30_000);
   /* IST, not the device clock — see istNow. A UTC browser must not turn
@@ -846,7 +864,24 @@ export function TimetableCard({
                         <span className="mt-0.5">{hhmm(s.startMin).slice(3)}</span>
                       </span>
                       <div className="min-w-0 flex-1">
-                        <p className="truncate text-sm font-medium">{s.subjectCode}</p>
+                        <p className="truncate text-sm font-medium">
+                          {(() => {
+                            const known = onOpenSubject ? knownSubjectCode(s.subjectCode, subjects) : null;
+                            return known ? (
+                              <button
+                                type="button"
+                                onClick={() => onOpenSubject!(known)}
+                                title={`Open subject details — attendance, trend and history for ${known}`}
+                                aria-label={`Open subject details for ${known}`}
+                                className="-mx-0.5 rounded px-0.5 text-left underline-offset-2 decoration-violet-500/60 transition-colors hover:text-violet-700 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring dark:hover:text-violet-400"
+                              >
+                                {known}
+                              </button>
+                            ) : (
+                              s.subjectCode
+                            );
+                          })()}
+                        </p>
                         <p className="text-xs tabular-nums text-muted-foreground">
                           {hhmm(s.startMin)} – {hhmm(s.endMin)}
                           {s.source === "demo" && " · demo"}

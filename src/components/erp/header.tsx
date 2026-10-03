@@ -38,7 +38,7 @@ import { cn } from "@/lib/utils";
 import { applyBatchPicks } from "@/lib/batch-picks";
 import { promptInstall, useCanInstall } from "./install-prompt";
 import { fetchDashboard, fetchTimetable, markAllNotificationsRead, postSync, qk } from "./api";
-import { ago, fmtDT, useNow } from "./shared";
+import { ago, fmtDT, istNow, useNow } from "./shared";
 import type { AppMode, AppNotification, NotificationSeverity } from "./types";
 
 /** Status dot with a soft radiating ping — marks the live/demo connection.
@@ -290,9 +290,10 @@ function NextClassChip({ subjects }: { subjects: { code: string; name: string }[
 
   const batch = applyBatchPicks(timetable.data?.slots ?? [], timetable.data?.picks ?? {});
   const slots = batch.attending;
-  const d = new Date(now);
-  const today = d.getDay();
-  const nowMin = d.getHours() * 60 + d.getMinutes();
+  /* IST, not the device clock — same fix as the schedule cards (istNow).
+     A UTC parent's browser must not read "in 490 min" for the student's
+     11:00 IST class; every schedule surface agrees on one clock. */
+  const { day: today, min: nowMin } = istNow(now);
 
   const todaySlots = slots
     .filter((s) => s.dayOfWeek === today)

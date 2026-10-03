@@ -1750,6 +1750,7 @@ export function DashboardTab({
           focusSignal={todayFocusSignal}
           overall={data.overall}
           target={data.target}
+          onOpenSubject={(code) => setSelectedCode(code)}
         />
       )}
 
