@@ -112,6 +112,13 @@ function SlotChip({
 }) {
   const st = slotStatus(slot, nowDay, nowMin);
   const ongoing = st.key === "ongoing";
+  /* r76: the "just ended" bridge (r75, today rows) now reaches the week-grid
+     chips — an attending chip within 15 min after its class reads amber, not
+     flat-dim, because the record isn't confirmed until the next auto-sync.
+     Alternatives/duplicates stay flat-dim: they were never the counted class,
+     so "attendance updates on the next sync" would be a false promise. */
+  const justEnded =
+    state === "attending" && st.key === "done" && isJustEnded(slot.endMin, nowMin);
   return (
     <div
       title={
@@ -125,9 +132,11 @@ function SlotChip({
         "group rounded-lg border px-2 py-1.5 text-left transition-colors",
         ongoing
           ? "border-emerald-500/50 bg-emerald-500/10"
-          : st.key === "done"
-            ? "border-border/40 bg-muted/30 opacity-55"
-            : "border-border/60 bg-card hover:bg-muted/40",
+          : justEnded
+            ? "border-amber-500/30 bg-amber-500/[0.06] opacity-70"
+            : st.key === "done"
+              ? "border-border/40 bg-muted/30 opacity-55"
+              : "border-border/60 bg-card hover:bg-muted/40",
         state === "alternative" && "border-dashed opacity-50",
         state === "duplicate" && "opacity-45"
       )}
@@ -143,6 +152,14 @@ function SlotChip({
       {!compact && st.label && (
         <p className={cn("mt-0.5 text-[10px] font-medium", ongoing ? "text-emerald-600 dark:text-emerald-400" : "text-muted-foreground")}>
           {st.label}
+        </p>
+      )}
+      {!compact && justEnded && (
+        <p
+          className="mt-0.5 flex items-center gap-1 text-[10px] font-medium text-amber-600/90 dark:text-amber-400/90"
+          title="Class just finished — attendance updates on the next auto-sync (within 15 minutes)"
+        >
+          <Check className="size-3 shrink-0" aria-hidden="true" /> just ended
         </p>
       )}
     </div>

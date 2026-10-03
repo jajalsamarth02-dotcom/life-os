@@ -2730,3 +2730,25 @@ Unresolved issues / risks & next-phase priorities:
 3. Feature residuals: drawer retry-story data-hidden (namespace split); SMS bubble raw ASCII deliberate; week-grid SlotChips could also show the just-ended badge (cosmetic follow-up, rows own the state today).
 4. QA notes carried: Radix tabs snapshot+click-by-ref; MultiEdit partial-apply → re-READ; enabled:false generic; old-format tests → exit code.
 5. Keeper cron 430680 alive; worklog protocol unchanged.
+
+---
+Task ID: 76
+Agent: Super Z (dev cron 430711)
+Task: Round 76 — the "just ended" bridge reaches the week-grid SlotChips (r75 residual closed).
+
+Work Log:
+1. STATUS: no parallel entries above 75. RSS AT START: 1963MB (under 2.0GB → lean round, 2 page loads). Clock: 10:31 IST, RWM class 11:00–13:00 (26 min out at QA time) — pre-class, soon-emerald window.
+2. FEATURE — r75's "just ended" state lived only on today-column rows; the week-grid SlotChips still went flat-dim "done". Now an ATTENDING chip within JUST_ENDED_WINDOW_MIN (15 min) after its class shows the same bridge: amber-500/30 border + amber-500/[0.06] bg + opacity-70 (slightly brighter than flat-done 55 — it carries in-flight info) + a "just ended" text line (Check icon, amber-600/90 dark:amber-400/90, tooltip "Class just finished — attendance updates on the next auto-sync (within 15 minutes)") — exact same vocabulary/classes as the r75 row badge, one coherence contract. HONESTY SCOPING: gated on state === "attending" — alternatives/duplicates were never the counted class, so "attendance updates on the next sync" would be a false promise for them; they stay flat-dim.
+3. STYLE (mandatory): amber = in-flight language now consistent across rows AND chips; chip palette family unchanged otherwise (emerald = happening, amber = pending/imminent, violet = deep-link). No layout shift beyond the one text line (same slot the st.label line occupies for ongoing/upcoming).
+4. TESTS: no new pure function (isJustEnded/JUST_ENDED_WINDOW_MIN already exported + pinned — r75's 10 boundary checks cover the consumption). Regression: ALL 20 test files pass by EXIT CODE. tsc src/ ZERO errors (rg "^src/" on project tsc output = zero lines; ad-hoc single-file tsc flags produce path-alias noise — use project tsconfig only).
+5. BROWSER QA (2 loads, LIVE, honest scope): Full week expanded → Sat column eval: "RESPONSIVE-WEB-MOBILE 11:00–13:00 starts in 26 min" ×2 (attending + batch duplicate, both humanized correctly). Just-ended chip NOT live-observable yet (no done slots today — class hadn't run); state is unit-pinned, live window 14:30–14:45 +08 (12:00–12:15 IST). Console+errors cleared → reload → ZERO fresh errors. Screenshot /tmp/qa-r76-weekgrid.png.
+6. DATA CORRECTION for in-class rounds: RWM is a 120-MIN class (11:00–13:00), so classProgress climbs ~0.83%/min, NOT the ~1.4%/min r74 estimated. Two evals ~5 min apart should move aria-valuenow ~4 points.
+7. End state PRISTINE: notify path untouched, no sync clicks, display-only language intact. ZERO sends ever.
+8. RSS AFTER ROUND: 1937MB (−26 from 1963 — net-negative lean round; ratchet continues r74 1920 → r75 1957 → r76 1937).
+
+Unresolved issues / risks & next-phase priorities:
+1. ⚠️⚠️ MEMORY: 1937MB — under 2.0GB, ratchet stable (r74 1920 → r75 1957 → r76 1937). Keeper-side restart proposal STILL UNAPPROVED — not added silently. Discipline unchanged: net-negative round whenever start ≥2.0GB, ≤3 loads otherwise.
+2. TIME WINDOW — the live QA schedule for next rounds (all times +08): 13:15 round (10:45 IST) → FIRST PRIORITY: catch the imminent-amber chip flip live at ~10:50 IST (header chip + today-card chip flip soon-emerald → imminent fast-pulse amber, ≤10 min); 13:30 round (11:00 IST) → class start: "Happening now" banner with gradient bar + % caption + humanized "2h left"-style badge + ongoing-amber chips; classProgress aria-valuenow climbing ~0.83%/min (verify movement between two evals, corrected rate); 14:30–14:45 → RWM ends 12:00 IST → the just-ended badge live on today ROWS and (new this round) week-grid CHIPS — screenshot both surfaces side by side; 15:30 → class window ends; after 13:00 IST (15:30+08) → milestone celebration honest QA if attended.
+3. Feature residuals: SMS bubble raw ASCII deliberate (do not humanize); week-grid compact chips (non-today columns) never show just-ended (isJustEnded is today-only by construction — correct); drawer retry-story namespace split unchanged.
+4. QA notes carried: Radix tabs snapshot+click-by-ref; MultiEdit partial-apply → re-READ; enabled:false useQuery explicit generic; old-format tests → exit code; tsc scoped to src/ via project tsconfig only.
+5. Keeper cron 430680 alive; worklog protocol unchanged.
