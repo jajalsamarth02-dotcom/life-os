@@ -47,7 +47,7 @@ import { cn } from "@/lib/utils";
 import { classesCanSkip, classesToReachTarget } from "@/lib/attendance";
 import { ApiError, createSlot, fetchAssignments, fetchDashboard, fetchHistory, fetchTimetable, putSubjectTarget, qk, type SlotConflict } from "./api";
 import { AnimatedNumber } from "./trend-chart";
-import { CustomTargetChip, erpAssignmentUrl, fmtDT, MiniBar, SkipPips, statusColors, StatusChip, useNow, ago } from "./shared";
+import { CustomTargetChip, erpAssignmentUrl, fmtDT, istNow, MiniBar, SkipPips, statusColors, StatusChip, useNow, ago } from "./shared";
 import type { AssignmentRow, AttendanceStatus, HistoryResponse, SubjectView, TimetableSlotRow } from "./types";
 
 const DAY_SHORT = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
@@ -592,7 +592,10 @@ function SubjectTimetable({
   dimmedIds?: Set<string>;
 }) {
   const now = useNow();
-  const today = new Date(now).getDay();
+  /* istNow — the "today" default for a NEW manual slot must follow the
+     student's IST day, not the device's (a parent abroad adding a slot at
+     20:00 IST on a UTC device would otherwise default to yesterday). */
+  const today = istNow(now).day;
   const qc = useQueryClient();
   const [adding, setAdding] = useState(false);
   const [day, setDay] = useState<string>(String(today));

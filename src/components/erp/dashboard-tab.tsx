@@ -67,6 +67,7 @@ import {
   StatusChip,
   TypeIcon,
   useNow,
+  istNow,
   AlaStatChip,
   collectAlaStats,
   SkipPips,
@@ -450,8 +451,10 @@ function NextUpStrip({
      batch-pick math (same-batch collapse + parallel picks) matches the
      week plan exactly, so the chip and the plan can never disagree. */
   const { data: ttRows } = useQuery({ queryKey: qk.timetable, queryFn: fetchTimetable });
-  const nowDay = new Date(now).getDay();
-  const nowMin = new Date(now).getHours() * 60 + new Date(now).getMinutes();
+  /* IST, not the device clock — one clock everywhere (istNow): a UTC device
+     between 18:30–24:00 IST still shows the PREVIOUS UTC day, which turned
+     this chip into Friday's "next class" for a Saturday-evening student. */
+  const { day: nowDay, min: nowMin } = istNow(now);
   const classInfo = useMemo(() => {
     const attending = applyBatchPicks(ttRows?.slots ?? [], ttRows?.picks ?? {}).attending;
     const today = attending.filter((s) => s.dayOfWeek === nowDay);
@@ -526,12 +529,26 @@ function NextUpStrip({
         </p>
       </div>
       {/* Next class today — a glanceable bridge between deadlines and the routine.
-          Desktop-only: the week plan + timetable cards carry the schedule on mobile. */}
+          Desktop-only: the week plan + timetable cards carry the schedule on mobile.
+          Clicking it deep-links to the timetable card (same erp:focus-timetable
+          event the Today chip uses) — violet hover = the deep-link family. */}
       {(classInfo.next || classInfo.allDone) && (
-        <div className="hidden shrink-0 items-center gap-3 sm:flex" aria-live="off">
+        <button
+          type="button"
+          onClick={() => window.dispatchEvent(new CustomEvent("erp:focus-timetable"))}
+          title="Jump to today's schedule"
+          aria-label={`Jump to today's schedule${
+            classInfo.next
+              ? classInfo.ongoing
+                ? ` — ${classInfo.next.subjectCode} ends in ${classInfo.next.endMin - nowMin} min`
+                : ` — ${classInfo.next.subjectCode} starts in ${classInfo.next.startMin - nowMin} min`
+              : " — all classes done"
+          }`}
+          className="hidden shrink-0 cursor-pointer items-center gap-3 rounded-lg px-1.5 py-1 text-right transition-colors hover:bg-violet-500/[0.06] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring sm:flex"
+        >
           <Separator orientation="vertical" className="h-9" />
           <div className="text-right">
-            <p className="flex items-center justify-end gap-1 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
+            <p className="flex items-center justify-end gap-1 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground transition-colors hover:text-violet-700 dark:hover:text-violet-400">
               {classInfo.ongoing && (
                 <CircleDot className="size-3 animate-pulse text-emerald-500" aria-hidden="true" />
               )}
@@ -563,7 +580,7 @@ function NextUpStrip({
               <p className="text-[10px] text-muted-foreground">nothing left today</p>
             )}
           </div>
-        </div>
+        </button>
       )}
       <div className="shrink-0 text-right">
         <p
@@ -1174,7 +1191,9 @@ export function DashboardTab({
   const ttTodayQ = useQuery({ queryKey: qk.timetable, queryFn: fetchTimetable });
   const todayClasses = useMemo<TodayClassBrief[] | null>(() => {
     if (!ttTodayQ.data) return null;
-    const day = new Date(now).getDay();
+    /* istNow, not the device day — this list feeds the brief's CLASSES TODAY
+       line; a UTC device before 05:30 IST must not show yesterday's classes. */
+    const day = istNow(now).day;
     return applyBatchPicks(ttTodayQ.data.slots ?? [], ttTodayQ.data.picks ?? {}).attending
       .filter((s) => s.dayOfWeek === day)
       .sort((a, b) => a.startMin - b.startMin)
