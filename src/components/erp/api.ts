@@ -82,11 +82,23 @@ export const qk = {
   semesters: ["semesters"] as const,
   sync: ["sync"] as const,
   results: ["results"] as const,
+  /* Cross-tab handoff for retry-story deep-links: the command palette writes
+     {code, nonce} here and the results card consumes it on mount/effect —
+     survives tab unmounts, unlike a window CustomEvent (no missed events). */
+  retryFocus: ["retry-story-focus"] as const,
   erpStatus: ["erp-status"] as const,
   waStatus: ["wa-status"] as const,
   ntfyStatus: ["ntfy-status"] as const,
   calendarToken: ["calendar-token"] as const,
 };
+
+/** Payload for the qk.retryFocus handoff (command palette → results card). */
+export interface RetryFocusHandoff {
+  /** Subject code to spotlight — null = generic "open retry history". */
+  code: string | null;
+  /** Monotonic bump so repeat commands re-flash even with the same code. */
+  nonce: number;
+}
 
 /* ---------- GET ---------- */
 

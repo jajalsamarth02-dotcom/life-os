@@ -248,6 +248,21 @@ export function subjectStories(exams: ExamLike[]): SubjectStory[] {
   return stories;
 }
 
+/**
+ * Deep-link gate for retry-story spotlights: returns the story ONLY when the
+ * incoming code exactly equals a story's code. Any case/whitespace drift →
+ * null, so a caller can fall back to the generic open instead of faking a
+ * highlight for a subject it can't actually see (same honesty contract as
+ * the timetable's knownSubjectCode gate — parse drift stays visible).
+ */
+export function matchStoryCode(
+  code: string | null | undefined,
+  stories: SubjectStory[]
+): SubjectStory | null {
+  if (!code) return null;
+  return stories.find((s) => s.code === code) ?? null;
+}
+
 export interface CgpaPoint {
   semester: number | null;
   cgpa: number;

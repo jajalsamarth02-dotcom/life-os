@@ -14,7 +14,7 @@
  *    separate markers so the two can't be confused.
  */
 
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   AlertTriangle,
@@ -42,6 +42,7 @@ import {
   cgpaProgression,
   deriveResultsSummary,
   gradeTier,
+  matchStoryCode,
   projectCgpa,
   resultsSummaryText,
   subjectStories,
@@ -49,7 +50,7 @@ import {
   type PendingSubject,
   type SubjectStory,
 } from "@/lib/results-summary";
-import { fetchResults, qk } from "./api";
+import { fetchResults, qk, type RetryFocusHandoff } from "./api";
 import { ago } from "./shared";
 import type { ErpResultExam, ErpResultSubjectRow } from "./types";
 
@@ -321,20 +322,26 @@ function PendingItem({
   pending,
   exams,
   onFocusExam,
+  onOpenStory,
+  hasStory,
 }: {
   pending: PendingSubject;
   exams: ErpResultExam[];
   onFocusExam: (typeId: string) => void;
+  /** Opens + spotlights this subject's retry story in the Retry history block. */
+  onOpenStory: (code: string) => void;
+  /** True when this subject also has a roll-up retry story worth jumping to. */
+  hasStory: boolean;
 }) {
   const [open, setOpen] = useState(false);
   const history = attemptHistory(exams, pending.code);
   return (
-    <li>
+    <li className="flex items-start gap-1">
       <button
         type="button"
         onClick={() => setOpen((v) => !v)}
         aria-expanded={open}
-        className="-mx-1 flex w-full items-center gap-2 rounded border-l-2 border-l-amber-500/40 px-1 py-0.5 text-left text-xs transition-colors hover:bg-amber-500/10 hover:border-l-amber-500/70 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-500/40"
+        className="-mx-1 flex min-w-0 flex-1 items-center gap-2 rounded border-l-2 border-l-amber-500/40 px-1 py-0.5 text-left text-xs transition-colors hover:bg-amber-500/10 hover:border-l-amber-500/70 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-500/40"
         title={open ? "Hide every published attempt" : "Show every published attempt"}
       >
         <span className="font-mono text-[10px] text-muted-foreground">{pending.code}</span>
@@ -354,6 +361,17 @@ function PendingItem({
           aria-hidden="true"
         />
       </button>
+      {hasStory && (
+        <button
+          type="button"
+          onClick={() => onOpenStory(pending.code)}
+          aria-label={`Open the retry story for ${pending.code} in the retry history below`}
+          title="Open this subject's full retry story in Retry history"
+          className="mt-px shrink-0 rounded p-1 text-muted-foreground transition-colors hover:bg-violet-500/10 hover:text-violet-600 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-violet-500/40 dark:hover:text-violet-400"
+        >
+          <History className="size-3.5" aria-hidden="true" />
+        </button>
+      )}
       {open && (
         <div className="mb-1 ml-1 space-y-1 rounded-md border border-amber-500/20 bg-background/60 px-2 py-1.5">
           <p className="text-[10px] font-medium uppercase tracking-wide text-muted-foreground">
@@ -393,9 +411,38 @@ function PendingItem({
 }
 
 /** One retry-story: a subject's grade timeline, oldest → latest, chips deep-link their exam. */
-function StoryRow({ story, onFocusExam }: { story: SubjectStory; onFocusExam: (typeId: string) => void }) {
+function StoryRow({
+  story,
+  onFocusExam,
+  spotlit = false,
+  spotNonce = 0,
+}: {
+  story: SubjectStory;
+  onFocusExam: (typeId: string) => void;
+  /** This story is the deep-link target — subtle violet left edge while visible. */
+  spotlit?: boolean;
+  /** Bump to scroll to + flash this row (same 1.8s violet language as ExamRow). */
+  spotNonce?: number;
+}) {
+  const [flash, setFlash] = useState(false);
+  const rowRef = useRef<HTMLLIElement>(null);
+  useEffect(() => {
+    if (spotNonce > 0) {
+      setFlash(true);
+      rowRef.current?.scrollIntoView({ behavior: "smooth", block: "nearest" });
+      const t = setTimeout(() => setFlash(false), 1800);
+      return () => clearTimeout(t);
+    }
+  }, [spotNonce]);
   return (
-    <li className="flex flex-wrap items-center gap-x-2 gap-y-1 text-xs">
+    <li
+      ref={rowRef}
+      className={cn(
+        "flex flex-wrap items-center gap-x-2 gap-y-1 rounded-r border-l-2 px-1 py-0.5 text-xs transition-all duration-300",
+        spotlit ? "border-l-violet-500/50 bg-violet-500/[0.06]" : "border-l-transparent",
+        flash && "ring-2 ring-violet-500/40"
+      )}
+    >
       <span className="font-mono text-[10px] text-muted-foreground">{story.code}</span>
       <span className="min-w-0 flex-1 truncate">{story.name}</span>
       <span className="flex shrink-0 items-center gap-0.5" aria-label="grade timeline, oldest to latest">
@@ -438,16 +485,22 @@ export function ResultsCard({ className }: { className?: string }) {
   const [whatIfSgpa, setWhatIfSgpa] = useState("");
   const [whatIfCredits, setWhatIfCredits] = useState("");
   // Deep-link state: bumping focusNonce opens + scrolls to + flashes the
-  // targeted exam row (used by the remedial SGPA markers).
+  // targeted exam row (used by the remedial SGPA markers). spotCode/spotNonce
+  // do the same for a retry STORY row (code-carried deep-links, see below).
   const [focusTarget, setFocusTarget] = useState<string | null>(null);
   const [focusNonce, setFocusNonce] = useState(0);
+  const [spotCode, setSpotCode] = useState<string | null>(null);
+  const [spotNonce, setSpotNonce] = useState(0);
   const [storiesOpen, setStoriesOpen] = useState(false);
+  const storiesRef = useRef<HTMLDivElement>(null);
   const query = useQuery({ queryKey: qk.results, queryFn: () => fetchResults() });
   const data = query.data;
   const summary = data ? deriveResultsSummary(data.exams) : null;
   const deltas = data ? careerDeltas(data.exams) : null;
   const stories = data ? subjectStories(data.exams) : [];
   const openStoryCount = stories.filter((st) => !st.cleared).length;
+  /* Pending rows that also have a roll-up story get the violet History jump. */
+  const storyCodes = useMemo(() => new Set(stories.map((s) => s.code)), [stories]);
 
   const onFocusExam = (typeId: string) => {
     setFocusTarget(typeId);
@@ -488,24 +541,55 @@ export function ResultsCard({ className }: { className?: string }) {
     }
   };
 
-  /* Command-palette hooks: the palette navigates to the dashboard then fires
-     these CustomEvents. A ref keeps the listener stable while the closure
-     inside stays fresh (it always sees the latest state/data). */
+  /* Command-palette hooks: the palette navigates to the dashboard then either
+     fires the erp:copy-summary CustomEvent (same-tab safe — the card is
+     mounted by then) or writes a qk.retryFocus handoff for retry stories.
+     A ref keeps the copy listener stable while the closure inside stays
+     fresh (it always sees the latest state/data). */
   const copyRef = useRef(onCopy);
   copyRef.current = onCopy;
   useEffect(() => {
     const onCopyEvt = () => copyRef.current();
-    const onHistoryEvt = () => {
-      setStoriesOpen(true);
-      rootRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
-    };
     window.addEventListener("erp:copy-summary", onCopyEvt);
-    window.addEventListener("erp:open-retry-history", onHistoryEvt);
-    return () => {
-      window.removeEventListener("erp:copy-summary", onCopyEvt);
-      window.removeEventListener("erp:open-retry-history", onHistoryEvt);
-    };
+    return () => window.removeEventListener("erp:copy-summary", onCopyEvt);
   }, []);
+  /* Retry-story focus handoff — READ-ONLY join: enabled:false never fetches,
+     it just observes what the palette wrote. Applied once stories exist:
+     a matching code spotlights its story row (open + scroll + violet flash),
+     a null/matched-nothing code falls back to the generic open. Consuming
+     clears the slot so a later command with the same code re-fires. */
+  const retryFocus = useQuery<RetryFocusHandoff | null>({
+    queryKey: qk.retryFocus,
+    queryFn: () => null,
+    enabled: false,
+  });
+  /* One spotlight path shared by the handoff effect and the in-card pending
+     rows: open the stories block, spotlight the matching story (violet left
+     edge + 1.8s flash) when the code matches, else generic open. */
+  const openStory = useCallback(
+    (code: string | null) => {
+      const story = matchStoryCode(code, stories);
+      if (story) {
+        setSpotCode(story.code);
+        setSpotNonce((n) => n + 1);
+      } else {
+        setSpotCode(null);
+      }
+      setStoriesOpen(true);
+      (story ? storiesRef.current : rootRef.current)?.scrollIntoView({
+        behavior: "smooth",
+        block: "start",
+      });
+    },
+    [stories]
+  );
+  useEffect(() => {
+    const handoff = retryFocus.data;
+    if (!handoff) return;
+    if (stories.length === 0) return; // results not parsed yet — keep it pending
+    openStory(handoff.code);
+    queryClient.setQueryData(qk.retryFocus, null);
+  }, [retryFocus.data, openStory, stories.length, queryClient]);
 
   const creditsPct =
     summary && summary.creditsEarned != null && summary.creditsOffered
@@ -647,7 +731,14 @@ export function ResultsCard({ className }: { className?: string }) {
                 </p>
                 <ul className="mt-1.5 space-y-0.5">
                   {summary.pending.map((p) => (
-                    <PendingItem key={p.code} pending={p} exams={data.exams} onFocusExam={onFocusExam} />
+                    <PendingItem
+                      key={p.code}
+                      pending={p}
+                      exams={data.exams}
+                      onFocusExam={onFocusExam}
+                      onOpenStory={openStory}
+                      hasStory={storyCodes.has(p.code)}
+                    />
                   ))}
                 </ul>
                 <p className="mt-1.5 text-[10px] leading-relaxed text-muted-foreground">
@@ -800,7 +891,7 @@ export function ResultsCard({ className }: { className?: string }) {
 
             {/* retry stories — subjects with retries or fails, oldest → latest */}
             {stories.length > 0 && (
-              <div className="rounded-lg border border-border/70" data-testid="retry-stories">
+              <div className="rounded-lg border border-border/70" ref={storiesRef} data-testid="retry-stories">
                 <button
                   type="button"
                   onClick={() => setStoriesOpen((v) => !v)}
@@ -831,7 +922,13 @@ export function ResultsCard({ className }: { className?: string }) {
                 {storiesOpen && (
                   <ul className="animate-in fade-in-0 slide-in-from-top-1 space-y-1 border-t px-3 py-2 duration-200">
                     {stories.map((s) => (
-                      <StoryRow key={s.code} story={s} onFocusExam={onFocusExam} />
+                      <StoryRow
+                        key={s.code}
+                        story={s}
+                        onFocusExam={onFocusExam}
+                        spotlit={spotCode === s.code}
+                        spotNonce={spotCode === s.code ? spotNonce : 0}
+                      />
                     ))}
                   </ul>
                 )}

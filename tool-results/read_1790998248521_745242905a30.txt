@@ -1,0 +1,864 @@
+     1→"use client";
+     2→
+     3→/**
+     4→ * Academic record — the student's published exam results (Final Results
+     5→ * page), parsed from the ERP and TTL-cached server-side. Display-only:
+     6→ * this card never writes to the ERP and never touches notifications.
+     7→ *
+     8→ * Honest-state model (src/lib/results-summary.ts):
+     9→ *  - Hero CGPA / credits come from the latest REGULAR exam (the career-
+    10→ *    cumulative line); remedial pages only cover re-entered subjects.
+    11→ *  - "Pending" = the subject's most recent ERP mention has 0 credit points.
+    12→ *    Earlier failures never linger once a later exam clears the subject.
+    13→ *  - The SGPA trend draws REGULAR exams; remedial attempts appear as
+    14→ *    separate markers so the two can't be confused.
+    15→ */
+    16→
+    17→import { useEffect, useRef, useState } from "react";
+    18→import { useQuery, useQueryClient } from "@tanstack/react-query";
+    19→import {
+    20→  AlertTriangle,
+    21→  Award,
+    22→  CheckCircle2,
+    23→  ChevronDown,
+    24→  ClipboardCheck,
+    25→  Copy,
+    26→  GraduationCap,
+    27→  History,
+    28→  RefreshCw,
+    29→  IdCard,
+    30→  TrendingDown,
+    31→  TrendingUp,
+    32→} from "lucide-react";
+    33→import { Badge } from "@/components/ui/badge";
+    34→import { Button } from "@/components/ui/button";
+    35→import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+    36→import { cn } from "@/lib/utils";
+    37→import { toast } from "sonner";
+    38→import { compactErrorText } from "@/lib/compact-error";
+    39→import {
+    40→  attemptHistory,
+    41→  careerDeltas,
+    42→  cgpaProgression,
+    43→  deriveResultsSummary,
+    44→  gradeTier,
+    45→  projectCgpa,
+    46→  resultsSummaryText,
+    47→  subjectStories,
+    48→  type CgpaPoint,
+    49→  type PendingSubject,
+    50→  type SubjectStory,
+    51→} from "@/lib/results-summary";
+    52→import { fetchResults, qk } from "./api";
+    53→import { ago } from "./shared";
+    54→import type { ErpResultExam, ErpResultSubjectRow } from "./types";
+    55→
+    56→const TIER_CLASSES: Record<string, string> = {
+    57→  top: "border-emerald-500/40 bg-emerald-500/15 text-emerald-700 dark:text-emerald-300",
+    58→  good: "border-sky-500/40 bg-sky-500/15 text-sky-700 dark:text-sky-300",
+    59→  ok: "border-border bg-muted text-foreground/80",
+    60→  weak: "border-amber-500/40 bg-amber-500/15 text-amber-700 dark:text-amber-300",
+    61→  fail: "border-rose-500/40 bg-rose-500/15 text-rose-700 dark:text-rose-300",
+    62→};
+    63→
+    64→function GradeChip({ grade }: { grade: string | null }) {
+    65→  if (!grade) {
+    66→    return <span className="text-[11px] text-muted-foreground">—</span>;
+    67→  }
+    68→  return (
+    69→    <span
+    70→      className={cn(
+    71→        "inline-flex h-5 min-w-7 items-center justify-center rounded border px-1 font-mono text-[11px] font-semibold leading-none",
+    72→        TIER_CLASSES[gradeTier(grade)]
+    73→      )}
+    74→    >
+    75→      {grade}
+    76→    </span>
+    77→  );
+    78→}
+    79→
+    80→/** Tiny CGPA sparkline from the REGULAR exams' printed career CGPA line. */
+    81→function CgpaSparkline({ points }: { points: CgpaPoint[] }) {
+    82→  if (points.length < 2) return null;
+    83→  const W = 96;
+    84→  const H = 26;
+    85→  const PAD = 3;
+    86→  const vals = points.map((p) => p.cgpa);
+    87→  const min = Math.min(...vals);
+    88→  const max = Math.max(...vals);
+    89→  const span = Math.max(max - min, 0.8); // never amplify a near-flat line
+    90→  const xs = points.map((_, i) => PAD + (i * (W - 2 * PAD)) / (points.length - 1));
+    91→  const ys = vals.map((v) => H - PAD - ((v - min) / span) * (H - 2 * PAD));
+    92→  const line = xs.map((x, i) => `${i ? "L" : "M"}${x.toFixed(1)},${ys[i].toFixed(1)}`).join(" ");
+    93→  const area = `${line} L${xs[xs.length - 1].toFixed(1)},${H - PAD} L${xs[0].toFixed(1)},${H - PAD} Z`;
+    94→  const last = points.length - 1;
+    95→  return (
+    96→    <svg
+    97→      width={W}
+    98→      height={H}
+    99→      viewBox={`0 0 ${W} ${H}`}
+   100→      className="mt-1.5"
+   101→      role="img"
+   102→      aria-label={`CGPA progression: ${vals.map((v) => v.toFixed(2)).join(" → ")}`}
+   103→    >
+   104→      <defs>
+   105→        <linearGradient id="cgpa-spark-fill" x1="0" y1="0" x2="0" y2="1">
+   106→          <stop offset="0%" stopColor="rgb(139 92 246)" stopOpacity="0.28" />
+   107→          <stop offset="100%" stopColor="rgb(139 92 246)" stopOpacity="0" />
+   108→        </linearGradient>
+   109→      </defs>
+   110→      <path d={area} fill="url(#cgpa-spark-fill)" />
+   111→      <path d={line} fill="none" stroke="rgb(139 92 246)" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
+   112→      {xs.map((x, i) => (
+   113→        <circle
+   114→          key={i}
+   115→          cx={x}
+   116→          cy={ys[i]}
+   117→          r={i === last ? 2.2 : 1.5}
+   118→          fill="rgb(139 92 246)"
+   119→          opacity={i === last ? 1 : 0.65}
+   120→          className="transition-[r] hover:r-3"
+   121→        >
+   122→          <title>{`S${points[i].semester ?? "?"} · CGPA ${vals[i].toFixed(2)}`}</title>
+   123→        </circle>
+   124→      ))}
+   125→      <text x={xs[last]} y={ys[last] - 4} textAnchor="end" fontSize="6.5" fill="currentColor" opacity="0.6">
+   126→        S{points[last].semester ?? "?"}
+   127→      </text>
+   128→    </svg>
+   129→  );
+   130→}
+   131→
+   132→function DeltaChip({ delta }: { delta: number }) {
+   133→  const up = delta > 0.0005;
+   134→  const down = delta < -0.0005;
+   135→  return (
+   136→    <span
+   137→      className={cn(
+   138→        "inline-flex items-center gap-0.5 rounded-full border px-1.5 py-0.5 font-mono text-[10px] tabular-nums",
+   139→        up
+   140→          ? "border-emerald-500/40 bg-emerald-500/10 text-emerald-700 dark:text-emerald-300"
+   141→          : down
+   142→            ? "border-rose-500/40 bg-rose-500/10 text-rose-700 dark:text-rose-300"
+   143→            : "border-border bg-muted text-muted-foreground"
+   144→      )}
+   145→    >
+   146→      {up && <TrendingUp className="size-3" aria-hidden="true" />}
+   147→      {down && <TrendingDown className="size-3" aria-hidden="true" />}
+   148→      {up ? "+" : ""}
+   149→      {delta.toFixed(2)}
+   150→    </span>
+   151→  );
+   152→}
+   153→
+   154→function VerdictChip({ result }: { result: string | null }) {
+   155→  const passed = /pass/i.test(result ?? "");
+   156→  const known = result != null;
+   157→  return (
+   158→    <span
+   159→      className={cn(
+   160→        "inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[11px] font-medium",
+   161→        !known
+   162→          ? "border-border bg-muted text-muted-foreground"
+   163→          : passed
+   164→            ? "border-emerald-500/40 bg-emerald-500/10 text-emerald-700 dark:text-emerald-300"
+   165→            : "border-rose-500/40 bg-rose-500/10 text-rose-700 dark:text-rose-300"
+   166→      )}
+   167→    >
+   168→      {known && (passed ? <CheckCircle2 className="size-3" aria-hidden="true" /> : <AlertTriangle className="size-3" aria-hidden="true" />)}
+   169→      {result ?? "—"}
+   170→    </span>
+   171→  );
+   172→}
+   173→
+   174→/** One expandable exam: summary row + full subject table. */
+   175→function ExamRow({
+   176→  exam,
+   177→  defaultOpen = false,
+   178→  focusNonce = 0,
+   179→  closeNonce = 0,
+   180→  accented = false,
+   181→  careerDelta = null,
+   182→}: {
+   183→  exam: ErpResultExam;
+   184→  defaultOpen?: boolean;
+   185→  /** Bump to programmatically open + scroll to + flash this row. */
+   186→  focusNonce?: number;
+   187→  /** Bump to programmatically COLLAPSE this row — deep-links spotlight one row by closing its siblings. */
+   188→  closeNonce?: number;
+   189→  /** This row was the deep-link target — subtle violet left edge while open. */
+   190→  accented?: boolean;
+   191→  /** Career-CGPA change this REGULAR exam printed vs the previous one. */
+   192→  careerDelta?: number | null;
+   193→}) {
+   194→  const [open, setOpen] = useState(defaultOpen);
+   195→  const [flash, setFlash] = useState(false);
+   196→  const rootRef = useRef<HTMLDivElement>(null);
+   197→  const kindLabel = exam.examKind === "REMEDIAL" ? "Remedial" : exam.examKind === "REGULAR" ? "Regular" : "Exam";
+   198→  useEffect(() => {
+   199→    if (focusNonce > 0) {
+   200→      setOpen(true);
+   201→      setFlash(true);
+   202→      rootRef.current?.scrollIntoView({ behavior: "smooth", block: "nearest" });
+   203→      const t = setTimeout(() => setFlash(false), 1800);
+   204→      return () => clearTimeout(t);
+   205→    }
+   206→  }, [focusNonce]);
+   207→  // Spotlight: when a sibling row is deep-linked, this one quietly collapses.
+   208→  // Manual toggles are untouched — closeNonce only changes on deep-links.
+   209→  useEffect(() => {
+   210→    if (closeNonce > 0) setOpen((v) => (v ? false : v));
+   211→  }, [closeNonce]);
+   212→  return (
+   213→    <div
+   214→      ref={rootRef}
+   215→      className={cn(
+   216→        "overflow-hidden rounded-lg border transition-all duration-300",
+   217→        exam.examKind === "REMEDIAL" ? "border-amber-500/25" : "border-border/70",
+   218→        open && "bg-muted/30",
+   219→        accented && open && "border-l-2 border-l-violet-500/50",
+   220→        flash && "border-violet-500/60 ring-2 ring-violet-500/40"
+   221→      )}
+   222→    >
+   223→      <button
+   224→        type="button"
+   225→        aria-expanded={open}
+   226→        onClick={() => setOpen((v) => !v)}
+   227→        className="flex w-full items-center gap-2 px-3 py-2 text-left transition-colors hover:bg-muted/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-violet-500/40"
+   228→      >
+   229→        <Badge variant="outline" className="shrink-0 font-mono text-[10px]">
+   230→          S{exam.semester ?? "?"}
+   231→        </Badge>
+   232→        <span className="min-w-0 flex-1 truncate text-xs font-medium">
+   233→          {kindLabel} · {exam.examSession ?? exam.examDateLabel ?? exam.label}
+   234→        </span>
+   235→        <span className="shrink-0 font-mono text-[11px] tabular-nums text-muted-foreground">
+   236→          SGPA {exam.sgpa?.toFixed(2) ?? "—"}
+   237→        </span>
+   238→        <VerdictChip result={exam.result} />
+   239→        <ChevronDown
+   240→          className={cn("size-3.5 shrink-0 text-muted-foreground transition-transform", open && "rotate-180")}
+   241→          aria-hidden="true"
+   242→        />
+   243→      </button>
+   244→      {open && (
+   245→        <div className="animate-in fade-in-0 slide-in-from-top-1 space-y-2 border-t px-3 py-2 duration-200">
+   246→          <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px] text-muted-foreground">
+   247→            <span>{exam.examDateLabel ? `Held ${exam.examDateLabel}` : null}</span>
+   248→            {exam.academicYear && <span>AY {exam.academicYear}</span>}
+   249→            {exam.seatNo && (
+   250→              <span className="inline-flex items-center gap-1">
+   251→                <IdCard className="size-3" aria-hidden="true" /> {exam.seatNo}
+   252→              </span>
+   253→            )}
+   254→            <span>
+   255→              {exam.earnedCredit ?? "—"}/{exam.offeredCredit ?? "—"} credits this exam
+   256→            </span>
+   257→            {exam.examKind === "REGULAR" && exam.totalEarnedCredit != null && (
+   258→              <span>
+   259→                career {exam.totalEarnedCredit}/{exam.totalOfferedCredit} · CGPA {exam.cgpa?.toFixed(2) ?? "—"}
+   260→              </span>
+   261→            )}
+   262→            {careerDelta != null && (
+   263→              <span className="inline-flex items-center gap-1">
+   264→                <span className="sr-only">Career CGPA change at this exam: </span>
+   265→                <DeltaChip delta={careerDelta} />
+   266→              </span>
+   267→            )}
+   268→          </div>
+   269→          <div className="overflow-hidden rounded-md border">
+   270→            <table className="w-full text-left text-[11px]">
+   271→              <thead>
+   272→                <tr className="border-b bg-muted/50 text-muted-foreground">
+   273→                  <th className="px-2 py-1 font-medium">Subject</th>
+   274→                  <th className="px-2 py-1 text-center font-medium">Cr</th>
+   275→                  <th className="px-2 py-1 text-center font-medium">Grade</th>
+   276→                  <th className="px-2 py-1 text-center font-medium">CP</th>
+   277→                </tr>
+   278→              </thead>
+   279→              <tbody>
+   280→                {exam.subjects.map((s: ErpResultSubjectRow) => (
+   281→                  <tr
+   282→                    key={s.code}
+   283→                    className={cn(
+   284→                      "border-b last:border-b-0",
+   285→                      s.creditPoint === 0 && "bg-rose-500/5"
+   286→                    )}
+   287→                  >
+   288→                    <td className="px-2 py-1">
+   289→                      <span className="font-mono text-[10px] text-muted-foreground">{s.code}</span>
+   290→                      <span className="ml-1.5">{s.name}</span>
+   291→                    </td>
+   292→                    <td className="px-2 py-1 text-center tabular-nums">{s.credit ?? "—"}</td>
+   293→                    <td className="px-2 py-1 text-center">
+   294→                      <GradeChip grade={s.grade} />
+   295→                    </td>
+   296→                    <td
+   297→                      className={cn(
+   298→                        "px-2 py-1 text-center font-mono tabular-nums",
+   299→                        s.creditPoint === 0 && "font-semibold text-rose-600 dark:text-rose-400"
+   300→                      )}
+   301→                    >
+   302→                      {s.creditPoint ?? "—"}
+   303→                    </td>
+   304→                  </tr>
+   305→                ))}
+   306→              </tbody>
+   307→            </table>
+   308→          </div>
+   309→          <p className="text-[10px] leading-relaxed text-muted-foreground">
+   310→            Component grades (SEE theory/practical, CCE mid/internal/viva) are on the ERP page; CP = credit points
+   311→            earned. A 0-CP row means the subject is not cleared yet.
+   312→          </p>
+   313→        </div>
+   314→      )}
+   315→    </div>
+   316→  );
+   317→}
+   318→
+   319→/** One pending subject row + its full published attempt history. */
+   320→function PendingItem({
+   321→  pending,
+   322→  exams,
+   323→  onFocusExam,
+   324→}: {
+   325→  pending: PendingSubject;
+   326→  exams: ErpResultExam[];
+   327→  onFocusExam: (typeId: string) => void;
+   328→}) {
+   329→  const [open, setOpen] = useState(false);
+   330→  const history = attemptHistory(exams, pending.code);
+   331→  return (
+   332→    <li>
+   333→      <button
+   334→        type="button"
+   335→        onClick={() => setOpen((v) => !v)}
+   336→        aria-expanded={open}
+   337→        className="-mx-1 flex w-full items-center gap-2 rounded border-l-2 border-l-amber-500/40 px-1 py-0.5 text-left text-xs transition-colors hover:bg-amber-500/10 hover:border-l-amber-500/70 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-500/40"
+   338→        title={open ? "Hide every published attempt" : "Show every published attempt"}
+   339→      >
+   340→        <span className="font-mono text-[10px] text-muted-foreground">{pending.code}</span>
+   341→        <span className="min-w-0 flex-1 truncate">{pending.name}</span>
+   342→        {history.length > 1 && (
+   343→          <span className="shrink-0 rounded border border-amber-500/30 px-1 font-mono text-[9px] tabular-nums text-amber-700 dark:text-amber-300">
+   344→            {history.length} tries
+   345→          </span>
+   346→        )}
+   347→        {pending.credit != null && <span className="shrink-0 tabular-nums text-muted-foreground">{pending.credit} cr</span>}
+   348→        <GradeChip grade={pending.grade} />
+   349→        <span className="hidden shrink-0 text-[10px] text-muted-foreground sm:inline">
+   350→          latest: {pending.examDateKey ?? pending.examLabel.slice(0, 24)}
+   351→        </span>
+   352→        <ChevronDown
+   353→          className={cn("size-3 shrink-0 text-muted-foreground transition-transform", open && "rotate-180")}
+   354→          aria-hidden="true"
+   355→        />
+   356→      </button>
+   357→      {open && (
+   358→        <div className="mb-1 ml-1 space-y-1 rounded-md border border-amber-500/20 bg-background/60 px-2 py-1.5">
+   359→          <p className="text-[10px] font-medium uppercase tracking-wide text-muted-foreground">
+   360→            Every published attempt
+   361→          </p>
+   362→          {history.map((h) => (
+   363→            <div key={h.typeId} className="flex items-center gap-2 text-[11px]">
+   364→              <Badge variant="outline" className="shrink-0 font-mono text-[9px]">
+   365→                S{h.semester ?? "?"}
+   366→              </Badge>
+   367→              <span className="w-14 shrink-0">{h.kind === "REMEDIAL" ? "Remedial" : h.kind === "REGULAR" ? "Regular" : "Exam"}</span>
+   368→              <span className="min-w-0 flex-1 truncate text-muted-foreground">{h.dateLabel ?? h.dateKey ?? "date not printed"}</span>
+   369→              <GradeChip grade={h.grade} />
+   370→              <span
+   371→                className={cn(
+   372→                  "w-9 shrink-0 text-right font-mono tabular-nums",
+   373→                  h.creditPoint === 0 && "font-semibold text-rose-600 dark:text-rose-400"
+   374→                )}
+   375→              >
+   376→                {h.creditPoint ?? "—"} CP
+   377→              </span>
+   378→              <button
+   379→                type="button"
+   380→                onClick={() => onFocusExam(h.typeId)}
+   381→                aria-label={`Open the ${h.kind === "REMEDIAL" ? "remedial" : "regular"} exam from ${h.dateLabel ?? h.dateKey ?? "this attempt"} in the list below`}
+   382→                title="Open this exam in the list below"
+   383→                className="shrink-0 rounded p-0.5 text-muted-foreground transition-colors hover:bg-violet-500/10 hover:text-violet-600 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-violet-500/40 dark:hover:text-violet-400"
+   384→              >
+   385→                <History className="size-3" aria-hidden="true" />
+   386→              </button>
+   387→            </div>
+   388→          ))}
+   389→        </div>
+   390→      )}
+   391→    </li>
+   392→  );
+   393→}
+   394→
+   395→/** One retry-story: a subject's grade timeline, oldest → latest, chips deep-link their exam. */
+   396→function StoryRow({ story, onFocusExam }: { story: SubjectStory; onFocusExam: (typeId: string) => void }) {
+   397→  return (
+   398→    <li className="flex flex-wrap items-center gap-x-2 gap-y-1 text-xs">
+   399→      <span className="font-mono text-[10px] text-muted-foreground">{story.code}</span>
+   400→      <span className="min-w-0 flex-1 truncate">{story.name}</span>
+   401→      <span className="flex shrink-0 items-center gap-0.5" aria-label="grade timeline, oldest to latest">
+   402→        {story.attempts.map((a, i) => (
+   403→          <span key={`${a.typeId}-${i}`} className="flex items-center gap-0.5">
+   404→            {i > 0 && (
+   405→              <span className="text-muted-foreground/50" aria-hidden="true">
+   406→                →
+   407→              </span>
+   408→            )}
+   409→            <button
+   410→              type="button"
+   411→              onClick={() => onFocusExam(a.typeId)}
+   412→              title={`${a.kind === "REMEDIAL" ? "Remedial" : a.kind === "REGULAR" ? "Regular" : "Exam"} S${a.semester ?? "?"} ${a.dateLabel ?? a.dateKey ?? ""} — ${a.grade ?? "no grade"}, ${a.creditPoint ?? "—"} CP — click to open this exam`}
+   413→              className="rounded focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-violet-500/40"
+   414→            >
+   415→              <GradeChip grade={a.grade} />
+   416→            </button>
+   417→          </span>
+   418→        ))}
+   419→      </span>
+   420→      {story.cleared ? (
+   421→        <span className="inline-flex shrink-0 items-center gap-0.5 rounded-full border border-emerald-500/40 bg-emerald-500/10 px-1.5 py-0.5 text-[10px] font-medium text-emerald-700 dark:text-emerald-300">
+   422→          <CheckCircle2 className="size-2.5" aria-hidden="true" /> cleared
+   423→        </span>
+   424→      ) : (
+   425→        <span className="inline-flex shrink-0 items-center gap-0.5 rounded-full border border-amber-500/40 bg-amber-500/10 px-1.5 py-0.5 text-[10px] font-medium text-amber-700 dark:text-amber-300">
+   426→          <AlertTriangle className="size-2.5" aria-hidden="true" /> not cleared
+   427→        </span>
+   428→      )}
+   429→    </li>
+   430→  );
+   431→}
+   432→
+   433→export function ResultsCard({ className }: { className?: string }) {
+   434→  const queryClient = useQueryClient();
+   435→  const rootRef = useRef<HTMLDivElement>(null);
+   436→  const [refreshing, setRefreshing] = useState(false);
+   437→  const [copied, setCopied] = useState(false);
+   438→  const [whatIfSgpa, setWhatIfSgpa] = useState("");
+   439→  const [whatIfCredits, setWhatIfCredits] = useState("");
+   440→  // Deep-link state: bumping focusNonce opens + scrolls to + flashes the
+   441→  // targeted exam row (used by the remedial SGPA markers).
+   442→  const [focusTarget, setFocusTarget] = useState<string | null>(null);
+   443→  const [focusNonce, setFocusNonce] = useState(0);
+   444→  const [storiesOpen, setStoriesOpen] = useState(false);
+   445→  const query = useQuery({ queryKey: qk.results, queryFn: () => fetchResults() });
+   446→  const data = query.data;
+   447→  const summary = data ? deriveResultsSummary(data.exams) : null;
+   448→  const deltas = data ? careerDeltas(data.exams) : null;
+   449→  const stories = data ? subjectStories(data.exams) : [];
+   450→  const openStoryCount = stories.filter((st) => !st.cleared).length;
+   451→
+   452→  const onFocusExam = (typeId: string) => {
+   453→    setFocusTarget(typeId);
+   454→    setFocusNonce((n) => n + 1);
+   455→  };
+   456→
+   457→  const onRefresh = async () => {
+   458→    setRefreshing(true);
+   459→    try {
+   460→      const fresh = await fetchResults(true);
+   461→      queryClient.setQueryData(qk.results, fresh);
+   462→      if (fresh.exams.length > 0) toast.success("Exam results refreshed from the ERP");
+   463→      else toast.message("No published results on the ERP yet");
+   464→    } catch (e) {
+   465→      toast.error(`Refresh failed: ${compactErrorText(e instanceof Error ? e.message : String(e), 120)}`);
+   466→    } finally {
+   467→      setRefreshing(false);
+   468→    }
+   469→  };
+   470→
+   471→  const onCopy = async () => {
+   472→    if (!data?.exams.length) {
+   473→      toast.message(query.isLoading ? "Results are still loading — try again in a moment" : "Nothing to copy yet — no exam results loaded");
+   474→      return;
+   475→    }
+   476→    const text = resultsSummaryText(data.exams);
+   477→    if (!text) {
+   478→      toast.message("Nothing to copy yet — no regular exam published");
+   479→      return;
+   480→    }
+   481→    try {
+   482→      await navigator.clipboard.writeText(text);
+   483→      setCopied(true);
+   484→      toast.success("Academic summary copied as text");
+   485→      setTimeout(() => setCopied(false), 2000);
+   486→    } catch {
+   487→      toast.error("Copy failed — the clipboard is unavailable here");
+   488→    }
+   489→  };
+   490→
+   491→  /* Command-palette hooks: the palette navigates to the dashboard then fires
+   492→     these CustomEvents. A ref keeps the listener stable while the closure
+   493→     inside stays fresh (it always sees the latest state/data). */
+   494→  const copyRef = useRef(onCopy);
+   495→  copyRef.current = onCopy;
+   496→  useEffect(() => {
+   497→    const onCopyEvt = () => copyRef.current();
+   498→    const onHistoryEvt = () => {
+   499→      setStoriesOpen(true);
+   500→      rootRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+   501→    };
+   502→    window.addEventListener("erp:copy-summary", onCopyEvt);
+   503→    window.addEventListener("erp:open-retry-history", onHistoryEvt);
+   504→    return () => {
+   505→      window.removeEventListener("erp:copy-summary", onCopyEvt);
+   506→      window.removeEventListener("erp:open-retry-history", onHistoryEvt);
+   507→    };
+   508→  }, []);
+   509→
+   510→  const creditsPct =
+   511→    summary && summary.creditsEarned != null && summary.creditsOffered
+   512→      ? Math.min(100, Math.round((summary.creditsEarned / summary.creditsOffered) * 100))
+   513→      : null;
+   514→  const maxSgpa = Math.max(10, ...(summary?.regularSeries.map((p) => p.sgpa) ?? [0]));
+   515→  const progression = data ? cgpaProgression(data.exams) : [];
+   516→  const defaultNextCredits = summary?.latestRegular?.offeredCredit ?? null;
+   517→  const parsedSgpa = parseFloat(whatIfSgpa);
+   518→  const parsedCredits = parseFloat(whatIfCredits) || defaultNextCredits;
+   519→  const sgpaValid = whatIfSgpa.trim() !== "" && !isNaN(parsedSgpa) && parsedSgpa >= 0 && parsedSgpa <= 10;
+   520→  const creditsValid = parsedCredits != null && parsedCredits > 0;
+   521→  const projected =
+   522→    summary && sgpaValid && creditsValid
+   523→      ? projectCgpa(summary.cgpa, summary.creditsOffered, parsedSgpa, parsedCredits)
+   524→      : null;
+   525→
+   526→  return (
+   527→    <Card ref={rootRef} className={cn("overflow-hidden", className)} data-testid="results-card">
+   528→      <CardHeader className="pb-3">
+   529→        <div className="flex items-start gap-3">
+   530→          <span
+   531→            className="flex size-8 shrink-0 items-center justify-center rounded-md bg-violet-500/10 text-violet-600 dark:text-violet-400"
+   532→            aria-hidden="true"
+   533→          >
+   534→            <GraduationCap className="size-4" />
+   535→          </span>
+   536→          <div className="min-w-0 flex-1">
+   537→            <CardTitle className="text-base tracking-tight">Academic record</CardTitle>
+   538→            <CardDescription className="text-xs">
+   539→              Published exam results from the ERP&apos;s Final Results page — grades, SGPA/CGPA and pending subjects.
+   540→            </CardDescription>
+   541→          </div>
+   542→          <div className="flex shrink-0 items-center gap-1.5 print:hidden">
+   543→            {data?.fetchedAt && (
+   544→              <span className="hidden text-[10px] text-muted-foreground sm:inline" title="Last fetched from the ERP">
+   545→                {ago(data.fetchedAt)}
+   546→              </span>
+   547→            )}
+   548→            {data?.stale && (
+   549→              <Badge variant="outline" className="border-amber-500/40 text-[10px] text-amber-700 dark:text-amber-300">
+   550→                cached
+   551→              </Badge>
+   552→            )}
+   553→            <Button
+   554→              variant="ghost"
+   555→              size="sm"
+   556→              className="h-7 gap-1 px-2 text-xs"
+   557→              onClick={onCopy}
+   558→              disabled={!data?.available || !data?.exams.length}
+   559→              aria-label="Copy a plain-text academic summary"
+   560→              title="Copy a plain-text academic summary"
+   561→            >
+   562→              {copied ? (
+   563→                <ClipboardCheck className="size-3.5 text-emerald-600 dark:text-emerald-400" aria-hidden="true" />
+   564→              ) : (
+   565→                <Copy className="size-3.5" aria-hidden="true" />
+   566→              )}
+   567→              <span className="hidden sm:inline">Copy</span>
+   568→            </Button>
+   569→            <Button
+   570→              variant="ghost"
+   571→              size="sm"
+   572→              className="h-7 gap-1 px-2 text-xs"
+   573→              onClick={onRefresh}
+   574→              disabled={refreshing || query.isLoading}
+   575→              aria-label="Refresh exam results from the ERP"
+   576→            >
+   577→              <RefreshCw className={cn("size-3.5", (refreshing || query.isLoading) && "animate-spin")} aria-hidden="true" />
+   578→              Refresh
+   579→            </Button>
+   580→          </div>
+   581→        </div>
+   582→      </CardHeader>
+   583→      <CardContent className="space-y-3">
+   584→        {query.isLoading ? (
+   585→          <div className="space-y-2" aria-label="Loading exam results">
+   586→            <div className="h-14 animate-pulse rounded-lg bg-muted" />
+   587→            <div className="h-16 animate-pulse rounded-lg bg-muted" />
+   588→            <div className="h-10 animate-pulse rounded-lg bg-muted" />
+   589→          </div>
+   590→        ) : !data ? (
+   591→          <p className="py-4 text-center text-sm text-muted-foreground">Could not load exam results.</p>
+   592→        ) : !data.available ? (
+   593→          <p className="py-4 text-center text-sm text-muted-foreground">{data.note ?? "Connect your ERP account in Settings to load exam results."}</p>
+   594→        ) : data.exams.length === 0 ? (
+   595→          <div className="rounded-lg border border-dashed py-5 text-center">
+   596→            <p className="text-sm font-medium">No published results yet</p>
+   597→            <p className="mx-auto mt-1 max-w-sm text-xs text-muted-foreground">
+   598→              {data.note ?? "The ERP lists no Final Results for your enrollment — the card fills in the moment one is published."}
+   599→            </p>
+   600→          </div>
+   601→        ) : summary ? (
+   602→          <>
+   603→            {/* hero — latest REGULAR exam is the career line */}
+   604→            <div className="flex flex-wrap items-center justify-between gap-4 rounded-lg border border-violet-500/20 bg-gradient-to-br from-violet-500/10 via-indigo-500/5 to-transparent px-4 py-3">
+   605→              <div>
+   606→                <div className="flex items-baseline gap-2">
+   607→                  <Award className="size-5 self-center text-violet-500/70" aria-hidden="true" />
+   608→                  <span className="text-3xl font-bold tabular-nums tracking-tight text-violet-700 dark:text-violet-300">
+   609→                    {summary.cgpa?.toFixed(2) ?? "—"}
+   610→                  </span>
+   611→                  <div className="leading-tight">
+   612→                    <p className="text-sm font-medium">CGPA</p>
+   613→                    <p className="text-[11px] text-muted-foreground">
+   614→                      {summary.latestRegular?.examDateLabel
+   615→                        ? `career line after ${summary.latestRegular.examDateLabel}`
+   616→                        : "career cumulative"}
+   617→                    </p>
+   618→                  </div>
+   619→                </div>
+   620→                <CgpaSparkline points={progression} />
+   621→              </div>
+   622→              <div className="min-w-40 flex-1 sm:max-w-56">
+   623→                <div className="mb-1 flex items-baseline justify-between text-[11px]">
+   624→                  <span className="font-medium tabular-nums">
+   625→                    {summary.creditsEarned ?? "—"} / {summary.creditsOffered ?? "—"} credits
+   626→                  </span>
+   627→                  <span className="tabular-nums text-muted-foreground">{creditsPct != null ? `${creditsPct}%` : ""}</span>
+   628→                </div>
+   629→                <div className="h-1.5 overflow-hidden rounded-full bg-muted" role="presentation">
+   630→                  <div
+   631→                    className="h-full rounded-full bg-gradient-to-r from-violet-500 to-indigo-500 transition-[width] duration-700"
+   632→                    style={{ width: `${creditsPct ?? 0}%` }}
+   633→                  />
+   634→                </div>
+   635→                <p className="mt-1 text-[10px] text-muted-foreground">
+   636→                  earned / offered · as printed on the latest regular result
+   637→                </p>
+   638→              </div>
+   639→            </div>
+   640→
+   641→            {/* pending backlogs — the honest current state */}
+   642→            {summary.pending.length > 0 ? (
+   643→              <div className="rounded-lg border border-amber-500/30 bg-amber-500/5 px-3 py-2.5" data-testid="pending-backlogs">
+   644→                <p className="flex items-center gap-1.5 text-xs font-medium text-amber-700 dark:text-amber-300">
+   645→                  <AlertTriangle className="size-3.5" aria-hidden="true" />
+   646→                  {summary.pending.length} subject{summary.pending.length === 1 ? "" : "s"} not cleared yet
+   647→                </p>
+   648→                <ul className="mt-1.5 space-y-0.5">
+   649→                  {summary.pending.map((p) => (
+   650→                    <PendingItem key={p.code} pending={p} exams={data.exams} onFocusExam={onFocusExam} />
+   651→                  ))}
+   652→                </ul>
+   653→                <p className="mt-1.5 text-[10px] leading-relaxed text-muted-foreground">
+   654→                  Latest ERP mention per subject decides — earlier failures that a later exam cleared are not listed.
+   655→                  The next remedial window is where these can be retried.
+   656→                </p>
+   657→              </div>
+   658→            ) : (
+   659→              <p className="flex items-center gap-1.5 rounded-lg border border-emerald-500/30 bg-emerald-500/5 px-3 py-2 text-xs font-medium text-emerald-700 dark:text-emerald-300">
+   660→                <CheckCircle2 className="size-3.5" aria-hidden="true" />
+   661→                No pending backlogs — every published subject result is cleared.
+   662→              </p>
+   663→            )}
+   664→
+   665→            {/* what-if — honest CGPA projection for the next semester */}
+   666→            {summary.hasRecord && summary.cgpa != null && summary.creditsOffered != null && (
+   667→              <div
+   668→                className="rounded-lg border border-dashed border-violet-500/30 bg-violet-500/5 px-3 py-2.5"
+   669→                data-testid="cgpa-whatif"
+   670→              >
+   671→                <div className="flex flex-wrap items-center gap-2 text-xs">
+   672→                  <TrendingUp className="size-3.5 shrink-0 text-violet-500/70" aria-hidden="true" />
+   673→                  <span className="font-medium">What if</span>
+   674→                  <input
+   675→                    type="number"
+   676→                    inputMode="decimal"
+   677→                    min={0}
+   678→                    max={10}
+   679→                    step={0.1}
+   680→                    placeholder="SGPA"
+   681→                    value={whatIfSgpa}
+   682→                    onChange={(e) => setWhatIfSgpa(e.target.value)}
+   683→                    aria-label="Projected SGPA for your next semester (0 to 10)"
+   684→                    className="h-7 w-16 rounded border border-border bg-background px-1.5 text-center font-mono text-xs tabular-nums outline-none focus-visible:ring-2 focus-visible:ring-violet-500/40"
+   685→                  />
+   686→                  <span className="text-muted-foreground">next semester with</span>
+   687→                  <input
+   688→                    type="number"
+   689→                    inputMode="numeric"
+   690→                    min={1}
+   691→                    max={45}
+   692→                    step={1}
+   693→                    value={whatIfCredits}
+   694→                    onChange={(e) => setWhatIfCredits(e.target.value)}
+   695→                    placeholder={defaultNextCredits != null ? String(defaultNextCredits) : "cr"}
+   696→                    aria-label="Credits you will take next semester"
+   697→                    className="h-7 w-14 rounded border border-border bg-background px-1.5 text-center font-mono text-xs tabular-nums outline-none placeholder:text-muted-foreground/60 focus-visible:ring-2 focus-visible:ring-violet-500/40"
+   698→                  />
+   699→                  <span className="text-muted-foreground">credits —</span>
+   700→                  {projected != null && summary.cgpa != null ? (
+   701→                    <span className="ml-auto inline-flex items-baseline gap-1.5">
+   702→                      <span className="text-[11px] text-muted-foreground">CGPA →</span>
+   703→                      <span className="text-lg font-bold tabular-nums tracking-tight text-violet-700 dark:text-violet-300">
+   704→                        {projected.toFixed(3)}
+   705→                      </span>
+   706→                      <DeltaChip delta={projected - summary.cgpa} />
+   707→                    </span>
+   708→                  ) : (
+   709→                    <span className="ml-auto text-[11px] text-muted-foreground">
+   710→                      {sgpaValid && !creditsValid ? "credits must be 1–45" : "enter a target SGPA (0–10)"}
+   711→                    </span>
+   712→                  )}
+   713→                </div>
+   714→                <p className="mt-1 text-[10px] leading-relaxed text-muted-foreground">
+   715→                  Estimate only — treats the ERP&apos;s career CGPA as cumulative points ÷ offered credits
+   716→                  ({summary.cgpa.toFixed(3)} × {summary.creditsOffered}). Your real result follows the
+   717→                  university&apos;s exact rules; clearing a pending subject next semester lifts it further.
+   718→                </p>
+   719→              </div>
+   720→            )}
+   721→
+   722→            {/* SGPA trend — REGULAR exams as bars, remedials as markers */}
+   723→            <div>
+   724→              <p className="mb-1.5 text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
+   725→                SGPA by semester (regular exams)
+   726→              </p>
+   727→              {summary.regularSeries.length > 0 ? (
+   728→                <div className="flex items-end gap-2" data-testid="sgpa-trend">
+   729→                  {summary.regularSeries.map((p) => (
+   730→                    <div key={p.typeId} className="flex min-w-0 flex-1 flex-col items-center gap-1">
+   731→                      <span
+   732→                        className={cn(
+   733→                          "font-mono text-[10px] font-semibold tabular-nums",
+   734→                          p.passed ? "text-emerald-600 dark:text-emerald-400" : "text-rose-600 dark:text-rose-400"
+   735→                        )}
+   736→                      >
+   737→                        {p.sgpa.toFixed(2)}
+   738→                      </span>
+   739→                      <div
+   740→                        className="flex w-full max-w-14 items-end justify-center rounded-t-md border-b border-border/60"
+   741→                        style={{ height: 64 }}
+   742→                        role="presentation"
+   743→                      >
+   744→                        <div
+   745→                          className={cn(
+   746→                            "w-full rounded-t-md transition-[height] duration-700",
+   747→                            p.passed
+   748→                              ? "bg-gradient-to-t from-emerald-500/70 to-emerald-400/80"
+   749→                              : "bg-gradient-to-t from-rose-500/70 to-rose-400/80"
+   750→                          )}
+   751→                          style={{ height: `${Math.max(6, (p.sgpa / maxSgpa) * 100)}%` }}
+   752→                          title={`Semester ${p.semester}: SGPA ${p.sgpa.toFixed(2)} (${p.passed ? "Pass" : "Fail"})`}
+   753→                        />
+   754→                      </div>
+   755→                      <span className="text-[10px] font-medium text-muted-foreground">S{p.semester}</span>
+   756→                    </div>
+   757→                  ))}
+   758→                  {(summary.regularSeries[summary.regularSeries.length - 1]?.semester ?? null) != null &&
+   759→                    (summary.regularSeries[summary.regularSeries.length - 1]?.semester as number) < 8 && (
+   760→                      <div
+   761→                        className="flex min-w-0 flex-1 flex-col items-center gap-1"
+   762→                        title="Next semester — in progress, no result published yet"
+   763→                        data-testid="trend-next-placeholder"
+   764→                      >
+   765→                        <span className="font-mono text-[10px] text-muted-foreground/50">—</span>
+   766→                        <div className="flex w-full max-w-14 items-end justify-center" style={{ height: 64 }} role="presentation">
+   767→                          <div
+   768→                            className="w-full rounded-t-md border border-dashed border-border/80 bg-muted/20"
+   769→                            style={{ height: "26%" }}
+   770→                          />
+   771→                        </div>
+   772→                        <span className="text-[10px] font-medium text-muted-foreground/70">
+   773→                          S{(summary.regularSeries[summary.regularSeries.length - 1]?.semester as number) + 1}
+   774→                        </span>
+   775→                      </div>
+   776→                    )}
+   777→                </div>
+   778→              ) : (
+   779→                <p className="text-xs text-muted-foreground">No regular exam results parsed yet.</p>
+   780→              )}
+   781→              {summary.remedialSeries.length > 0 && (
+   782→                <div className="mt-1.5 flex flex-wrap items-center gap-1.5" data-testid="remedial-markers">
+   783→                  <span className="text-[10px] text-muted-foreground">Remedial attempts:</span>
+   784→                  {summary.remedialSeries.map((p) => (
+   785→                    <button
+   786→                      key={p.typeId}
+   787→                      type="button"
+   788→                      onClick={() => {
+   789→                        onFocusExam(p.typeId);
+   790→                      }}
+   791→                      className="inline-flex cursor-pointer items-center gap-1 rounded-full border border-amber-500/40 bg-amber-500/10 px-2 py-0.5 font-mono text-[10px] tabular-nums text-amber-700 transition-colors hover:bg-amber-500/20 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-500/40 dark:text-amber-300"
+   792→                      title={`Remedial attempt for semester ${p.semester}: SGPA ${p.sgpa.toFixed(2)} (${p.passed ? "Pass" : "Fail"}) — click to open that exam below`}
+   793→                    >
+   794→                      ↺ S{p.semester} · {p.sgpa.toFixed(2)}
+   795→                    </button>
+   796→                  ))}
+   797→                </div>
+   798→              )}
+   799→            </div>
+   800→
+   801→            {/* retry stories — subjects with retries or fails, oldest → latest */}
+   802→            {stories.length > 0 && (
+   803→              <div className="rounded-lg border border-border/70" data-testid="retry-stories">
+   804→                <button
+   805→                  type="button"
+   806→                  onClick={() => setStoriesOpen((v) => !v)}
+   807→                  aria-expanded={storiesOpen}
+   808→                  className="flex w-full items-center gap-2 px-3 py-2 text-left text-xs font-medium transition-colors hover:bg-muted/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-violet-500/40"
+   809→                >
+   810→                  <History className="size-3.5 shrink-0 text-muted-foreground" aria-hidden="true" />
+   811→                  Retry history
+   812→                  <Badge variant="outline" className="shrink-0 font-mono text-[10px]">
+   813→                    {stories.length}
+   814→                  </Badge>
+   815→                  {openStoryCount > 0 && (
+   816→                    <span
+   817→                      className="shrink-0 rounded-full border border-amber-500/40 bg-amber-500/10 px-1.5 py-px text-[9px] font-medium tabular-nums text-amber-700 dark:text-amber-300"
+   818→                      title="Subjects whose latest attempt is not cleared"
+   819→                    >
+   820→                      {openStoryCount} open
+   821→                    </span>
+   822→                  )}
+   823→                  <span className="hidden min-w-0 flex-1 truncate text-[10px] font-normal text-muted-foreground sm:inline">
+   824→                    every subject with a retry or a fail — grade timeline, oldest → latest
+   825→                  </span>
+   826→                  <ChevronDown
+   827→                    className={cn("ml-auto size-3.5 shrink-0 text-muted-foreground transition-transform", storiesOpen && "rotate-180")}
+   828→                    aria-hidden="true"
+   829→                  />
+   830→                </button>
+   831→                {storiesOpen && (
+   832→                  <ul className="animate-in fade-in-0 slide-in-from-top-1 space-y-1 border-t px-3 py-2 duration-200">
+   833→                    {stories.map((s) => (
+   834→                      <StoryRow key={s.code} story={s} onFocusExam={onFocusExam} />
+   835→                    ))}
+   836→                  </ul>
+   837→                )}
+   838→              </div>
+   839→            )}
+   840→
+   841→            {/* per-exam breakdown */}
+   842→            <div className="space-y-1.5">
+   843→              <p className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">All published results</p>
+   844→              {data.exams.map((exam, i) => (
+   845→                <ExamRow
+   846→                  key={exam.typeId}
+   847→                  exam={exam}
+   848→                  defaultOpen={i === 0}
+   849→                  focusNonce={exam.typeId === focusTarget ? focusNonce : 0}
+   850→                  closeNonce={exam.typeId === focusTarget ? 0 : focusNonce}
+   851→                  accented={exam.typeId === focusTarget}
+   852→                  careerDelta={deltas?.get(exam.typeId) ?? null}
+   853→                />
+   854→              ))}
+   855→            </div>
+   856→
+   857→            {data.note && <p className="text-[10px] text-muted-foreground">{data.note}</p>}
+   858→          </>
+   859→        ) : null}
+   860→      </CardContent>
+   861→    </Card>
+   862→  );
+   863→}
+   864→

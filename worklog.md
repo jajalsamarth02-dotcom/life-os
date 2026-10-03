@@ -2588,3 +2588,31 @@ Unresolved issues / risks & next-phase priorities:
 4. Dead/thin seeds unchanged: /student/exam-routine ERP-500 (no probe before Nov 2026); /student/assessment redirect (covered).
 5. QA notes carried + one more: replacing a <p> with a <button> in JSX — the opening tag's `>` is easy to lose when the last attribute is a multiline {cn(...)}} — tsc catches it immediately (JSX2657), fix before QA.
 6. Keeper cron 430680 alive; worklog protocol unchanged.
+
+---
+Task ID: 70
+Agent: Z.ai Code (main orchestrator)
+Task: retry-story spotlight — code-carrying deep-links (palette per-story commands + pending-row History jumps), cross-tab-safe handoff
+
+Work Log (Round 70 — 3 Oct, 11:30–11:45 +08):
+- Parallel protocol: only my Task 69 present (worklog mtime 03:17Z, no newer src activity) → clean round. Server 200. RSS at round start: 1984MB (flat vs r69 end) → frugal round (4 src files, 1 new test file, ~12 page loads).
+
+Completed modifications / verified:
+1. FEATURE — retry stories are now deep-link TARGETS, not just a list. New pure gate `matchStoryCode(code, stories)` in results-summary.ts (exact-match only — case/whitespace drift → null → generic fallback, same honesty contract as knownSubjectCode). The `erp:open-retry-history` CustomEvent is REPLACED by a React-Query cache handoff (`qk.retryFocus` = {code, nonce}):
+   - WHY: Radix Tabs unmounts DashboardTab when another tab is active (proven live this round: attendance tab → results-card gone). The old palette command dispatched the event immediately after onNavigate — the card wasn't mounted → event silently LOST (latent bug since the command shipped). A cache handoff persists until the card mounts and consumes it → zero missed commands.
+   - Command palette: new "Retry stories" command group (top 6, read-only cache join via `useQuery({enabled:false})` — ZERO fetch; cold/GC'd cache → group hidden). Each row: History icon (emerald cleared / amber open) + mono code + name + "N attempts · latest X" + verdict icon. Generic "Open retry history" kept (code=null).
+   - In-card source: pending-backlogs rows whose subject also has a roll-up story gained a trailing History button (violet hover family, aria-label "Open the retry story for CODE…"). Restructured PendingItem li → flex row (button-in-button is illegal HTML — the story button is a SIBLING of the toggle).
+2. STYLE — StoryRow spotlight = exact ExamRow deep-link language: persistent violet left edge (`border-l-violet-500/50`) + `bg-violet-500/[0.06]` while spotlit, plus the 1.8s `ring-2 ring-violet-500/40` flash + scrollIntoView(nearest) on nonce bump; rows get px-1 py-0.5 + rounded-r so the edge reads cleanly. Targeted jumps scroll the STORIES block (not the card top); generic jumps keep card-top behavior and CLEAR any spotlight.
+3. TESTS — new scripts/test-results-r70.ts (14 cases): exact hits ×3, all drift modes → null (case/whitespace/unknown/empty/null/undefined/empty-list), subjectStories round-trip (retry + single-F qualify, single clean pass doesn't, codes gate-stable, cleared F→B spotlatable). HONESTY: my first draft mis-assumed a single F with no retry is NOT a story — the fixture proved me wrong (FAIL_RE matches F alone, by design); fixed the TEST, not the lib. Full suite: 344 → 358 green (routine-parse BAD lines = pre-existing honest exposure, exit 0).
+4. tsc ×3 (src/ ZERO errors; one intermediate caught my own deletion of the erp:copy-summary listener while replacing the retry listener — restored immediately; palette resultsQ needed explicit `useQuery<ResultsResponse | null>` generic).
+5. BROWSER QA ALL GREEN (LIVE data): pending rows = 2, both have story buttons; click BETCE12302 → stories open (7 rows), EXACTLY ONE spotlit (BETCE12302), computed styles confirm violet (bg 6% alpha, border-left 50%); flash ring caught ACTIVE:true within the 1.8s window on the cross-tab run. Palette (Ctrl+K): "Retry stories" group + 4 real commands (BETCE12302 2×F, BETCE14312 1×F, BETCE11301 F→B cleared, BETEE10301 2×C); CROSS-TAB: attendance tab (card unmounted) → palette → click BETCE14312 → auto-landed dashboard, stories open, spotlight = BETCE14312, flash active. Generic command → opens + spotlight cleared (spotlitCount 0). Screenshots: /tmp/qa-r70-story-spotlight.png (light, violet edge + both pending History buttons), /tmp/qa-r70-dark.png (dark intact), /tmp/qa-r70-mobile.png (docW=390 hScroll=false, compact rows hold). Console fresh-clear + reload → ZERO errors.
+6. End state PRISTINE: newest notification still 2026-10-02T22:37:41Z (06:07 IST, pre-round) — zero sends, zero notify-path touches (handoff + scroll + CSS only).
+7. RSS AFTER ROUND: 1920MB (−64 from 1984 start — biggest net-negative round yet).
+
+Unresolved issues / risks & next-phase priorities:
+1. ⚠️⚠️ MEMORY — 1920MB this instant (net-negative round, ~140MB above the 1.8GB attention line). The STANDING USER PROPOSAL (keeper-side auto-restart when RSS > 1.8GB, double-fork subshell) still needs explicit go-ahead — NOT added silently. Trajectory stays 1890–2010 between rounds; two net-negative rounds in a row (r69 −5, r70 −64) prove frugal rounds reclaim, but inter-round drift persists.
+2. Milestone watch: RWM 11:00–13:00 IST TODAY (was "starts in 134 min" at r69 QA). If a round fires 11:00–13:00 IST (13:30–15:30 +08): FIRST live visual QA of the ongoing progress bar. After 13:00: milestone celebration honest QA if attended.
+3. erp:open-subject (palette → attendance tab) has the SAME cross-tab race the retry event had — it survives by the 60ms+120ms setTimeout convention only. Candidate: migrate to a retryFocus-style handoff in a future round (low risk, do NOT bundle with other work).
+4. Feature residuals: today-card istParts → istNow dedup (cosmetic); palette retry group currently caps at 6 (subjectStories pre-sorts open-first — fine for 7 stories; revisit only if the list grows).
+5. QA notes carried: replacing listeners — when swapping ONE event off a shared useEffect, diff the WHOLE effect (this round nearly shipped without erp:copy-summary); useQuery with enabled:false needs an explicit TData generic or TS infers {}.
+6. Keeper cron 430680 alive; worklog protocol unchanged.

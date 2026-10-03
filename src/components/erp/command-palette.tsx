@@ -1,7 +1,7 @@
 "use client";
 
 import * as React from "react";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useTheme } from "next-themes";
 import { toast } from "sonner";
 import { formatDistanceToNowStrict } from "date-fns";
@@ -43,10 +43,11 @@ import {
 } from "@/components/ui/command";
 import { cn } from "@/lib/utils";
 import { cycleTextSize, TEXT_SIZES } from "@/lib/text-size";
-import { fetchAlaNotes, fetchAssignments, postDemoEvolve, postSync, putSelectedSemester, qk } from "./api";
+import { fetchAlaNotes, fetchAssignments, fetchResults, postDemoEvolve, postSync, putSelectedSemester, qk, type RetryFocusHandoff } from "./api";
+import { subjectStories } from "@/lib/results-summary";
 import { ERP_BASE } from "./shared";
 import { ALA_PRIORITY_META } from "./reminders-tab";
-import type { AttendanceStatus, SubjectView } from "./types";
+import type { AttendanceStatus, ResultsResponse, SubjectView } from "./types";
 import { useTextSize } from "./text-size-card";
 
 const STATUS_DOT: Record<AttendanceStatus, string> = {
@@ -86,6 +87,7 @@ export function CommandPalette({
   subjects,
   semester = "all",
 }: CommandPaletteProps) {
+  const queryClient = useQueryClient();
   const { resolvedTheme, setTheme } = useTheme();
 
   const run = (fn: () => void) => {
@@ -99,6 +101,21 @@ export function CommandPalette({
       onNavigate("attendance");
       window.setTimeout(() => {
         window.dispatchEvent(new CustomEvent("erp:open-subject", { detail: code }));
+      }, 120);
+    });
+  };
+
+  /* Retry-story deep-link: write the handoff AFTER the dashboard tab is
+     active (run() already delays 60ms; the extra tick lets the tab's card
+     mount first). code=null = generic "open retry history". */
+  const openRetryStory = (code: string | null) => {
+    run(() => {
+      onNavigate("dashboard");
+      window.setTimeout(() => {
+        queryClient.setQueryData<RetryFocusHandoff>(qk.retryFocus, {
+          code,
+          nonce: Date.now(),
+        });
       }, 120);
     });
   };
@@ -131,6 +148,20 @@ export function CommandPalette({
   /* Deadline launcher — joins the shared assignments query cache (already
      polled by the ALA section and the app badge), so it costs no extra fetch. */
   const assignmentsQ = useQuery({ queryKey: qk.assignments, queryFn: fetchAssignments, staleTime: 15_000 });
+  /* Retry-story launcher — READ-ONLY cache join (enabled:false never fetches):
+     it sees whatever the dashboard's results card already loaded. Cold or
+     garbage-collected cache → undefined → the group simply stays hidden.
+     Story commands write a qk.retryFocus handoff the card consumes — works
+     even when the dashboard tab isn't mounted (no missed CustomEvents). */
+  const resultsQ = useQuery<ResultsResponse | null>({
+    queryKey: qk.results,
+    queryFn: () => fetchResults(),
+    enabled: false,
+  });
+  const retryStories = React.useMemo(
+    () => (resultsQ.data ? subjectStories(resultsQ.data.exams).slice(0, 6) : []),
+    [resultsQ.data]
+  );
   /* Local note overlay — powers the "Your flagged ALAs" palette group. */
   const alaNotesQ = useQuery({ queryKey: qk.alaNotes, queryFn: fetchAlaNotes, staleTime: 30_000 });
   /* The student's own triage layer as palette rows — mirrors the dashboard's
@@ -465,17 +496,38 @@ export function CommandPalette({
             <CopyIcon className="size-4 text-muted-foreground" aria-hidden="true" />
             Copy academic summary as text
           </CommandItem>
-          <CommandItem
-            onSelect={() =>
-              run(() => {
-                onNavigate("dashboard");
-                window.dispatchEvent(new CustomEvent("erp:open-retry-history"));
-              })
-            }
-          >
+          <CommandItem onSelect={() => openRetryStory(null)}>
             <History className="size-4 text-muted-foreground" aria-hidden="true" />
             Open retry history (grade timelines)
           </CommandItem>
+          {retryStories.length > 0 && (
+            <CommandGroup heading="Retry stories">
+              {retryStories.map((s) => (
+                <CommandItem
+                  key={s.code}
+                  value={`retry-story ${s.code} ${s.name}`}
+                  onSelect={() => openRetryStory(s.code)}
+                  className="gap-2"
+                >
+                  <History
+                    className={cn("size-4 shrink-0", s.cleared ? "text-emerald-500/70" : "text-amber-500/70")}
+                    aria-hidden="true"
+                  />
+                  <span className="font-mono text-xs">{s.code}</span>
+                  <span className="min-w-0 flex-1 truncate">{s.name}</span>
+                  <span className="shrink-0 text-[10px] tabular-nums text-muted-foreground">
+                    {s.attempts.length} attempt{s.attempts.length === 1 ? "" : "s"}
+                    {s.latestGrade ? ` · latest ${s.latestGrade}` : ""}
+                  </span>
+                  {s.cleared ? (
+                    <Check className="size-3.5 shrink-0 text-emerald-500" aria-hidden="true" />
+                  ) : (
+                    <AlertTriangle className="size-3.5 shrink-0 text-amber-500" aria-hidden="true" />
+                  )}
+                </CommandItem>
+              ))}
+            </CommandGroup>
+          )}
         </CommandGroup>
 
         <CommandGroup heading="Actions">
