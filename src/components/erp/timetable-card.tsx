@@ -54,6 +54,7 @@ import { DAY_NAMES_FULL, DAY_NAMES_SHORT, humanizeMins, istNow, useNow } from ".
    would cycle). */
 import {
   daysAheadLabel,
+  daysAheadQualifierClass,
   daysAheadThisWeek,
   IMMINENT_MIN,
   JUST_ENDED_WINDOW_MIN,
@@ -859,9 +860,8 @@ export function TimetableCard({
     [batch, now]
   );
   const weekNextId = weekNext?.id ?? null;
-  const weekNextLabel = weekNext
-    ? daysAheadLabel(daysAheadThisWeek(weekNext.dayOfWeek, now))
-    : null;
+  const weekNextD = weekNext ? daysAheadThisWeek(weekNext.dayOfWeek, now) : null;
+  const weekNextLabel = weekNextD !== null ? daysAheadLabel(weekNextD) : null;
   const ongoing = todaySlots.find((s) => nowMin >= s.startMin && nowMin < s.endMin);
   const next = todaySlots.find((s) => s.startMin > nowMin);
   /* Milestone stakes: rendered on the next/ongoing row only when attending
@@ -967,6 +967,22 @@ export function TimetableCard({
                 ? "Your weekly schedule is empty — the ERP doesn’t publish one, so add your real classes via Manage."
                 : "Enjoy the free day — or add your classes via Manage."}
             </p>
+            {weekNext && weekNextD !== null && (
+              /* r96: the free day still points forward — the empty card gains
+                 the family's week-ahead line (the surface "tomorrow" renders
+                 on, e.g. Sunday before the Monday class). Same pinned math,
+                 same muted ladder; hidden when nothing is synced at all. */
+              <p className="mt-1 flex items-center gap-1.5 text-xs tabular-nums text-muted-foreground">
+                <CalendarClock className="size-3 shrink-0" aria-hidden="true" />
+                <span className="font-mono text-[10px] font-semibold">{weekNext.subjectCode}</span>
+                <span>
+                  {DAY_NAMES_SHORT[weekNext.dayOfWeek]} {hhmm(weekNext.startMin)}
+                </span>
+                <span className={daysAheadQualifierClass(weekNextD)} aria-hidden="true">
+                  · {daysAheadLabel(weekNextD)}
+                </span>
+              </p>
+            )}
           </div>
         ) : (
           <div className="space-y-2">
@@ -1165,6 +1181,38 @@ export function TimetableCard({
                 );
               })}
             </AnimatePresence>
+            {!classesLeftToday && weekNext && weekNextD !== null && (
+              /* r96: the jump always lands — when today's rows are all done,
+                 the deep-link's violet accent used to have no row to mark
+                 (the accent needs a next/ongoing row). This dashed tail row
+                 gives the eye a landing place: the SAME weekNext the grid
+                 marker consumes, muted tones, and it takes the violet
+                 spotlight accent while the focusSignal flash is live. */
+              <div
+                className={cn(
+                  "flex items-center gap-2.5 rounded-lg border border-dashed border-border/60 bg-muted/20 p-2.5",
+                  spotlit && "border-solid border-violet-500/40 bg-violet-500/[0.05]"
+                )}
+                title="Next class this week"
+              >
+                <span className="flex size-9 shrink-0 items-center justify-center rounded-lg bg-muted text-muted-foreground">
+                  <CalendarClock className="size-3.5" aria-hidden="true" />
+                </span>
+                <div className="min-w-0 flex-1">
+                  <p className="truncate text-sm font-medium text-muted-foreground">
+                    <span className="font-mono text-[11px] font-semibold">{weekNext.subjectCode}</span>
+                    {" "}· {DAY_NAMES_SHORT[weekNext.dayOfWeek]} {hhmm(weekNext.startMin)}
+                  </p>
+                  <p className="text-[11px] text-muted-foreground/70">next class this week</p>
+                </div>
+                <span
+                  className={`shrink-0 text-[11px] font-medium tabular-nums ${daysAheadQualifierClass(weekNextD)}`}
+                  aria-hidden="true"
+                >
+                  · {daysAheadLabel(weekNextD)}
+                </span>
+              </div>
+            )}
             {hiddenToday > 0 && (
               <p className="pt-0.5 text-[10px] leading-snug text-muted-foreground/70">
                 {hiddenToday} parallel alternative{hiddenToday === 1 ? "" : "s"} hidden — you picked a different class
