@@ -38,8 +38,8 @@ import { cn } from "@/lib/utils";
 import { applyBatchPicks } from "@/lib/batch-picks";
 import { promptInstall, useCanInstall } from "./install-prompt";
 import { fetchDashboard, fetchTimetable, markAllNotificationsRead, postSync, qk } from "./api";
-import { ago, fmtDT, humanizeMins, istNow, useNow } from "./shared";
-import { chipUrgency, daysAheadThisWeek, daysAheadLabel, justEndedChip, nextUpcomingThisWeek, type TodayLiveClass } from "./today-card";
+import { DAY_NAMES_SHORT, ago, fmtDT, humanizeMins, istNow, useNow } from "./shared";
+import { chipUrgency, daysAheadQualifierClass, daysAheadThisWeek, daysAheadLabel, justEndedChip, nextUpcomingThisWeek, type TodayLiveClass } from "./today-card";
 import type { AppMode, AppNotification, NotificationSeverity } from "./types";
 
 /** Status dot with a soft radiating ping — marks the live/demo connection.
@@ -323,7 +323,8 @@ function NextClassChip({ subjects }: { subjects: { code: string; name: string }[
   if ((!shown && !justEnded && !upcoming) || timetable.isPending) return null;
 
   if (!shown && upcoming) {
-    const DAYS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+    /* r94: the local DAYS array retired — shared DAY_NAMES_SHORT is the one
+       names source (short labels pinned equal to the full names' slices). */
     const uName =
       subjects?.find((x) => x.code === upcoming.subjectCode)?.name ??
       upcoming.subjectCode;
@@ -336,22 +337,22 @@ function NextClassChip({ subjects }: { subjects: { code: string; name: string }[
         <TooltipTrigger asChild>
           <span
             className="hidden shrink-0 cursor-default items-center gap-1.5 whitespace-nowrap rounded-full border border-border/70 bg-muted/50 px-2.5 py-1 text-xs font-medium tabular-nums text-muted-foreground lg:inline-flex"
-            aria-label={`Next class this week — ${upcoming.subjectCode} ${DAYS[upcoming.dayOfWeek]} ${hhmm(upcoming.startMin)} (${daysAheadLabel(dAhead)})`}
+            aria-label={`Next class this week — ${upcoming.subjectCode} ${DAY_NAMES_SHORT[upcoming.dayOfWeek]} ${hhmm(upcoming.startMin)} (${daysAheadLabel(dAhead)})`}
             title="Today's classes are done — the next one later this week."
           >
             <span className="size-1.5 rounded-full bg-muted-foreground/50" aria-hidden="true" />
             <CalendarClock className="size-3.5 shrink-0" aria-hidden="true" />
             <span className="font-mono text-[11px] font-semibold">{upcoming.subjectCode}</span>
             <span className="tabular-nums">
-              {DAYS[upcoming.dayOfWeek]} {hhmm(upcoming.startMin)}
+              {DAY_NAMES_SHORT[upcoming.dayOfWeek]} {hhmm(upcoming.startMin)}
             </span>
-            <span className="tabular-nums text-muted-foreground/70" aria-hidden="true">
+            <span className={`tabular-nums ${daysAheadQualifierClass(dAhead)}`} aria-hidden="true">
               · {daysAheadLabel(dAhead)}
             </span>
           </span>
         </TooltipTrigger>
         <TooltipContent>
-          Next class this week: {uName} · {DAYS[upcoming.dayOfWeek]} {hhmm(upcoming.startMin)}–{hhmm(upcoming.endMin)} · {daysAheadLabel(dAhead)}
+          Next class this week: {uName} · {DAY_NAMES_SHORT[upcoming.dayOfWeek]} {hhmm(upcoming.startMin)}–{hhmm(upcoming.endMin)} · {daysAheadLabel(dAhead)}
         </TooltipContent>
       </Tooltip>
     );

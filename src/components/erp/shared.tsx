@@ -89,6 +89,17 @@ export function istNow(now: number): { day: number; min: number } {
   };
 }
 
+/* Canonical weekday labels — ONE source for every surface (r94). Index =
+   dayOfWeek (0=Sun..6=Sat), matching istNow's weekday index. DAY_NAMES_SHORT
+   values are the first three chars of DAY_NAMES_FULL — the r94 pin test
+   proves the equivalence, so a surface printing the short label can never
+   drift from one printing the full name. Retires six local copies (header's
+   r87 DAYS, dashboard-tab's r90 DAY_NAMES, today-card's r93 DAY_SHORT,
+   week-plan-card's DAY_NAMES_SHORT, subject-drawer's DAY_SHORT, and
+   timetable-card's full DAY_NAMES + its .slice(0, 3) grid headers). */
+export const DAY_NAMES_SHORT = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"] as const;
+export const DAY_NAMES_FULL = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
+
 /* ------------------------------------------------------------------ */
 /* Timetable conflict helper (client-side preview)                     */
 /* ------------------------------------------------------------------ */

@@ -49,10 +49,11 @@ import { cn } from "@/lib/utils";
 import { classesCanSkip, classesToReachTarget } from "@/lib/attendance";
 import { ApiError, createSlot, fetchAssignments, fetchDashboard, fetchHistory, fetchResults, fetchTimetable, putSubjectTarget, qk, type RetryFocusHandoff, type SlotConflict } from "./api";
 import { AnimatedNumber } from "./trend-chart";
-import { CustomTargetChip, erpAssignmentUrl, fmtDT, istNow, MiniBar, SkipPips, statusColors, StatusChip, useNow, ago } from "./shared";
+import { CustomTargetChip, DAY_NAMES_SHORT, erpAssignmentUrl, fmtDT, istNow, MiniBar, SkipPips, statusColors, StatusChip, useNow, ago } from "./shared";
 import type { AssignmentRow, AttendanceStatus, HistoryResponse, ResultsResponse, SubjectView, TimetableSlotRow } from "./types";
 
-const DAY_SHORT = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+/* r94: the local DAY_SHORT copy retired — shared.tsx is the one names
+   source for every surface. */
 const TARGET_PRESETS = [60, 65, 70, 75, 80, 85];
 
 function hhmm(min: number): string {
@@ -613,8 +614,8 @@ function SubjectTimetable({
       qc.invalidateQueries({ queryKey: qk.dashboard });
       toast.success(
         force
-          ? `${DAY_SHORT[Number(day)]} ${start}–${end} added for ${subjectCode} (overlap accepted)`
-          : `${DAY_SHORT[Number(day)]} ${start}–${end} added for ${subjectCode}`
+          ? `${DAY_NAMES_SHORT[Number(day)]} ${start}–${end} added for ${subjectCode} (overlap accepted)`
+          : `${DAY_NAMES_SHORT[Number(day)]} ${start}–${end} added for ${subjectCode}`
       );
       setConflicts(null);
       setAdding(false);
@@ -686,7 +687,7 @@ function SubjectTimetable({
                 <SelectContent>
                   {[1, 2, 3, 4, 5, 6, 0].map((d) => (
                     <SelectItem key={d} value={String(d)} className="text-xs">
-                      {DAY_SHORT[d]}
+                      {DAY_NAMES_SHORT[d]}
                       {d === today ? " · today" : ""}
                     </SelectItem>
                   ))}
@@ -787,7 +788,7 @@ function SubjectTimetable({
                   d === today ? "bg-emerald-500/15 text-emerald-700 dark:text-emerald-400" : "bg-muted text-muted-foreground"
                 )}
               >
-                {DAY_SHORT[d]}
+                {DAY_NAMES_SHORT[d]}
               </span>
               <div className="flex flex-wrap gap-1.5">
                 {byDay.get(d)!.map((slot) => {

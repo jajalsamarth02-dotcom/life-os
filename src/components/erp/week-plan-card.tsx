@@ -41,13 +41,14 @@ import { classesToReachTarget } from "@/lib/attendance";
 import { applyBatchPicks } from "@/lib/batch-picks";
 import { fetchTimetable, qk } from "./api";
 import { AnimatedNumber } from "./trend-chart";
-import { hueColors, istNow, SkipPips } from "./shared";
+import { DAY_NAMES_SHORT, hueColors, istNow, SkipPips } from "./shared";
 import type { SubjectView, TimetableSlotRow } from "./types";
 
 const DAY_LETTERS = ["M", "T", "W", "T", "F", "S", "S"] as const;
 /** Monday-first traversal of dayOfWeek values (0 = Sunday … 6 = Saturday). */
 const WEEK_ORDER = [1, 2, 3, 4, 5, 6, 0] as const;
-const DAY_NAMES_SHORT = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"] as const;
+/* r94: the local DAY_NAMES_SHORT copy retired — shared.tsx is the one names
+   source for every surface. */
 
 /** Monday=0 … Sunday=6 — makes "later this week" a plain comparison. */
 function weekOffset(day: number): number {

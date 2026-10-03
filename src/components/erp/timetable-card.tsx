@@ -46,7 +46,7 @@ import { cn } from "@/lib/utils";
 import { downloadTimetableIcs } from "@/lib/ics";
 import { applyBatchPicks, parallelCells } from "@/lib/batch-picks";
 import { createSlot, deleteSlot, fetchTimetable, setBatchPick, qk, ApiError, type SlotConflict } from "./api";
-import { humanizeMins, istNow, useNow } from "./shared";
+import { DAY_NAMES_FULL, DAY_NAMES_SHORT, humanizeMins, istNow, useNow } from "./shared";
 /* r92: the week-grid joins the "next up this week" family as its FOURTH
    surface — consuming the pinned pures (r90/r91) instead of re-deriving
    the wrap math. Import direction is safe: today-card never imports this
@@ -61,7 +61,9 @@ import {
 } from "./today-card";
 import type { AppMode, AttendanceView, SubjectView, TimetableSlotRow } from "./types";
 
-const DAY_NAMES = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
+/* r94: the local DAY_NAMES copy retired — shared DAY_NAMES_FULL/DAY_NAMES_SHORT
+   are the one names source (the grid's short headers now print the pinned
+   short labels directly instead of slicing the full names at render). */
 const WEEK_ORDER = [1, 2, 3, 4, 5, 6, 0]; // Mon → Sun
 
 const CHIP_COLORS = ["#10b981", "#f59e0b", "#84cc16", "#f97316", "#14b8a6", "#a8a29e", "#ef4444"];
@@ -348,7 +350,7 @@ function ParallelClassesSection({
             <li key={c.key} className="rounded-lg border border-border/50 bg-muted/20 px-2.5 py-2">
               <div className="flex items-center justify-between gap-2">
                 <span className="text-[11px] font-semibold">
-                  {DAY_NAMES[c.dayOfWeek]}{" "}
+                  {DAY_NAMES_FULL[c.dayOfWeek]}{" "}
                   <span className="tabular-nums text-muted-foreground">{range}</span>
                 </span>
                 {picked ? (
@@ -357,7 +359,7 @@ function ParallelClassesSection({
                     disabled={setPick.isPending}
                     onClick={() => setPick.mutate({ cellKey: c.key, subjectCode: null })}
                     className="rounded-md px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground transition-colors hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-                    aria-label={`Clear the pick for ${DAY_NAMES[c.dayOfWeek]} ${range} and count every option again`}
+                    aria-label={`Clear the pick for ${DAY_NAMES_FULL[c.dayOfWeek]} ${range} and count every option again`}
                   >
                     count all
                   </button>
@@ -370,7 +372,7 @@ function ParallelClassesSection({
               <div
                 className="mt-1.5 flex flex-wrap gap-1.5"
                 role="group"
-                aria-label={`Pick the class you attend on ${DAY_NAMES[c.dayOfWeek]}, ${range}`}
+                aria-label={`Pick the class you attend on ${DAY_NAMES_FULL[c.dayOfWeek]}, ${range}`}
               >
                 {c.options.map((code) => {
                   const isPicked = picked === code;
@@ -526,7 +528,7 @@ function ManageTimetableDialog({
                 <SelectTrigger id="tt-day" className="h-9 text-xs"><SelectValue /></SelectTrigger>
                 <SelectContent>
                   {WEEK_ORDER.map((d) => (
-                    <SelectItem key={d} value={String(d)} className="text-xs">{DAY_NAMES[d]}</SelectItem>
+                    <SelectItem key={d} value={String(d)} className="text-xs">{DAY_NAMES_FULL[d]}</SelectItem>
                   ))}
                 </SelectContent>
               </Select>
@@ -616,7 +618,7 @@ function ManageTimetableDialog({
             if (daySlots.length === 0) return null;
             return (
               <div key={d}>
-                <p className="mb-1 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">{DAY_NAMES[d]}</p>
+                <p className="mb-1 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">{DAY_NAMES_FULL[d]}</p>
                 <ul className="space-y-1">
                   {daySlots.map((s) => {
                     const cell = cellByKey.get(`${s.dayOfWeek}-${s.startMin}-${s.endMin}`);
@@ -663,7 +665,7 @@ function ManageTimetableDialog({
                           type="button"
                           onClick={() => remove.mutate(s.id)}
                           className="ml-auto rounded-md p-1 text-muted-foreground transition-colors hover:bg-red-500/10 hover:text-red-600 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-                          aria-label={`Remove ${s.subjectCode} on ${DAY_NAMES[d]} at ${hhmm(s.startMin)}`}
+                          aria-label={`Remove ${s.subjectCode} on ${DAY_NAMES_FULL[d]} at ${hhmm(s.startMin)}`}
                         >
                           {remove.isPending ? <Loader2 className="size-3.5 animate-spin" aria-hidden="true" /> : <Trash2 className="size-3.5" aria-hidden="true" />}
                         </button>
@@ -913,7 +915,7 @@ export function TimetableCard({
                    an empty day). Data-derived only: no attendance claim. */
                 todaySlots.length > 0 && <Check className="size-3 shrink-0" aria-hidden="true" />
               )}
-              {DAY_NAMES[nowDay]}
+              {DAY_NAMES_FULL[nowDay]}
             </Badge>
           </h3>
           <p className="mt-0.5 text-xs text-muted-foreground">
@@ -1254,7 +1256,7 @@ export function TimetableCard({
                             {colState === "done" && (
                               <Check className="size-3 shrink-0" aria-hidden="true" />
                             )}
-                            {DAY_NAMES[d].slice(0, 3)}
+                            {DAY_NAMES_SHORT[d]}
                           </p>
                           <div className="space-y-1.5">
                             {daySlots.length === 0 ? (

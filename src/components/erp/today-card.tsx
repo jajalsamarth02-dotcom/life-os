@@ -25,7 +25,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { cn } from "@/lib/utils";
 import type { AlaUpcomingRow, AttendanceView, SubjectView, TimetableSlotRow } from "./types";
-import { istNow, humanizeMins } from "./shared";
+import { DAY_NAMES_SHORT, istNow, humanizeMins } from "./shared";
 
 /* ------------------------------------------------------------------ */
 /* SMS segment math (GSM-7 vs UCS-2, concat rules)                     */
@@ -292,6 +292,17 @@ export function daysAheadLabel(d: number): string {
   return d === 0 ? "today" : d === 1 ? "tomorrow" : `in ${d}d`;
 }
 
+/** r94: the qualifier's TONE is family math too — "tomorrow" (d=1) lifts one
+ *  rung of the r87 muted ladder (prep tonight is actionable tonight, so the
+ *  wait deserves full muted presence instead of /70), while "in Nd" stays at
+ *  the ladder's quietest rung. d=0 never reaches these surfaces (today is
+ *  excluded upstream) but stays quiet defensively. ONE source — the header
+ *  chip, the strip's done line and the today-card pill all consume it, so
+ *  the whole family shifts tone together. Pinned in tests (r94). */
+export function daysAheadQualifierClass(d: number): string {
+  return d === 1 ? "text-muted-foreground" : "text-muted-foreground/70";
+}
+
 /** Build the exact SMS text shown in the bubble (and used for copy/share). */
 export function buildTodaySms(input: TodaySmsInput): string {
   const p = istParts(input.now);
@@ -452,12 +463,6 @@ export const SMS_TONE_CLASS: Record<SmsKeywordTone, string> = {
   violet: "text-violet-700 dark:text-violet-400",
 };
 
-/* Short weekday labels for the week-ahead pill (r93) — the same strings the
-   header chip (r87 local DAYS) and the deadline strip (r90 DAY_NAMES) print.
-   A future consolidation into shared.tsx can retire the three copies; the
-   VALUES are stable constants, the pinned MATH is what must stay single. */
-const DAY_SHORT = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"] as const;
-
 /** Legacy clipboard fallback for insecure contexts (plain-HTTP views, older
  *  WebViews where navigator.clipboard is undefined or rejects): an off-screen
  *  textarea + execCommand("copy"). execCommand is deprecated but STILL the
@@ -558,9 +563,9 @@ export function TodayCard(props: TodaySmsInput & { className?: string; /** r93: 
      at a time. */
   const weekNextInfo = useMemo(() => {
     const w = nextUpcomingThisWeek(weekSlots ?? null, now);
-    return w
-      ? { slot: w, label: daysAheadLabel(daysAheadThisWeek(w.dayOfWeek, now)) }
-      : null;
+    if (!w) return null;
+    const d = daysAheadThisWeek(w.dayOfWeek, now);
+    return { slot: w, d, label: daysAheadLabel(d) };
   }, [weekSlots, now]);
 
   /* Chip click → deep-link to the timetable card. Event-based (same pattern
@@ -779,15 +784,15 @@ export function TodayCard(props: TodaySmsInput & { className?: string; /** r93: 
               type="button"
               onClick={focusTimetable}
               className="inline-flex cursor-pointer items-center gap-1.5 whitespace-nowrap rounded-full border border-border/70 bg-muted/50 px-2.5 py-1 text-[11px] font-medium tabular-nums text-muted-foreground transition-all hover:brightness-105 hover:shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-violet-500/40 active:scale-[0.98] print:hidden"
-              aria-label={`Next class this week — ${weekNextInfo.slot.subjectCode} ${DAY_SHORT[weekNextInfo.slot.dayOfWeek]} ${hhmmFromMin(weekNextInfo.slot.startMin)} (${weekNextInfo.label})`}
+              aria-label={`Next class this week — ${weekNextInfo.slot.subjectCode} ${DAY_NAMES_SHORT[weekNextInfo.slot.dayOfWeek]} ${hhmmFromMin(weekNextInfo.slot.startMin)} (${weekNextInfo.label})`}
               title="Today's classes are done — the next one later this week. Click to jump to the schedule."
             >
               <CalendarClock className="size-3 shrink-0" aria-hidden="true" />
               <span className="font-mono text-[10px] font-semibold">{weekNextInfo.slot.subjectCode}</span>
               <span className="tabular-nums">
-                {DAY_SHORT[weekNextInfo.slot.dayOfWeek]} {hhmmFromMin(weekNextInfo.slot.startMin)}
+                {DAY_NAMES_SHORT[weekNextInfo.slot.dayOfWeek]} {hhmmFromMin(weekNextInfo.slot.startMin)}
               </span>
-              <span className="tabular-nums text-muted-foreground/70" aria-hidden="true">
+              <span className={`tabular-nums ${daysAheadQualifierClass(weekNextInfo.d)}`} aria-hidden="true">
                 · {weekNextInfo.label}
               </span>
             </button>
