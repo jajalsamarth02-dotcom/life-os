@@ -19,6 +19,7 @@ import { Activity, CalendarCheck, Download, X } from "lucide-react";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
+import { downloadTextFile } from "./download";
 import type { HistoryPoint, HistoryResponse, SubjectView } from "./types";
 
 /* ------------------------------------------------------------------ */
@@ -122,15 +123,9 @@ export function downloadCsv(filename: string, headers: string[], rows: (string |
     return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
   };
   const csv = [headers.map(esc).join(","), ...rows.map((r) => r.map(esc).join(","))].join("\n");
-  const blob = new Blob([csv], { type: "text/csv;charset=utf-8" });
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement("a");
-  a.href = url;
-  a.download = filename;
-  document.body.appendChild(a);
-  a.click();
-  a.remove();
-  URL.revokeObjectURL(url);
+  /* r103: the anchor-click dance retired — the shared downloadTextFile is
+     the ONE download path (byte-identical file, written once). */
+  downloadTextFile(csv, filename, "text/csv");
 }
 
 /* ------------------------------------------------------------------ */

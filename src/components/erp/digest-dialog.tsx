@@ -28,6 +28,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { cn } from "@/lib/utils";
 import { istFormat } from "@/lib/ist";
 import { fetchDigest } from "./api";
+import { downloadTextFile } from "./download";
 import { SourceBadge } from "./shared";
 import type { DigestResponse } from "./types";
 
@@ -123,13 +124,10 @@ function downloadCsv(d: DigestResponse) {
     ]);
   }
   const csv = rows.map((r) => r.map(esc).join(",")).join("\n");
-  const blob = new Blob([csv], { type: "text/csv;charset=utf-8" });
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement("a");
-  a.href = url;
-  a.download = `erp-sync-report-${d.days}d-${istFormat(new Date(), "yyyy-MM-dd")}.csv`;
-  a.click();
-  URL.revokeObjectURL(url);
+  /* r103: the inline object-URL dance retired — the shared downloadTextFile
+     is the ONE download path (also restores the missing appendChild/remove
+     this old variant had silently skipped). */
+  downloadTextFile(csv, `erp-sync-report-${d.days}d-${istFormat(new Date(), "yyyy-MM-dd")}.csv`, "text/csv");
 }
 
 /* ------------------------------------------------------------------ */

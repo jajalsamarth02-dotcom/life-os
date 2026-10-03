@@ -12,6 +12,7 @@ import {
   ArrowRight,
   BarChart3,
   CalendarClock,
+  CalendarDays,
   CalendarPlus,
   Check,
   Copy as CopyIcon,
@@ -49,8 +50,10 @@ import { fetchAlaNotes, fetchAssignments, fetchResults, fetchTimetable, postDemo
 import { subjectStories } from "@/lib/results-summary";
 import { buildSingleClassIcs, upcomingClassSlots } from "./ics";
 import { downloadTextFile } from "./download";
+import { rankedCap } from "./palette-search";
 import { DAY_NAMES_SHORT, ERP_BASE } from "./shared";
 import { ALA_PRIORITY_META } from "./reminders-tab";
+import type { SettingsFocus } from "./settings-tab";
 import type { AttendanceStatus, ResultsResponse, SubjectView } from "./types";
 import { useTextSize } from "./text-size-card";
 
@@ -87,6 +90,10 @@ interface CommandPaletteProps {
   subjects: SubjectView[] | undefined;
   /** Active semester partition ("all" or "1".."8"). */
   semester?: string;
+  /** r103: deep-link into Settings with a spotlight target — powers the
+   *  "export the calendar" action (Settings stays the ONE export surface;
+   *  the palette only launches it, never re-builds the file). */
+  onOpenSettingsFocus: (focus: SettingsFocus) => void;
 }
 
 /**
@@ -103,9 +110,21 @@ export function CommandPalette({
   demoMode,
   subjects,
   semester = "all",
+  onOpenSettingsFocus,
 }: CommandPaletteProps) {
   const queryClient = useQueryClient();
   const { resolvedTheme, setTheme } = useTheme();
+
+  /* r102/r103: the palette's live search string, fed by CommandInput's
+     onValueChange (NOT useCommandState — that hook reads the cmdk store
+     context, which does not exist in this component: the palette RENDERS
+     the Command, it is not inside it — calling it here crashed the app in
+     r102 and the lesson stays pinned). Reset on close: the Command root
+     remounts with a fresh store, this state must not outlive it. */
+  const [paletteSearch, setPaletteSearch] = React.useState("");
+  React.useEffect(() => {
+    if (!open) setPaletteSearch("");
+  }, [open]);
 
   const run = (fn: () => void) => {
     onOpenChange(false);
@@ -181,16 +200,29 @@ export function CommandPalette({
     queryFn: () => fetchResults(),
     enabled: false,
   });
-  const retryStories = React.useMemo(
-    () => (resultsQ.data ? subjectStories(resultsQ.data.exams).slice(0, 8) : []),
+  const retryStoriesBase = React.useMemo(
+    () => (resultsQ.data ? subjectStories(resultsQ.data.exams) : []),
     [resultsQ.data]
+  );
+  /* r103: search-aware cap — while typing, ALL retry stories are scored
+     (cmdk's own filter) so a cleared subject in week 2 is reachable even
+     when it sits below the idle 8-row cap. */
+  const retryStories = React.useMemo(
+    () =>
+      rankedCap(
+        retryStoriesBase,
+        (s) => `retry-story ${s.code} ${s.name}`,
+        8,
+        paletteSearch
+      ),
+    [retryStoriesBase, paletteSearch]
   );
   /* Local note overlay — powers the "Your flagged ALAs" palette group. */
   const alaNotesQ = useQuery({ queryKey: qk.alaNotes, queryFn: fetchAlaNotes, staleTime: 30_000 });
   /* The student's own triage layer as palette rows — mirrors the dashboard's
      "Your flagged ALAs" card: priority desc, then nearest deadline. Selecting
      any row opens the Reminders tab with the Noted filter applied. */
-  const flaggedItems = React.useMemo(() => {
+  const flaggedAll = React.useMemo(() => {
     const notes = alaNotesQ.data ?? [];
     if (notes.length === 0) return [];
     const prio = new Map(notes.map((n) => [n.externalId, n.priority]));
@@ -208,15 +240,27 @@ export function CommandPalette({
           new Date(x.a.dueAt).getTime() - new Date(y.a.dueAt).getTime()
       );
   }, [assignmentsQ.data, alaNotesQ.data]);
+  /* r103: search-aware cap — a flagged ALA below the idle 3-row cap stays
+     reachable by name while typing (same rankedCap contract everywhere). */
+  const flaggedItems = React.useMemo(
+    () =>
+      rankedCap(
+        flaggedAll,
+        ({ a, note }) => `${a.title} ${a.subjectCode ?? ""} ${note} flagged priority local triage`,
+        3,
+        paletteSearch
+      ),
+    [flaggedAll, paletteSearch]
+  );
   const nowMs = React.useMemo(() => Date.now(), [assignmentsQ.data]);
-  const { deadlineItems, activeDeadlineCount, overdueCount, soonCount } = React.useMemo(() => {
+  const { sortedDeadlines, activeDeadlineCount, overdueCount, soonCount } = React.useMemo(() => {
     const active = (assignmentsQ.data?.assignments ?? []).filter((a) => a.status === "ACTIVE");
     const sorted = [...active].sort(
       (a, b) => new Date(a.dueAt).getTime() - new Date(b.dueAt).getTime()
     );
     const dueMs = (a: { dueAt: string }) => new Date(a.dueAt).getTime();
     return {
-      deadlineItems: sorted.slice(0, 8),
+      sortedDeadlines: sorted,
       activeDeadlineCount: active.length,
       overdueCount: active.filter((a) => dueMs(a) < nowMs).length,
       soonCount: active.filter((a) => {
@@ -225,6 +269,20 @@ export function CommandPalette({
       }).length,
     };
   }, [assignmentsQ.data, nowMs]);
+  /* r103: search-aware cap — the headline fix this round. 41 active
+     deadlines, 8 rendered: before, a search for a deep deadline ("pdo",
+     week 6's ALA…) found NOTHING because cmdk never saw the row. While
+     typing, all of them are scored and the best 8 matches render. */
+  const deadlineItems = React.useMemo(
+    () =>
+      rankedCap(
+        sortedDeadlines,
+        (a) => `${a.title} ${a.subjectCode ?? ""} ala assignment deadline`,
+        8,
+        paletteSearch
+      ),
+    [sortedDeadlines, paletteSearch]
+  );
   const openDeadline = (title: string) => {
     run(() => {
       onNavigate("reminders");
@@ -288,34 +346,20 @@ export function CommandPalette({
     () => upcomingClassSlots(timetableQ.data?.slots ?? [], new Date()),
     [timetableQ.data]
   );
-  /* Search-aware capping (r102): idle, the group shows the 8 SOONEST
-     classes; while typing, ALL unique classes are scored with cmdk's OWN
-     filter and the best 8 matches win — a class sitting deep in the week
-     ("network calendar" → Wed's COMPUTER-NETWORKS) stays reachable without
-     the 8-row cap hiding it from cmdk's per-row filter. Rank order puts the
-     strongest match first. The search string comes from CommandInput's
-     onValueChange (NOT useCommandState — that hook reads the cmdk store
-     context, which does not exist in this component: the palette RENDERS
-     the Command, it is not inside it — calling it here crashed the app). */
-  const [paletteSearch, setPaletteSearch] = React.useState("");
-  /* The Command root remounts on close (fresh cmdk store) while this state
-     lives on — reset it so a reopened palette never shows a stale query. */
-  React.useEffect(() => {
-    if (!open) setPaletteSearch("");
-  }, [open]);
-  const classEntries = React.useMemo(() => {
-    const q = paletteSearch.trim();
-    if (!q) return allClassEntries.slice(0, 8);
-    return allClassEntries
-      .map((slot) => ({
-        slot,
-        rank: cmdkDefaultFilter(classRowValue(slot, subjectName.get(slot.subjectCode) ?? null), q),
-      }))
-      .filter((x) => x.rank > 0)
-      .sort((a, b) => b.rank - a.rank)
-      .slice(0, 8)
-      .map((x) => x.slot);
-  }, [allClassEntries, paletteSearch, subjectName]);
+  /* r103: the r102 inline class-cap is now rankedCap — the SAME search-aware
+     contract as deadlines/flagged/retry (one helper, one behavior, four
+     groups). Idle: the 8 SOONEST classes; typing: all 28 scored, best 8
+     win, strongest match first. */
+  const classEntries = React.useMemo(
+    () =>
+      rankedCap(
+        allClassEntries,
+        (slot) => classRowValue(slot, subjectName.get(slot.subjectCode) ?? null),
+        8,
+        paletteSearch
+      ),
+    [allClassEntries, paletteSearch, subjectName]
+  );
   const classTotal = allClassEntries.length;
   /* r102: transient "saved" feedback — the row's icon swaps to a check for
      two seconds after the download fires (the r101 chip's landing pattern). */
@@ -361,7 +405,15 @@ export function CommandPalette({
         onValueChange={setPaletteSearch}
       />
       <CommandList className="max-h-[min(60vh,26rem)]">
-        <CommandEmpty>No results found.</CommandEmpty>
+        <CommandEmpty>
+          <div className="px-4 py-2 text-center">
+            <p className="text-sm font-medium">No results found.</p>
+            <p className="mt-1 text-xs leading-relaxed text-muted-foreground">
+              Try a subject code, "overdue", "calendar", "what-if", "retry" or "print" —
+              every capped group searches its FULL list, not just the visible rows.
+            </p>
+          </div>
+        </CommandEmpty>
 
         {subjects && subjects.length > 0 && (
           <>
@@ -569,7 +621,7 @@ export function CommandPalette({
               >
                 <StickyNote className="size-4 shrink-0 text-primary" aria-hidden="true" />
                 <span>
-                  Open all <b className="font-semibold tabular-nums text-foreground">{flaggedItems.length}</b> noted
+                  Open all <b className="font-semibold tabular-nums text-foreground">{flaggedAll.length}</b> noted
                   ALAs — your private triage
                 </span>
                 <span className="ml-auto text-xs text-muted-foreground">Reminders tab</span>
@@ -749,6 +801,20 @@ export function CommandPalette({
           >
             <Zap className="size-4 text-amber-500" aria-hidden="true" />
             Open the what-if simulator
+          </CommandItem>
+          <CommandItem
+            value="export calendar ics whole week deadlines classes download file google apple outlook"
+            onSelect={() => run(() => onOpenSettingsFocus("backup"))}
+          >
+            <CalendarDays className="size-4 shrink-0 text-violet-500" aria-hidden="true" />
+            <span>Export deadlines &amp; classes as a calendar file</span>
+            <span
+              className="ml-auto rounded border border-violet-500/40 bg-violet-500/10 px-1 font-mono text-[10px] font-semibold text-violet-600 dark:text-violet-400"
+              aria-hidden="true"
+            >
+              .ics
+            </span>
+            <span className="sr-only">opens Settings with the export card highlighted</span>
           </CommandItem>
           <CommandItem
             value="print report save pdf attendance"

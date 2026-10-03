@@ -124,6 +124,7 @@ import { CustomTargetChip, erpAssignmentUrl, fmtDT, syncLogIcon } from "./shared
 import { TextSizeCard } from "./text-size-card";
 import { downloadCsv } from "./trend-chart";
 import { alaUid, buildClassEvents, buildDeadlineIcs, reminderUid } from "./ics";
+import { downloadTextFile } from "./download";
 import type { AppSettings, ErpConnectFailure, SubjectView } from "./types";
 
 /* ------------------------------------------------------------------ */
@@ -1367,29 +1368,14 @@ function daysSinceLastBackup(): number | null {
 
 /** Download any text payload as a file (JSON notes export). */
 function downloadJson(filename: string, text: string) {
-  const blob = new Blob([text], { type: "application/json;charset=utf-8" });
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement("a");
-  a.href = url;
-  a.download = filename;
-  document.body.appendChild(a);
-  a.click();
-  a.remove();
-  URL.revokeObjectURL(url);
+  /* r103: the anchor-click dance retired — the shared helper is the ONE
+     download path (byte-identical file, written once). */
+  downloadTextFile(text, filename, "application/json");
 }
 
-/** Download any text payload with an explicit MIME type (iCalendar export). */
-function downloadText(filename: string, text: string, mime: string) {
-  const blob = new Blob([text], { type: `${mime};charset=utf-8` });
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement("a");
-  a.href = url;
-  a.download = filename;
-  document.body.appendChild(a);
-  a.click();
-  a.remove();
-  URL.revokeObjectURL(url);
-}
+/** r103: the local downloadText retired — the shared downloadTextFile
+   (components/erp/download.ts) is the ONE anchor-click helper now; the
+   calendar export path is byte-identical, just written once. */
 
 /** One staged restore candidate, parsed client-side before the write. */
 interface StagedRestore {
@@ -1608,7 +1594,7 @@ function DataBackupCard() {
       const { text, total, future, past } = buildDeadlineIcs(icsEvents);
       const stamp = new Date().toISOString().slice(0, 10);
       const filename = `erp-sync-calendar-${stamp}.ics`;
-      downloadText(filename, text, "text/calendar");
+      downloadTextFile(text, filename, "text/calendar");
       toast.success(`Calendar exported — ${total} event${total === 1 ? "" : "s"}`, {
         description:
           future + past === total

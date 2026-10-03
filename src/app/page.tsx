@@ -453,6 +453,7 @@ export default function Home() {
         demoMode={mode === "demo"}
         subjects={data?.subjects}
         semester={data?.semester}
+        onOpenSettingsFocus={openSettingsFocus}
       />
 
       <footer className="relative mt-auto border-t border-border/60 bg-card/50 print:hidden">
