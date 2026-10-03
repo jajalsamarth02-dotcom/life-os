@@ -210,6 +210,68 @@ export function cgpaProgression(exams: ExamLike[]): CgpaPoint[] {
 }
 
 /**
+ * Career-CGPA change at each REGULAR exam (keyed by typeId): the printed
+ * career line minus the previous REGULAR exam's printed line, ascending by
+ * exam date. The first regular exam is the baseline (no delta). Remedial
+ * pages never carry a career line, so they are never in the map.
+ */
+export function careerDeltas(exams: ExamLike[]): Map<string, number> {
+  const asc = (a: ExamLike, b: ExamLike): number => {
+    if (a.examDateKey && b.examDateKey && a.examDateKey !== b.examDateKey) {
+      return a.examDateKey.localeCompare(b.examDateKey);
+    }
+    if (a.examDateKey && !b.examDateKey) return -1;
+    if (!a.examDateKey && b.examDateKey) return 1;
+    if (a.semester !== null && b.semester !== null && a.semester !== b.semester) {
+      return a.semester - b.semester;
+    }
+    return a.typeId.localeCompare(b.typeId);
+  };
+  const deltas = new Map<string, number>();
+  let prev: number | null = null;
+  for (const e of [...exams].filter((e) => e.examKind === "REGULAR" && e.cgpa != null).sort(asc)) {
+    if (prev !== null) deltas.set(e.typeId, Math.round((e.cgpa! - prev) * 1000) / 1000);
+    prev = e.cgpa!;
+  }
+  return deltas;
+}
+
+/**
+ * Plain-text academic summary for sharing (copy-to-clipboard payload) —
+ * built purely from what the ERP published, never embellished. Returns
+ * null when there is no REGULAR exam to summarise.
+ */
+export function resultsSummaryText(exams: ExamLike[]): string | null {
+  const s = deriveResultsSummary(exams);
+  if (!s.hasRecord || s.latestRegular == null) return null;
+  const lines: string[] = [];
+  lines.push(
+    `CGPA ${s.cgpa?.toFixed(2) ?? "—"} (career, after ${s.latestRegular.examDateLabel ?? "latest published exam"})`,
+  );
+  if (s.creditsEarned != null && s.creditsOffered != null) {
+    lines.push(`Credits ${s.creditsEarned} / ${s.creditsOffered} earned`);
+  }
+  if (s.pending.length > 0) {
+    lines.push(
+      `Pending (${s.pending.length}): ` +
+        s.pending
+          .map((p) => `${p.code} ${p.name} — ${p.grade ?? "grade not printed"}, latest attempt ${p.examDateKey ?? "date not printed"}`)
+          .join("; "),
+    );
+  } else {
+    lines.push("No pending backlogs — every published subject result is cleared.");
+  }
+  if (s.regularSeries.length > 0) {
+    lines.push(`SGPA: ${s.regularSeries.map((p) => `S${p.semester} ${p.sgpa.toFixed(2)} (${p.passed ? "P" : "F"})`).join(" · ")}`);
+  }
+  if (s.remedialSeries.length > 0) {
+    lines.push(`Remedial: ${s.remedialSeries.map((p) => `↺S${p.semester} ${p.sgpa.toFixed(2)}`).join(" · ")}`);
+  }
+  lines.push("(from the ERP Final Results page — published exams only)");
+  return lines.join("\n");
+}
+
+/**
  * Estimate the career CGPA after one more semester. The ERP's career CGPA is
  * treated as cumulative credit-points ÷ credit-offered (points = cgpa ×
  * offered); the UI must label the result an estimate — the university's exact

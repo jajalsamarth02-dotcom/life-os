@@ -1,0 +1,608 @@
+     1→     1→"use client";
+     2→     2→
+     3→     3→/**
+     4→     4→ * Academic record — the student's published exam results (Final Results
+     5→     5→ * page), parsed from the ERP and TTL-cached server-side. Display-only:
+     6→     6→ * this card never writes to the ERP and never touches notifications.
+     7→     7→ *
+     8→     8→ * Honest-state model (src/lib/results-summary.ts):
+     9→     9→ *  - Hero CGPA / credits come from the latest REGULAR exam (the career-
+    10→    10→ *    cumulative line); remedial pages only cover re-entered subjects.
+    11→    11→ *  - "Pending" = the subject's most recent ERP mention has 0 credit points.
+    12→    12→ *    Earlier failures never linger once a later exam clears the subject.
+    13→    13→ *  - The SGPA trend draws REGULAR exams; remedial attempts appear as
+    14→    14→ *    separate markers so the two can't be confused.
+    15→    15→ */
+    16→    16→
+    17→    17→import { useState } from "react";
+    18→    18→import { useQuery, useQueryClient } from "@tanstack/react-query";
+    19→    19→import {
+    20→    20→  AlertTriangle,
+    21→    21→  Award,
+    22→    22→  CheckCircle2,
+    23→    23→  ChevronDown,
+    24→    24→  GraduationCap,
+    25→    25→  RefreshCw,
+    26→    26→  IdCard,
+    27→    27→  TrendingDown,
+    28→    28→  TrendingUp,
+    29→    29→} from "lucide-react";
+    30→    30→import { Badge } from "@/components/ui/badge";
+    31→    31→import { Button } from "@/components/ui/button";
+    32→    32→import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+    33→    33→import { cn } from "@/lib/utils";
+    34→    34→import { toast } from "sonner";
+    35→    35→import { compactErrorText } from "@/lib/compact-error";
+    36→    36→import {
+    37→    37→  attemptHistory,
+    38→    38→  cgpaProgression,
+    39→    39→  deriveResultsSummary,
+    40→    40→  gradeTier,
+    41→    41→  projectCgpa,
+    42→    42→  type CgpaPoint,
+    43→    43→  type PendingSubject,
+    44→    44→} from "@/lib/results-summary";
+    45→    45→import { fetchResults, qk } from "./api";
+    46→    46→import { ago } from "./shared";
+    47→    47→import type { ErpResultExam, ErpResultSubjectRow } from "./types";
+    48→    48→
+    49→    49→const TIER_CLASSES: Record<string, string> = {
+    50→    50→  top: "border-emerald-500/40 bg-emerald-500/15 text-emerald-700 dark:text-emerald-300",
+    51→    51→  good: "border-sky-500/40 bg-sky-500/15 text-sky-700 dark:text-sky-300",
+    52→    52→  ok: "border-border bg-muted text-foreground/80",
+    53→    53→  weak: "border-amber-500/40 bg-amber-500/15 text-amber-700 dark:text-amber-300",
+    54→    54→  fail: "border-rose-500/40 bg-rose-500/15 text-rose-700 dark:text-rose-300",
+    55→    55→};
+    56→    56→
+    57→    57→function GradeChip({ grade }: { grade: string | null }) {
+    58→    58→  if (!grade) {
+    59→    59→    return <span className="text-[11px] text-muted-foreground">—</span>;
+    60→    60→  }
+    61→    61→  return (
+    62→    62→    <span
+    63→    63→      className={cn(
+    64→    64→        "inline-flex h-5 min-w-7 items-center justify-center rounded border px-1 font-mono text-[11px] font-semibold leading-none",
+    65→    65→        TIER_CLASSES[gradeTier(grade)]
+    66→    66→      )}
+    67→    67→    >
+    68→    68→      {grade}
+    69→    69→    </span>
+    70→    70→  );
+    71→    71→}
+    72→    72→
+    73→    73→/** Tiny CGPA sparkline from the REGULAR exams' printed career CGPA line. */
+    74→    74→function CgpaSparkline({ points }: { points: CgpaPoint[] }) {
+    75→    75→  if (points.length < 2) return null;
+    76→    76→  const W = 96;
+    77→    77→  const H = 26;
+    78→    78→  const PAD = 3;
+    79→    79→  const vals = points.map((p) => p.cgpa);
+    80→    80→  const min = Math.min(...vals);
+    81→    81→  const max = Math.max(...vals);
+    82→    82→  const span = Math.max(max - min, 0.8); // never amplify a near-flat line
+    83→    83→  const xs = points.map((_, i) => PAD + (i * (W - 2 * PAD)) / (points.length - 1));
+    84→    84→  const ys = vals.map((v) => H - PAD - ((v - min) / span) * (H - 2 * PAD));
+    85→    85→  const line = xs.map((x, i) => `${i ? "L" : "M"}${x.toFixed(1)},${ys[i].toFixed(1)}`).join(" ");
+    86→    86→  const area = `${line} L${xs[xs.length - 1].toFixed(1)},${H - PAD} L${xs[0].toFixed(1)},${H - PAD} Z`;
+    87→    87→  const last = points.length - 1;
+    88→    88→  return (
+    89→    89→    <svg
+    90→    90→      width={W}
+    91→    91→      height={H}
+    92→    92→      viewBox={`0 0 ${W} ${H}`}
+    93→    93→      className="mt-1.5"
+    94→    94→      role="img"
+    95→    95→      aria-label={`CGPA progression: ${vals.map((v) => v.toFixed(2)).join(" → ")}`}
+    96→    96→    >
+    97→    97→      <defs>
+    98→    98→        <linearGradient id="cgpa-spark-fill" x1="0" y1="0" x2="0" y2="1">
+    99→    99→          <stop offset="0%" stopColor="rgb(139 92 246)" stopOpacity="0.28" />
+   100→   100→          <stop offset="100%" stopColor="rgb(139 92 246)" stopOpacity="0" />
+   101→   101→        </linearGradient>
+   102→   102→      </defs>
+   103→   103→      <path d={area} fill="url(#cgpa-spark-fill)" />
+   104→   104→      <path d={line} fill="none" stroke="rgb(139 92 246)" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
+   105→   105→      {xs.map((x, i) => (
+   106→   106→        <circle
+   107→   107→          key={i}
+   108→   108→          cx={x}
+   109→   109→          cy={ys[i]}
+   110→   110→          r={i === last ? 2.2 : 1.5}
+   111→   111→          fill="rgb(139 92 246)"
+   112→   112→          opacity={i === last ? 1 : 0.65}
+   113→   113→        />
+   114→   114→      ))}
+   115→   115→      <text x={xs[last]} y={ys[last] - 4} textAnchor="end" fontSize="6.5" fill="currentColor" opacity="0.6">
+   116→   116→        S{points[last].semester ?? "?"}
+   117→   117→      </text>
+   118→   118→    </svg>
+   119→   119→  );
+   120→   120→}
+   121→   121→
+   122→   122→function DeltaChip({ delta }: { delta: number }) {
+   123→   123→  const up = delta > 0.0005;
+   124→   124→  const down = delta < -0.0005;
+   125→   125→  return (
+   126→   126→    <span
+   127→   127→      className={cn(
+   128→   128→        "inline-flex items-center gap-0.5 rounded-full border px-1.5 py-0.5 font-mono text-[10px] tabular-nums",
+   129→   129→        up
+   130→   130→          ? "border-emerald-500/40 bg-emerald-500/10 text-emerald-700 dark:text-emerald-300"
+   131→   131→          : down
+   132→   132→            ? "border-rose-500/40 bg-rose-500/10 text-rose-700 dark:text-rose-300"
+   133→   133→            : "border-border bg-muted text-muted-foreground"
+   134→   134→      )}
+   135→   135→    >
+   136→   136→      {up && <TrendingUp className="size-3" aria-hidden="true" />}
+   137→   137→      {down && <TrendingDown className="size-3" aria-hidden="true" />}
+   138→   138→      {up ? "+" : ""}
+   139→   139→      {delta.toFixed(2)}
+   140→   140→    </span>
+   141→   141→  );
+   142→   142→}
+   143→   143→
+   144→   144→function VerdictChip({ result }: { result: string | null }) {
+   145→   145→  const passed = /pass/i.test(result ?? "");
+   146→   146→  const known = result != null;
+   147→   147→  return (
+   148→   148→    <span
+   149→   149→      className={cn(
+   150→   150→        "inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[11px] font-medium",
+   151→   151→        !known
+   152→   152→          ? "border-border bg-muted text-muted-foreground"
+   153→   153→          : passed
+   154→   154→            ? "border-emerald-500/40 bg-emerald-500/10 text-emerald-700 dark:text-emerald-300"
+   155→   155→            : "border-rose-500/40 bg-rose-500/10 text-rose-700 dark:text-rose-300"
+   156→   156→      )}
+   157→   157→    >
+   158→   158→      {known && (passed ? <CheckCircle2 className="size-3" aria-hidden="true" /> : <AlertTriangle className="size-3" aria-hidden="true" />)}
+   159→   159→      {result ?? "—"}
+   160→   160→    </span>
+   161→   161→  );
+   162→   162→}
+   163→   163→
+   164→   164→/** One expandable exam: summary row + full subject table. */
+   165→   165→function ExamRow({ exam, defaultOpen = false }: { exam: ErpResultExam; defaultOpen?: boolean }) {
+   166→   166→  const [open, setOpen] = useState(defaultOpen);
+   167→   167→  const kindLabel = exam.examKind === "REMEDIAL" ? "Remedial" : exam.examKind === "REGULAR" ? "Regular" : "Exam";
+   168→   168→  return (
+   169→   169→    <div
+   170→   170→      className={cn(
+   171→   171→        "overflow-hidden rounded-lg border transition-colors",
+   172→   172→        exam.examKind === "REMEDIAL" ? "border-amber-500/25" : "border-border/70",
+   173→   173→        open && "bg-muted/30"
+   174→   174→      )}
+   175→   175→    >
+   176→   176→      <button
+   177→   177→        type="button"
+   178→   178→        aria-expanded={open}
+   179→   179→        onClick={() => setOpen((v) => !v)}
+   180→   180→        className="flex w-full items-center gap-2 px-3 py-2 text-left transition-colors hover:bg-muted/40"
+   181→   181→      >
+   182→   182→        <Badge variant="outline" className="shrink-0 font-mono text-[10px]">
+   183→   183→          S{exam.semester ?? "?"}
+   184→   184→        </Badge>
+   185→   185→        <span className="min-w-0 flex-1 truncate text-xs font-medium">
+   186→   186→          {kindLabel} · {exam.examSession ?? exam.examDateLabel ?? exam.label}
+   187→   187→        </span>
+   188→   188→        <span className="shrink-0 font-mono text-[11px] tabular-nums text-muted-foreground">
+   189→   189→          SGPA {exam.sgpa?.toFixed(2) ?? "—"}
+   190→   190→        </span>
+   191→   191→        <VerdictChip result={exam.result} />
+   192→   192→        <ChevronDown
+   193→   193→          className={cn("size-3.5 shrink-0 text-muted-foreground transition-transform", open && "rotate-180")}
+   194→   194→          aria-hidden="true"
+   195→   195→        />
+   196→   196→      </button>
+   197→   197→      {open && (
+   198→   198→        <div className="space-y-2 border-t px-3 py-2">
+   199→   199→          <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px] text-muted-foreground">
+   200→   200→            <span>{exam.examDateLabel ? `Held ${exam.examDateLabel}` : null}</span>
+   201→   201→            {exam.academicYear && <span>AY {exam.academicYear}</span>}
+   202→   202→            {exam.seatNo && (
+   203→   203→              <span className="inline-flex items-center gap-1">
+   204→   204→                <IdCard className="size-3" aria-hidden="true" /> {exam.seatNo}
+   205→   205→              </span>
+   206→   206→            )}
+   207→   207→            <span>
+   208→   208→              {exam.earnedCredit ?? "—"}/{exam.offeredCredit ?? "—"} credits this exam
+   209→   209→            </span>
+   210→   210→            {exam.examKind === "REGULAR" && exam.totalEarnedCredit != null && (
+   211→   211→              <span>
+   212→   212→                career {exam.totalEarnedCredit}/{exam.totalOfferedCredit} · CGPA {exam.cgpa?.toFixed(2) ?? "—"}
+   213→   213→              </span>
+   214→   214→            )}
+   215→   215→          </div>
+   216→   216→          <div className="overflow-hidden rounded-md border">
+   217→   217→            <table className="w-full text-left text-[11px]">
+   218→   218→              <thead>
+   219→   219→                <tr className="border-b bg-muted/50 text-muted-foreground">
+   220→   220→                  <th className="px-2 py-1 font-medium">Subject</th>
+   221→   221→                  <th className="px-2 py-1 text-center font-medium">Cr</th>
+   222→   222→                  <th className="px-2 py-1 text-center font-medium">Grade</th>
+   223→   223→                  <th className="px-2 py-1 text-center font-medium">CP</th>
+   224→   224→                </tr>
+   225→   225→              </thead>
+   226→   226→              <tbody>
+   227→   227→                {exam.subjects.map((s: ErpResultSubjectRow) => (
+   228→   228→                  <tr
+   229→   229→                    key={s.code}
+   230→   230→                    className={cn(
+   231→   231→                      "border-b last:border-b-0",
+   232→   232→                      s.creditPoint === 0 && "bg-rose-500/5"
+   233→   233→                    )}
+   234→   234→                  >
+   235→   235→                    <td className="px-2 py-1">
+   236→   236→                      <span className="font-mono text-[10px] text-muted-foreground">{s.code}</span>
+   237→   237→                      <span className="ml-1.5">{s.name}</span>
+   238→   238→                    </td>
+   239→   239→                    <td className="px-2 py-1 text-center tabular-nums">{s.credit ?? "—"}</td>
+   240→   240→                    <td className="px-2 py-1 text-center">
+   241→   241→                      <GradeChip grade={s.grade} />
+   242→   242→                    </td>
+   243→   243→                    <td
+   244→   244→                      className={cn(
+   245→   245→                        "px-2 py-1 text-center font-mono tabular-nums",
+   246→   246→                        s.creditPoint === 0 && "font-semibold text-rose-600 dark:text-rose-400"
+   247→   247→                      )}
+   248→   248→                    >
+   249→   249→                      {s.creditPoint ?? "—"}
+   250→   250→                    </td>
+   251→   251→                  </tr>
+   252→   252→                ))}
+   253→   253→              </tbody>
+   254→   254→            </table>
+   255→   255→          </div>
+   256→   256→          <p className="text-[10px] leading-relaxed text-muted-foreground">
+   257→   257→            Component grades (SEE theory/practical, CCE mid/internal/viva) are on the ERP page; CP = credit points
+   258→   258→            earned. A 0-CP row means the subject is not cleared yet.
+   259→   259→          </p>
+   260→   260→        </div>
+   261→   261→      )}
+   262→   262→    </div>
+   263→   263→  );
+   264→   264→}
+   265→   265→
+   266→   266→/** One pending subject row + its full published attempt history. */
+   267→   267→function PendingItem({ pending, exams }: { pending: PendingSubject; exams: ErpResultExam[] }) {
+   268→   268→  const [open, setOpen] = useState(false);
+   269→   269→  const history = attemptHistory(exams, pending.code);
+   270→   270→  return (
+   271→   271→    <li>
+   272→   272→      <button
+   273→   273→        type="button"
+   274→   274→        onClick={() => setOpen((v) => !v)}
+   275→   275→        aria-expanded={open}
+   276→   276→        className="-mx-1 flex w-full items-center gap-2 rounded px-1 py-0.5 text-left text-xs transition-colors hover:bg-amber-500/10"
+   277→   277→        title={open ? "Hide every published attempt" : "Show every published attempt"}
+   278→   278→      >
+   279→   279→        <span className="font-mono text-[10px] text-muted-foreground">{pending.code}</span>
+   280→   280→        <span className="min-w-0 flex-1 truncate">{pending.name}</span>
+   281→   281→        {history.length > 1 && (
+   282→   282→          <span className="shrink-0 rounded border border-amber-500/30 px-1 font-mono text-[9px] tabular-nums text-amber-700 dark:text-amber-300">
+   283→   283→            {history.length} tries
+   284→   284→          </span>
+   285→   285→        )}
+   286→   286→        {pending.credit != null && <span className="shrink-0 tabular-nums text-muted-foreground">{pending.credit} cr</span>}
+   287→   287→        <GradeChip grade={pending.grade} />
+   288→   288→        <span className="hidden shrink-0 text-[10px] text-muted-foreground sm:inline">
+   289→   289→          latest: {pending.examDateKey ?? pending.examLabel.slice(0, 24)}
+   290→   290→        </span>
+   291→   291→        <ChevronDown
+   292→   292→          className={cn("size-3 shrink-0 text-muted-foreground transition-transform", open && "rotate-180")}
+   293→   293→          aria-hidden="true"
+   294→   294→        />
+   295→   295→      </button>
+   296→   296→      {open && (
+   297→   297→        <div className="mb-1 ml-1 space-y-1 rounded-md border border-amber-500/20 bg-background/60 px-2 py-1.5">
+   298→   298→          <p className="text-[10px] font-medium uppercase tracking-wide text-muted-foreground">
+   299→   299→            Every published attempt
+   300→   300→          </p>
+   301→   301→          {history.map((h) => (
+   302→   302→            <div key={h.typeId} className="flex items-center gap-2 text-[11px]">
+   303→   303→              <Badge variant="outline" className="shrink-0 font-mono text-[9px]">
+   304→   304→                S{h.semester ?? "?"}
+   305→   305→              </Badge>
+   306→   306→              <span className="w-14 shrink-0">{h.kind === "REMEDIAL" ? "Remedial" : h.kind === "REGULAR" ? "Regular" : "Exam"}</span>
+   307→   307→              <span className="min-w-0 flex-1 truncate text-muted-foreground">{h.dateLabel ?? h.dateKey ?? "date not printed"}</span>
+   308→   308→              <GradeChip grade={h.grade} />
+   309→   309→              <span
+   310→   310→                className={cn(
+   311→   311→                  "w-9 shrink-0 text-right font-mono tabular-nums",
+   312→   312→                  h.creditPoint === 0 && "font-semibold text-rose-600 dark:text-rose-400"
+   313→   313→                )}
+   314→   314→              >
+   315→   315→                {h.creditPoint ?? "—"} CP
+   316→   316→              </span>
+   317→   317→            </div>
+   318→   318→          ))}
+   319→   319→        </div>
+   320→   320→      )}
+   321→   321→    </li>
+   322→   322→  );
+   323→   323→}
+   324→   324→
+   325→   325→export function ResultsCard({ className }: { className?: string }) {
+   326→   326→  const queryClient = useQueryClient();
+   327→   327→  const [refreshing, setRefreshing] = useState(false);
+   328→   328→  const [whatIfSgpa, setWhatIfSgpa] = useState("");
+   329→   329→  const [whatIfCredits, setWhatIfCredits] = useState("");
+   330→   330→  const query = useQuery({ queryKey: qk.results, queryFn: () => fetchResults() });
+   331→   331→  const data = query.data;
+   332→   332→  const summary = data ? deriveResultsSummary(data.exams) : null;
+   333→   333→
+   334→   334→  const onRefresh = async () => {
+   335→   335→    setRefreshing(true);
+   336→   336→    try {
+   337→   337→      const fresh = await fetchResults(true);
+   338→   338→      queryClient.setQueryData(qk.results, fresh);
+   339→   339→      if (fresh.exams.length > 0) toast.success("Exam results refreshed from the ERP");
+   340→   340→      else toast.message("No published results on the ERP yet");
+   341→   341→    } catch (e) {
+   342→   342→      toast.error(`Refresh failed: ${compactErrorText(e instanceof Error ? e.message : String(e), 120)}`);
+   343→   343→    } finally {
+   344→   344→      setRefreshing(false);
+   345→   345→    }
+   346→   346→  };
+   347→   347→
+   348→   348→  const creditsPct =
+   349→   349→    summary && summary.creditsEarned != null && summary.creditsOffered
+   350→   350→      ? Math.min(100, Math.round((summary.creditsEarned / summary.creditsOffered) * 100))
+   351→   351→      : null;
+   352→   352→  const maxSgpa = Math.max(10, ...(summary?.regularSeries.map((p) => p.sgpa) ?? [0]));
+   353→   353→  const progression = data ? cgpaProgression(data.exams) : [];
+   354→   354→  const defaultNextCredits = summary?.latestRegular?.offeredCredit ?? null;
+   355→   355→  const parsedSgpa = parseFloat(whatIfSgpa);
+   356→   356→  const parsedCredits = parseFloat(whatIfCredits) || defaultNextCredits;
+   357→   357→  const sgpaValid = whatIfSgpa.trim() !== "" && !isNaN(parsedSgpa) && parsedSgpa >= 0 && parsedSgpa <= 10;
+   358→   358→  const creditsValid = parsedCredits != null && parsedCredits > 0;
+   359→   359→  const projected =
+   360→   360→    summary && sgpaValid && creditsValid
+   361→   361→      ? projectCgpa(summary.cgpa, summary.creditsOffered, parsedSgpa, parsedCredits)
+   362→   362→      : null;
+   363→   363→
+   364→   364→  return (
+   365→   365→    <Card className={cn("overflow-hidden", className)} data-testid="results-card">
+   366→   366→      <CardHeader className="pb-3">
+   367→   367→        <div className="flex items-start gap-3">
+   368→   368→          <span
+   369→   369→            className="flex size-8 shrink-0 items-center justify-center rounded-md bg-violet-500/10 text-violet-600 dark:text-violet-400"
+   370→   370→            aria-hidden="true"
+   371→   371→          >
+   372→   372→            <GraduationCap className="size-4" />
+   373→   373→          </span>
+   374→   374→          <div className="min-w-0 flex-1">
+   375→   375→            <CardTitle className="text-base tracking-tight">Academic record</CardTitle>
+   376→   376→            <CardDescription className="text-xs">
+   377→   377→              Published exam results from the ERP&apos;s Final Results page — grades, SGPA/CGPA and pending subjects.
+   378→   378→            </CardDescription>
+   379→   379→          </div>
+   380→   380→          <div className="flex shrink-0 items-center gap-1.5 print:hidden">
+   381→   381→            {data?.fetchedAt && (
+   382→   382→              <span className="hidden text-[10px] text-muted-foreground sm:inline" title="Last fetched from the ERP">
+   383→   383→                {ago(data.fetchedAt)}
+   384→   384→              </span>
+   385→   385→            )}
+   386→   386→            {data?.stale && (
+   387→   387→              <Badge variant="outline" className="border-amber-500/40 text-[10px] text-amber-700 dark:text-amber-300">
+   388→   388→                cached
+   389→   389→              </Badge>
+   390→   390→            )}
+   391→   391→            <Button
+   392→   392→              variant="ghost"
+   393→   393→              size="sm"
+   394→   394→              className="h-7 gap-1 px-2 text-xs"
+   395→   395→              onClick={onRefresh}
+   396→   396→              disabled={refreshing || query.isLoading}
+   397→   397→              aria-label="Refresh exam results from the ERP"
+   398→   398→            >
+   399→   399→              <RefreshCw className={cn("size-3.5", (refreshing || query.isLoading) && "animate-spin")} aria-hidden="true" />
+   400→   400→              Refresh
+   401→   401→            </Button>
+   402→   402→          </div>
+   403→   403→        </div>
+   404→   404→      </CardHeader>
+   405→   405→      <CardContent className="space-y-3">
+   406→   406→        {query.isLoading ? (
+   407→   407→          <div className="space-y-2" aria-label="Loading exam results">
+   408→   408→            <div className="h-14 animate-pulse rounded-lg bg-muted" />
+   409→   409→            <div className="h-16 animate-pulse rounded-lg bg-muted" />
+   410→   410→            <div className="h-10 animate-pulse rounded-lg bg-muted" />
+   411→   411→          </div>
+   412→   412→        ) : !data ? (
+   413→   413→          <p className="py-4 text-center text-sm text-muted-foreground">Could not load exam results.</p>
+   414→   414→        ) : !data.available ? (
+   415→   415→          <p className="py-4 text-center text-sm text-muted-foreground">{data.note ?? "Connect your ERP account in Settings to load exam results."}</p>
+   416→   416→        ) : data.exams.length === 0 ? (
+   417→   417→          <div className="rounded-lg border border-dashed py-5 text-center">
+   418→   418→            <p className="text-sm font-medium">No published results yet</p>
+   419→   419→            <p className="mx-auto mt-1 max-w-sm text-xs text-muted-foreground">
+   420→   420→              {data.note ?? "The ERP lists no Final Results for your enrollment — the card fills in the moment one is published."}
+   421→   421→            </p>
+   422→   422→          </div>
+   423→   423→        ) : summary ? (
+   424→   424→          <>
+   425→   425→            {/* hero — latest REGULAR exam is the career line */}
+   426→   426→            <div className="flex flex-wrap items-center justify-between gap-4 rounded-lg border border-violet-500/20 bg-gradient-to-br from-violet-500/10 via-indigo-500/5 to-transparent px-4 py-3">
+   427→   427→              <div>
+   428→   428→                <div className="flex items-baseline gap-2">
+   429→   429→                  <Award className="size-5 self-center text-violet-500/70" aria-hidden="true" />
+   430→   430→                  <span className="text-3xl font-bold tabular-nums tracking-tight text-violet-700 dark:text-violet-300">
+   431→   431→                    {summary.cgpa?.toFixed(2) ?? "—"}
+   432→   432→                  </span>
+   433→   433→                  <div className="leading-tight">
+   434→   434→                    <p className="text-sm font-medium">CGPA</p>
+   435→   435→                    <p className="text-[11px] text-muted-foreground">
+   436→   436→                      {summary.latestRegular?.examDateLabel
+   437→   437→                        ? `career line after ${summary.latestRegular.examDateLabel}`
+   438→   438→                        : "career cumulative"}
+   439→   439→                    </p>
+   440→   440→                  </div>
+   441→   441→                </div>
+   442→   442→                <CgpaSparkline points={progression} />
+   443→   443→              </div>
+   444→   444→              <div className="min-w-40 flex-1 sm:max-w-56">
+   445→   445→                <div className="mb-1 flex items-baseline justify-between text-[11px]">
+   446→   446→                  <span className="font-medium tabular-nums">
+   447→   447→                    {summary.creditsEarned ?? "—"} / {summary.creditsOffered ?? "—"} credits
+   448→   448→                  </span>
+   449→   449→                  <span className="tabular-nums text-muted-foreground">{creditsPct != null ? `${creditsPct}%` : ""}</span>
+   450→   450→                </div>
+   451→   451→                <div className="h-1.5 overflow-hidden rounded-full bg-muted" role="presentation">
+   452→   452→                  <div
+   453→   453→                    className="h-full rounded-full bg-gradient-to-r from-violet-500 to-indigo-500 transition-[width] duration-700"
+   454→   454→                    style={{ width: `${creditsPct ?? 0}%` }}
+   455→   455→                  />
+   456→   456→                </div>
+   457→   457→                <p className="mt-1 text-[10px] text-muted-foreground">
+   458→   458→                  earned / offered · as printed on the latest regular result
+   459→   459→                </p>
+   460→   460→              </div>
+   461→   461→            </div>
+   462→   462→
+   463→   463→            {/* pending backlogs — the honest current state */}
+   464→   464→            {summary.pending.length > 0 ? (
+   465→   465→              <div className="rounded-lg border border-amber-500/30 bg-amber-500/5 px-3 py-2.5" data-testid="pending-backlogs">
+   466→   466→                <p className="flex items-center gap-1.5 text-xs font-medium text-amber-700 dark:text-amber-300">
+   467→   467→                  <AlertTriangle className="size-3.5" aria-hidden="true" />
+   468→   468→                  {summary.pending.length} subject{summary.pending.length === 1 ? "" : "s"} not cleared yet
+   469→   469→                </p>
+   470→   470→                <ul className="mt-1.5 space-y-0.5">
+   471→   471→                  {summary.pending.map((p) => (
+   472→   472→                    <PendingItem key={p.code} pending={p} exams={data.exams} />
+   473→   473→                  ))}
+   474→   474→                </ul>
+   475→   475→                <p className="mt-1.5 text-[10px] leading-relaxed text-muted-foreground">
+   476→   476→                  Latest ERP mention per subject decides — earlier failures that a later exam cleared are not listed.
+   477→   477→                  The next remedial window is where these can be retried.
+   478→   478→                </p>
+   479→   479→              </div>
+   480→   480→            ) : (
+   481→   481→              <p className="flex items-center gap-1.5 rounded-lg border border-emerald-500/30 bg-emerald-500/5 px-3 py-2 text-xs font-medium text-emerald-700 dark:text-emerald-300">
+   482→   482→                <CheckCircle2 className="size-3.5" aria-hidden="true" />
+   483→   483→                No pending backlogs — every published subject result is cleared.
+   484→   484→              </p>
+   485→   485→            )}
+   486→   486→
+   487→   487→            {/* what-if — honest CGPA projection for the next semester */}
+   488→   488→            {summary.hasRecord && summary.cgpa != null && summary.creditsOffered != null && (
+   489→   489→              <div
+   490→   490→                className="rounded-lg border border-dashed border-violet-500/30 bg-violet-500/5 px-3 py-2.5"
+   491→   491→                data-testid="cgpa-whatif"
+   492→   492→              >
+   493→   493→                <div className="flex flex-wrap items-center gap-2 text-xs">
+   494→   494→                  <TrendingUp className="size-3.5 shrink-0 text-violet-500/70" aria-hidden="true" />
+   495→   495→                  <span className="font-medium">What if</span>
+   496→   496→                  <input
+   497→   497→                    type="number"
+   498→   498→                    inputMode="decimal"
+   499→   499→                    min={0}
+   500→   500→                    max={10}
+   501→   501→                    step={0.1}
+   502→   502→                    placeholder="SGPA"
+   503→   503→                    value={whatIfSgpa}
+   504→   504→                    onChange={(e) => setWhatIfSgpa(e.target.value)}
+   505→   505→                    aria-label="Projected SGPA for your next semester (0 to 10)"
+   506→   506→                    className="h-7 w-16 rounded border border-border bg-background px-1.5 text-center font-mono text-xs tabular-nums outline-none focus-visible:ring-2 focus-visible:ring-violet-500/40"
+   507→   507→                  />
+   508→   508→                  <span className="text-muted-foreground">next semester with</span>
+   509→   509→                  <input
+   510→   510→                    type="number"
+   511→   511→                    inputMode="numeric"
+   512→   512→                    min={1}
+   513→   513→                    max={45}
+   514→   514→                    step={1}
+   515→   515→                    value={whatIfCredits}
+   516→   516→                    onChange={(e) => setWhatIfCredits(e.target.value)}
+   517→   517→                    placeholder={defaultNextCredits != null ? String(defaultNextCredits) : "cr"}
+   518→   518→                    aria-label="Credits you will take next semester"
+   519→   519→                    className="h-7 w-14 rounded border border-border bg-background px-1.5 text-center font-mono text-xs tabular-nums outline-none placeholder:text-muted-foreground/60 focus-visible:ring-2 focus-visible:ring-violet-500/40"
+   520→   520→                  />
+   521→   521→                  <span className="text-muted-foreground">credits —</span>
+   522→   522→                  {projected != null && summary.cgpa != null ? (
+   523→   523→                    <span className="ml-auto inline-flex items-baseline gap-1.5">
+   524→   524→                      <span className="text-[11px] text-muted-foreground">CGPA →</span>
+   525→   525→                      <span className="text-lg font-bold tabular-nums tracking-tight text-violet-700 dark:text-violet-300">
+   526→   526→                        {projected.toFixed(3)}
+   527→   527→                      </span>
+   528→   528→                      <DeltaChip delta={projected - summary.cgpa} />
+   529→   529→                    </span>
+   530→   530→                  ) : (
+   531→   531→                    <span className="ml-auto text-[11px] text-muted-foreground">
+   532→   532→                      {sgpaValid && !creditsValid ? "credits must be 1–45" : "enter a target SGPA (0–10)"}
+   533→   533→                    </span>
+   534→   534→                  )}
+   535→   535→                </div>
+   536→   536→                <p className="mt-1 text-[10px] leading-relaxed text-muted-foreground">
+   537→   537→                  Estimate only — treats the ERP&apos;s career CGPA as cumulative points ÷ offered credits
+   538→   538→                  ({summary.cgpa.toFixed(3)} × {summary.creditsOffered}). Your real result follows the
+   539→   539→                  university&apos;s exact rules; clearing a pending subject next semester lifts it further.
+   540→   540→                </p>
+   541→   541→              </div>
+   542→   542→            )}
+   543→   543→
+   544→   544→            {/* SGPA trend — REGULAR exams as bars, remedials as markers */}
+   545→   545→            <div>
+   546→   546→              <p className="mb-1.5 text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
+   547→   547→                SGPA by semester (regular exams)
+   548→   548→              </p>
+   549→   549→              {summary.regularSeries.length > 0 ? (
+   550→   550→                <div className="flex items-end gap-2" data-testid="sgpa-trend">
+   551→   551→                  {summary.regularSeries.map((p) => (
+   552→   552→                    <div key={p.typeId} className="flex min-w-0 flex-1 flex-col items-center gap-1">
+   553→   553→                      <span className="font-mono text-[10px] tabular-nums text-muted-foreground">{p.sgpa.toFixed(2)}</span>
+   554→   554→                      <div
+   555→   555→                        className="flex w-full max-w-14 items-end justify-center rounded-t-md border-b border-border/60"
+   556→   556→                        style={{ height: 64 }}
+   557→   557→                        role="presentation"
+   558→   558→                      >
+   559→   559→                        <div
+   560→   560→                          className={cn(
+   561→   561→                            "w-full rounded-t-md transition-[height] duration-700",
+   562→   562→                            p.passed
+   563→   563→                              ? "bg-gradient-to-t from-emerald-500/70 to-emerald-400/80"
+   564→   564→                              : "bg-gradient-to-t from-rose-500/70 to-rose-400/80"
+   565→   565→                          )}
+   566→   566→                          style={{ height: `${Math.max(6, (p.sgpa / maxSgpa) * 100)}%` }}
+   567→   567→                          title={`Semester ${p.semester}: SGPA ${p.sgpa.toFixed(2)} (${p.passed ? "Pass" : "Fail"})`}
+   568→   568→                        />
+   569→   569→                      </div>
+   570→   570→                      <span className="text-[10px] font-medium text-muted-foreground">S{p.semester}</span>
+   571→   571→                    </div>
+   572→   572→                  ))}
+   573→   573→                </div>
+   574→   574→              ) : (
+   575→   575→                <p className="text-xs text-muted-foreground">No regular exam results parsed yet.</p>
+   576→   576→              )}
+   577→   577→              {summary.remedialSeries.length > 0 && (
+   578→   578→                <div className="mt-1.5 flex flex-wrap items-center gap-1.5" data-testid="remedial-markers">
+   579→   579→                  <span className="text-[10px] text-muted-foreground">Remedial attempts:</span>
+   580→   580→                  {summary.remedialSeries.map((p) => (
+   581→   581→                    <span
+   582→   582→                      key={p.typeId}
+   583→   583→                      className="inline-flex items-center gap-1 rounded-full border border-amber-500/40 bg-amber-500/10 px-2 py-0.5 font-mono text-[10px] tabular-nums text-amber-700 dark:text-amber-300"
+   584→   584→                      title={`Remedial attempt for semester ${p.semester}: SGPA ${p.sgpa.toFixed(2)} (${p.passed ? "Pass" : "Fail"})`}
+   585→   585→                    >
+   586→   586→                      ↺ S{p.semester} · {p.sgpa.toFixed(2)}
+   587→   587→                    </span>
+   588→   588→                  ))}
+   589→   589→                </div>
+   590→   590→              )}
+   591→   591→            </div>
+   592→   592→
+   593→   593→            {/* per-exam breakdown */}
+   594→   594→            <div className="space-y-1.5">
+   595→   595→              <p className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">All published results</p>
+   596→   596→              {data.exams.map((exam, i) => (
+   597→   597→                <ExamRow key={exam.typeId} exam={exam} defaultOpen={i === 0} />
+   598→   598→              ))}
+   599→   599→            </div>
+   600→   600→
+   601→   601→            {data.note && <p className="text-[10px] text-muted-foreground">{data.note}</p>}
+   602→   602→          </>
+   603→   603→        ) : null}
+   604→   604→      </CardContent>
+   605→   605→    </Card>
+   606→   606→  );
+   607→   607→}
+   608→   608→

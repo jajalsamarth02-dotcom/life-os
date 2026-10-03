@@ -14,13 +14,15 @@
  *    separate markers so the two can't be confused.
  */
 
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   AlertTriangle,
   Award,
   CheckCircle2,
   ChevronDown,
+  ClipboardCheck,
+  Copy,
   GraduationCap,
   RefreshCw,
   IdCard,
@@ -35,10 +37,12 @@ import { toast } from "sonner";
 import { compactErrorText } from "@/lib/compact-error";
 import {
   attemptHistory,
+  careerDeltas,
   cgpaProgression,
   deriveResultsSummary,
   gradeTier,
   projectCgpa,
+  resultsSummaryText,
   type CgpaPoint,
   type PendingSubject,
 } from "@/lib/results-summary";
@@ -110,7 +114,10 @@ function CgpaSparkline({ points }: { points: CgpaPoint[] }) {
           r={i === last ? 2.2 : 1.5}
           fill="rgb(139 92 246)"
           opacity={i === last ? 1 : 0.65}
-        />
+          className="transition-[r] hover:r-3"
+        >
+          <title>{`S${points[i].semester ?? "?"} · CGPA ${vals[i].toFixed(2)}`}</title>
+        </circle>
       ))}
       <text x={xs[last]} y={ys[last] - 4} textAnchor="end" fontSize="6.5" fill="currentColor" opacity="0.6">
         S{points[last].semester ?? "?"}
@@ -162,15 +169,40 @@ function VerdictChip({ result }: { result: string | null }) {
 }
 
 /** One expandable exam: summary row + full subject table. */
-function ExamRow({ exam, defaultOpen = false }: { exam: ErpResultExam; defaultOpen?: boolean }) {
+function ExamRow({
+  exam,
+  defaultOpen = false,
+  focusNonce = 0,
+  careerDelta = null,
+}: {
+  exam: ErpResultExam;
+  defaultOpen?: boolean;
+  /** Bump to programmatically open + scroll to + flash this row. */
+  focusNonce?: number;
+  /** Career-CGPA change this REGULAR exam printed vs the previous one. */
+  careerDelta?: number | null;
+}) {
   const [open, setOpen] = useState(defaultOpen);
+  const [flash, setFlash] = useState(false);
+  const rootRef = useRef<HTMLDivElement>(null);
   const kindLabel = exam.examKind === "REMEDIAL" ? "Remedial" : exam.examKind === "REGULAR" ? "Regular" : "Exam";
+  useEffect(() => {
+    if (focusNonce > 0) {
+      setOpen(true);
+      setFlash(true);
+      rootRef.current?.scrollIntoView({ behavior: "smooth", block: "nearest" });
+      const t = setTimeout(() => setFlash(false), 1800);
+      return () => clearTimeout(t);
+    }
+  }, [focusNonce]);
   return (
     <div
+      ref={rootRef}
       className={cn(
-        "overflow-hidden rounded-lg border transition-colors",
+        "overflow-hidden rounded-lg border transition-all duration-300",
         exam.examKind === "REMEDIAL" ? "border-amber-500/25" : "border-border/70",
-        open && "bg-muted/30"
+        open && "bg-muted/30",
+        flash && "border-violet-500/60 ring-2 ring-violet-500/40"
       )}
     >
       <button
@@ -195,7 +227,7 @@ function ExamRow({ exam, defaultOpen = false }: { exam: ErpResultExam; defaultOp
         />
       </button>
       {open && (
-        <div className="space-y-2 border-t px-3 py-2">
+        <div className="animate-in fade-in-0 slide-in-from-top-1 space-y-2 border-t px-3 py-2 duration-200">
           <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px] text-muted-foreground">
             <span>{exam.examDateLabel ? `Held ${exam.examDateLabel}` : null}</span>
             {exam.academicYear && <span>AY {exam.academicYear}</span>}
@@ -210,6 +242,12 @@ function ExamRow({ exam, defaultOpen = false }: { exam: ErpResultExam; defaultOp
             {exam.examKind === "REGULAR" && exam.totalEarnedCredit != null && (
               <span>
                 career {exam.totalEarnedCredit}/{exam.totalOfferedCredit} · CGPA {exam.cgpa?.toFixed(2) ?? "—"}
+              </span>
+            )}
+            {careerDelta != null && (
+              <span className="inline-flex items-center gap-1">
+                <span className="sr-only">Career CGPA change at this exam: </span>
+                <DeltaChip delta={careerDelta} />
               </span>
             )}
           </div>
@@ -273,7 +311,7 @@ function PendingItem({ pending, exams }: { pending: PendingSubject; exams: ErpRe
         type="button"
         onClick={() => setOpen((v) => !v)}
         aria-expanded={open}
-        className="-mx-1 flex w-full items-center gap-2 rounded px-1 py-0.5 text-left text-xs transition-colors hover:bg-amber-500/10"
+        className="-mx-1 flex w-full items-center gap-2 rounded border-l-2 border-l-amber-500/40 px-1 py-0.5 text-left text-xs transition-colors hover:bg-amber-500/10 hover:border-l-amber-500/70"
         title={open ? "Hide every published attempt" : "Show every published attempt"}
       >
         <span className="font-mono text-[10px] text-muted-foreground">{pending.code}</span>
@@ -325,11 +363,17 @@ function PendingItem({ pending, exams }: { pending: PendingSubject; exams: ErpRe
 export function ResultsCard({ className }: { className?: string }) {
   const queryClient = useQueryClient();
   const [refreshing, setRefreshing] = useState(false);
+  const [copied, setCopied] = useState(false);
   const [whatIfSgpa, setWhatIfSgpa] = useState("");
   const [whatIfCredits, setWhatIfCredits] = useState("");
+  // Deep-link state: bumping focusNonce opens + scrolls to + flashes the
+  // targeted exam row (used by the remedial SGPA markers).
+  const [focusTarget, setFocusTarget] = useState<string | null>(null);
+  const [focusNonce, setFocusNonce] = useState(0);
   const query = useQuery({ queryKey: qk.results, queryFn: () => fetchResults() });
   const data = query.data;
   const summary = data ? deriveResultsSummary(data.exams) : null;
+  const deltas = data ? careerDeltas(data.exams) : null;
 
   const onRefresh = async () => {
     setRefreshing(true);
@@ -342,6 +386,23 @@ export function ResultsCard({ className }: { className?: string }) {
       toast.error(`Refresh failed: ${compactErrorText(e instanceof Error ? e.message : String(e), 120)}`);
     } finally {
       setRefreshing(false);
+    }
+  };
+
+  const onCopy = async () => {
+    if (!data?.exams.length) return;
+    const text = resultsSummaryText(data.exams);
+    if (!text) {
+      toast.message("Nothing to copy yet — no regular exam published");
+      return;
+    }
+    try {
+      await navigator.clipboard.writeText(text);
+      setCopied(true);
+      toast.success("Academic summary copied as text");
+      setTimeout(() => setCopied(false), 2000);
+    } catch {
+      toast.error("Copy failed — the clipboard is unavailable here");
     }
   };
 
@@ -388,6 +449,22 @@ export function ResultsCard({ className }: { className?: string }) {
                 cached
               </Badge>
             )}
+            <Button
+              variant="ghost"
+              size="sm"
+              className="h-7 gap-1 px-2 text-xs"
+              onClick={onCopy}
+              disabled={!data?.available || !data?.exams.length}
+              aria-label="Copy a plain-text academic summary"
+              title="Copy a plain-text academic summary"
+            >
+              {copied ? (
+                <ClipboardCheck className="size-3.5 text-emerald-600 dark:text-emerald-400" aria-hidden="true" />
+              ) : (
+                <Copy className="size-3.5" aria-hidden="true" />
+              )}
+              <span className="hidden sm:inline">Copy</span>
+            </Button>
             <Button
               variant="ghost"
               size="sm"
@@ -550,7 +627,14 @@ export function ResultsCard({ className }: { className?: string }) {
                 <div className="flex items-end gap-2" data-testid="sgpa-trend">
                   {summary.regularSeries.map((p) => (
                     <div key={p.typeId} className="flex min-w-0 flex-1 flex-col items-center gap-1">
-                      <span className="font-mono text-[10px] tabular-nums text-muted-foreground">{p.sgpa.toFixed(2)}</span>
+                      <span
+                        className={cn(
+                          "font-mono text-[10px] font-semibold tabular-nums",
+                          p.passed ? "text-emerald-600 dark:text-emerald-400" : "text-rose-600 dark:text-rose-400"
+                        )}
+                      >
+                        {p.sgpa.toFixed(2)}
+                      </span>
                       <div
                         className="flex w-full max-w-14 items-end justify-center rounded-t-md border-b border-border/60"
                         style={{ height: 64 }}
@@ -578,13 +662,18 @@ export function ResultsCard({ className }: { className?: string }) {
                 <div className="mt-1.5 flex flex-wrap items-center gap-1.5" data-testid="remedial-markers">
                   <span className="text-[10px] text-muted-foreground">Remedial attempts:</span>
                   {summary.remedialSeries.map((p) => (
-                    <span
+                    <button
                       key={p.typeId}
-                      className="inline-flex items-center gap-1 rounded-full border border-amber-500/40 bg-amber-500/10 px-2 py-0.5 font-mono text-[10px] tabular-nums text-amber-700 dark:text-amber-300"
-                      title={`Remedial attempt for semester ${p.semester}: SGPA ${p.sgpa.toFixed(2)} (${p.passed ? "Pass" : "Fail"})`}
+                      type="button"
+                      onClick={() => {
+                        setFocusTarget(p.typeId);
+                        setFocusNonce((n) => n + 1);
+                      }}
+                      className="inline-flex cursor-pointer items-center gap-1 rounded-full border border-amber-500/40 bg-amber-500/10 px-2 py-0.5 font-mono text-[10px] tabular-nums text-amber-700 transition-colors hover:bg-amber-500/20 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-500/40 dark:text-amber-300"
+                      title={`Remedial attempt for semester ${p.semester}: SGPA ${p.sgpa.toFixed(2)} (${p.passed ? "Pass" : "Fail"}) — click to open that exam below`}
                     >
                       ↺ S{p.semester} · {p.sgpa.toFixed(2)}
-                    </span>
+                    </button>
                   ))}
                 </div>
               )}
@@ -594,7 +683,13 @@ export function ResultsCard({ className }: { className?: string }) {
             <div className="space-y-1.5">
               <p className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">All published results</p>
               {data.exams.map((exam, i) => (
-                <ExamRow key={exam.typeId} exam={exam} defaultOpen={i === 0} />
+                <ExamRow
+                  key={exam.typeId}
+                  exam={exam}
+                  defaultOpen={i === 0}
+                  focusNonce={exam.typeId === focusTarget ? focusNonce : 0}
+                  careerDelta={deltas?.get(exam.typeId) ?? null}
+                />
               ))}
             </div>
 
