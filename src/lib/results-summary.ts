@@ -182,6 +182,72 @@ export function attemptHistory(exams: ExamLike[], code: string): AttemptMention[
   }));
 }
 
+/* ------------------------------------------------------------------ */
+/* Retry-story roll-up: subjects with retries or failures              */
+/* ------------------------------------------------------------------ */
+
+const FAIL_RE = /^(F|FT|AB)$/i;
+
+export interface SubjectStory {
+  code: string;
+  name: string;
+  credit: number | null;
+  /** Every published attempt, ascending by exam date (oldest first). */
+  attempts: AttemptMention[];
+  latestGrade: string | null;
+  /** True when the subject's LATEST mention earned credit points. */
+  cleared: boolean;
+}
+
+/**
+ * Subjects whose published history contains a retry (more than one mention)
+ * or any failing grade — the "how did I get here" timelines. Cleared-after-
+ * failure subjects stay visible on purpose: the F→C→F path is the story.
+ * Sorted: not-cleared first, then most attempts, then code (stable).
+ */
+export function subjectStories(exams: ExamLike[]): SubjectStory[] {
+  const byCode = new Map<string, { name: string; credit: number | null; mentions: { exam: ExamLike; row: ExamLike["subjects"][number] }[] }>();
+  for (const e of exams) {
+    for (const row of e.subjects) {
+      let entry = byCode.get(row.code);
+      if (!entry) {
+        entry = { name: row.name, credit: row.credit, mentions: [] };
+        byCode.set(row.code, entry);
+      }
+      entry.mentions.push({ exam: e, row });
+    }
+  }
+  const stories: SubjectStory[] = [];
+  for (const [code, { name, credit, mentions }] of byCode) {
+    const hasFail = mentions.some(({ row }) => row.grade != null && FAIL_RE.test(row.grade));
+    if (mentions.length < 2 && !hasFail) continue;
+    const asc = [...mentions].sort((a, b) => -byExamDateDesc(a.exam, b.exam));
+    const latest = asc[asc.length - 1];
+    stories.push({
+      code,
+      name,
+      credit: credit ?? latest.row.credit,
+      attempts: asc.map(({ exam, row }) => ({
+        typeId: exam.typeId,
+        semester: exam.semester,
+        kind: exam.examKind,
+        dateKey: exam.examDateKey,
+        dateLabel: exam.examDateLabel,
+        grade: row.grade,
+        creditPoint: row.creditPoint,
+      })),
+      latestGrade: latest.row.grade,
+      cleared: latest.row.creditPoint != null && latest.row.creditPoint > 0,
+    });
+  }
+  stories.sort((a, b) => {
+    if (a.cleared !== b.cleared) return a.cleared ? 1 : -1;
+    if (b.attempts.length !== a.attempts.length) return b.attempts.length - a.attempts.length;
+    return a.code.localeCompare(b.code);
+  });
+  return stories;
+}
+
 export interface CgpaPoint {
   semester: number | null;
   cgpa: number;

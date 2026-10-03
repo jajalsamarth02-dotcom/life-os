@@ -2293,3 +2293,32 @@ Unresolved issues / risks & next-phase priorities:
 4. MilestoneCelebration still awaits the real 3/4 = 75% crossing.
 5. QA journey notes carried: subshell-spawn persistence (load-bearing); stale-ref clicks — re-query + assert content; CgpaPoint has no typeId by design (careerDeltas returns a typeId-keyed Map instead); MultiEdit regions re-read on success AND failure; Radix tabs need snapshot-ref clicks; eval top-level consts persist (IIFE); `set viewport` is the viewport command; headless clipboard writeText is permission-denied — stub it to test success paths.
 6. Keeper cron 430680 must stay alive; worklog protocol unchanged.
+
+---
+Task ID: 59
+Agent: Z.ai Code (main orchestrator)
+Task: Exam-routine retry probe (dead seed) + Retry-history roll-up feature + deep-link completion (display-only round)
+
+Work Log (Round 59 — 3 Oct, 08:45–09:15 +08):
+- Round start: server 200 (pid 29666, RSS 1693MB), /api/results instant from the 08:21 TTL cache — no walk triggered. Browser sanity: console 0, card renders, no hscroll.
+- WORKLOG CORRECTION from Task 58: the note "pid 29666, 20h+ uptime" misread ps etime (MM:SS format) — the server had ~20 MINUTES uptime at that point (spawned 08:13 by Round 57's subshell re-spawn). Current uptime is still short-ish; the subshell form remains the load-bearing spawn method.
+- SEED PROBE (read-only GET via scripts/dump-exam-routine.ts): /student/exam-routine is STILL ERP-500 (status 500, 6609-byte error page, 0 tables/selects/forms). Dead seed stays dead — no parser built; do NOT re-probe for several weeks.
+- Attendance-side gaps already covered elsewhere: what-if-overall.tsx, recovery-plan.tsx, skip-budget-card.tsx exist — projection features ruled out as duplicative.
+
+Completed modifications / verified:
+1. FEATURE — Retry-history roll-up (new): pure subjectStories(exams) in results-summary.ts — subjects with >1 published mention OR any F/FT/AB grade, as ASCENDING grade timelines (oldest → latest) with per-attempt kind/semester/date/CP and a cleared flag (latest mention cp>0). Sort: not-cleared first, then most attempts, then code. Cleared-after-failure subjects stay visible ON PURPOSE (the F→C→F path is the story). Card gains a collapsible "Retry history (N)" section between the SGPA trend and the per-exam list (collapsed by default; 7 real stories: OOP-II F→F not-cleared, Cyber F not-cleared, then 5 cleared-after-fail incl. F→B and F→C paths). Each attempt chip deep-links its exam row (reuses the focus machinery: open + scroll + violet flash). Browser QA: section opens, 7 rows, first row BETCE12302 F→F not-cleared; chip click "Regular S2 May-2025 — F, 0 CP" → S2 Regular · SUMMER 2025 row opened + flashed.
+2. FEATURE — Pending-attempt deep-links completed: every "Every published attempt" line in the pending block now has a History-icon button that focuses + opens + flashes that exam row. QA: OOP-II panel's regular-attempt link → S2 Regular · SUMMER 2025 flash (remedial link verified earlier via chips path). All three deep-link entry points (remedial chips, story chips, pending attempt lines) share one onFocusExam.
+3. STYLE — Dashed "next semester" slot in the SGPA trend: after the last regular bar, an honest placeholder ("—" value, dashed border, S{n+1} label — real data shows S5, the semester the student is in) with tooltip "in progress, no result published yet". Generic (only when last semester < 8). Verified in light + dark.
+4. TESTS: scripts/test-results-r59.ts — 17/17 PASS (qualification rules, ascending timelines F→C→F / F→C, cleared flags, kind recording, tie-breaks, empty/no-fail cases). One initial FAIL was a TEST expectation bug (asserted Cyber before OOP-II; documented sort = most-attempts wins the tie). Regressions: test-results-r58 25/25, test-results-features 24/24, test-parse-results 70/70, test-batch-picks 39/39. Live-payload preview: 7 stories, exactly matching the browser.
+5. tsc ONCE: src/ ZERO errors. A transient HMR parse-error cluster (15 console errors @ results-card.tsx:481) appeared from my own mid-edit file state (ResultsCard declaration briefly consumed by a MultiEdit region, then restored) — after console --clear + reload: 0 errors. Lesson logged: agent-browser console buffer is session-cumulative; clear before judging freshness.
+6. MultiEdit atomicity caveat learned: a failing edit in a batch CAN leave earlier edits applied (contrary to the documented all-or-nothing) — always re-read the file after ANY MultiEdit failure before re-applying.
+7. BROWSER QA ALL GREEN: retry-stories + placeholder render light/dark/mobile (/tmp/qa-r59-{light,dark,mobile}.png; mobile docW=390 hScroll=false); console 0 after clear+reload.
+8. End state PRISTINE: batchPicks absent, changeEvents last hour = 0, zero WhatsApp sends (display-only round; exam-routine probe was a read-only GET; no notify path touched). Server RSS after round: 1731MB.
+
+Unresolved issues / risks & next-phase priorities:
+1. MEMORY #1 risk unchanged: 1731MB, OOM ~2.2GB. Standing user proposal (do NOT add silently): keeper-side restart at RSS > 1.8GB with the double-fork subshell form.
+2. Results family is now TRULY complete: hero/sparkline/credits, pending + attempt histories, retry-story timelines, what-if, SGPA trend with honest S5 slot, per-exam accordion, career deltas, copy-summary, three deep-link entry points. Only cosmetic ideas remain (sparkline axis if >6 points; auto-collapse siblings on deep-link — noted as optional).
+3. Dead/thin seeds: /student/exam-routine STILL ERP-500 (re-probe no earlier than Nov 2026); /student/assessment = dashboard redirect (covered by Assignments sync). No blind re-probes.
+4. MilestoneCelebration awaits the real 3/4 = 75% crossing.
+5. QA journey notes carried: subshell spawn (load-bearing); clear console buffer before freshness judgments; MultiEdit failures may partially apply — re-read after ANY failure; stale-ref clicks — re-query + assert content; headless clipboard denial — stub writeText to test success paths; `set viewport` is the viewport command.
+6. Keeper cron 430680 alive; worklog protocol unchanged.

@@ -24,6 +24,7 @@ import {
   ClipboardCheck,
   Copy,
   GraduationCap,
+  History,
   RefreshCw,
   IdCard,
   TrendingDown,
@@ -43,8 +44,10 @@ import {
   gradeTier,
   projectCgpa,
   resultsSummaryText,
+  subjectStories,
   type CgpaPoint,
   type PendingSubject,
+  type SubjectStory,
 } from "@/lib/results-summary";
 import { fetchResults, qk } from "./api";
 import { ago } from "./shared";
@@ -302,7 +305,15 @@ function ExamRow({
 }
 
 /** One pending subject row + its full published attempt history. */
-function PendingItem({ pending, exams }: { pending: PendingSubject; exams: ErpResultExam[] }) {
+function PendingItem({
+  pending,
+  exams,
+  onFocusExam,
+}: {
+  pending: PendingSubject;
+  exams: ErpResultExam[];
+  onFocusExam: (typeId: string) => void;
+}) {
   const [open, setOpen] = useState(false);
   const history = attemptHistory(exams, pending.code);
   return (
@@ -352,9 +363,56 @@ function PendingItem({ pending, exams }: { pending: PendingSubject; exams: ErpRe
               >
                 {h.creditPoint ?? "—"} CP
               </span>
+              <button
+                type="button"
+                onClick={() => onFocusExam(h.typeId)}
+                aria-label={`Open the ${h.kind === "REMEDIAL" ? "remedial" : "regular"} exam from ${h.dateLabel ?? h.dateKey ?? "this attempt"} in the list below`}
+                title="Open this exam in the list below"
+                className="shrink-0 rounded p-0.5 text-muted-foreground transition-colors hover:bg-violet-500/10 hover:text-violet-600 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-violet-500/40 dark:hover:text-violet-400"
+              >
+                <History className="size-3" aria-hidden="true" />
+              </button>
             </div>
           ))}
         </div>
+      )}
+    </li>
+  );
+}
+
+/** One retry-story: a subject's grade timeline, oldest → latest, chips deep-link their exam. */
+function StoryRow({ story, onFocusExam }: { story: SubjectStory; onFocusExam: (typeId: string) => void }) {
+  return (
+    <li className="flex flex-wrap items-center gap-x-2 gap-y-1 text-xs">
+      <span className="font-mono text-[10px] text-muted-foreground">{story.code}</span>
+      <span className="min-w-0 flex-1 truncate">{story.name}</span>
+      <span className="flex shrink-0 items-center gap-0.5" aria-label="grade timeline, oldest to latest">
+        {story.attempts.map((a, i) => (
+          <span key={`${a.typeId}-${i}`} className="flex items-center gap-0.5">
+            {i > 0 && (
+              <span className="text-muted-foreground/50" aria-hidden="true">
+                →
+              </span>
+            )}
+            <button
+              type="button"
+              onClick={() => onFocusExam(a.typeId)}
+              title={`${a.kind === "REMEDIAL" ? "Remedial" : a.kind === "REGULAR" ? "Regular" : "Exam"} S${a.semester ?? "?"} ${a.dateLabel ?? a.dateKey ?? ""} — ${a.grade ?? "no grade"}, ${a.creditPoint ?? "—"} CP — click to open this exam`}
+              className="rounded focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-violet-500/40"
+            >
+              <GradeChip grade={a.grade} />
+            </button>
+          </span>
+        ))}
+      </span>
+      {story.cleared ? (
+        <span className="inline-flex shrink-0 items-center gap-0.5 rounded-full border border-emerald-500/40 bg-emerald-500/10 px-1.5 py-0.5 text-[10px] font-medium text-emerald-700 dark:text-emerald-300">
+          <CheckCircle2 className="size-2.5" aria-hidden="true" /> cleared
+        </span>
+      ) : (
+        <span className="inline-flex shrink-0 items-center gap-0.5 rounded-full border border-amber-500/40 bg-amber-500/10 px-1.5 py-0.5 text-[10px] font-medium text-amber-700 dark:text-amber-300">
+          <AlertTriangle className="size-2.5" aria-hidden="true" /> not cleared
+        </span>
       )}
     </li>
   );
@@ -370,10 +428,17 @@ export function ResultsCard({ className }: { className?: string }) {
   // targeted exam row (used by the remedial SGPA markers).
   const [focusTarget, setFocusTarget] = useState<string | null>(null);
   const [focusNonce, setFocusNonce] = useState(0);
+  const [storiesOpen, setStoriesOpen] = useState(false);
   const query = useQuery({ queryKey: qk.results, queryFn: () => fetchResults() });
   const data = query.data;
   const summary = data ? deriveResultsSummary(data.exams) : null;
   const deltas = data ? careerDeltas(data.exams) : null;
+  const stories = data ? subjectStories(data.exams) : [];
+
+  const onFocusExam = (typeId: string) => {
+    setFocusTarget(typeId);
+    setFocusNonce((n) => n + 1);
+  };
 
   const onRefresh = async () => {
     setRefreshing(true);
@@ -546,7 +611,7 @@ export function ResultsCard({ className }: { className?: string }) {
                 </p>
                 <ul className="mt-1.5 space-y-0.5">
                   {summary.pending.map((p) => (
-                    <PendingItem key={p.code} pending={p} exams={data.exams} />
+                    <PendingItem key={p.code} pending={p} exams={data.exams} onFocusExam={onFocusExam} />
                   ))}
                 </ul>
                 <p className="mt-1.5 text-[10px] leading-relaxed text-muted-foreground">
@@ -654,6 +719,25 @@ export function ResultsCard({ className }: { className?: string }) {
                       <span className="text-[10px] font-medium text-muted-foreground">S{p.semester}</span>
                     </div>
                   ))}
+                  {(summary.regularSeries[summary.regularSeries.length - 1]?.semester ?? null) != null &&
+                    (summary.regularSeries[summary.regularSeries.length - 1]?.semester as number) < 8 && (
+                      <div
+                        className="flex min-w-0 flex-1 flex-col items-center gap-1"
+                        title="Next semester — in progress, no result published yet"
+                        data-testid="trend-next-placeholder"
+                      >
+                        <span className="font-mono text-[10px] text-muted-foreground/50">—</span>
+                        <div className="flex w-full max-w-14 items-end justify-center" style={{ height: 64 }} role="presentation">
+                          <div
+                            className="w-full rounded-t-md border border-dashed border-border/80 bg-muted/20"
+                            style={{ height: "26%" }}
+                          />
+                        </div>
+                        <span className="text-[10px] font-medium text-muted-foreground/70">
+                          S{(summary.regularSeries[summary.regularSeries.length - 1]?.semester as number) + 1}
+                        </span>
+                      </div>
+                    )}
                 </div>
               ) : (
                 <p className="text-xs text-muted-foreground">No regular exam results parsed yet.</p>
@@ -666,8 +750,7 @@ export function ResultsCard({ className }: { className?: string }) {
                       key={p.typeId}
                       type="button"
                       onClick={() => {
-                        setFocusTarget(p.typeId);
-                        setFocusNonce((n) => n + 1);
+                        onFocusExam(p.typeId);
                       }}
                       className="inline-flex cursor-pointer items-center gap-1 rounded-full border border-amber-500/40 bg-amber-500/10 px-2 py-0.5 font-mono text-[10px] tabular-nums text-amber-700 transition-colors hover:bg-amber-500/20 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-500/40 dark:text-amber-300"
                       title={`Remedial attempt for semester ${p.semester}: SGPA ${p.sgpa.toFixed(2)} (${p.passed ? "Pass" : "Fail"}) — click to open that exam below`}
@@ -678,6 +761,38 @@ export function ResultsCard({ className }: { className?: string }) {
                 </div>
               )}
             </div>
+
+            {/* retry stories — subjects with retries or fails, oldest → latest */}
+            {stories.length > 0 && (
+              <div className="rounded-lg border border-border/70" data-testid="retry-stories">
+                <button
+                  type="button"
+                  onClick={() => setStoriesOpen((v) => !v)}
+                  aria-expanded={storiesOpen}
+                  className="flex w-full items-center gap-2 px-3 py-2 text-left text-xs font-medium transition-colors hover:bg-muted/40"
+                >
+                  <History className="size-3.5 shrink-0 text-muted-foreground" aria-hidden="true" />
+                  Retry history
+                  <Badge variant="outline" className="shrink-0 font-mono text-[10px]">
+                    {stories.length}
+                  </Badge>
+                  <span className="hidden min-w-0 flex-1 truncate text-[10px] font-normal text-muted-foreground sm:inline">
+                    every subject with a retry or a fail — grade timeline, oldest → latest
+                  </span>
+                  <ChevronDown
+                    className={cn("ml-auto size-3.5 shrink-0 text-muted-foreground transition-transform", storiesOpen && "rotate-180")}
+                    aria-hidden="true"
+                  />
+                </button>
+                {storiesOpen && (
+                  <ul className="animate-in fade-in-0 slide-in-from-top-1 space-y-1 border-t px-3 py-2 duration-200">
+                    {stories.map((s) => (
+                      <StoryRow key={s.code} story={s} onFocusExam={onFocusExam} />
+                    ))}
+                  </ul>
+                )}
+              </div>
+            )}
 
             {/* per-exam breakdown */}
             <div className="space-y-1.5">
