@@ -477,6 +477,11 @@ export function TodayCard(props: TodaySmsInput & { className?: string }) {
               seg.segments > 1 ? "text-amber-600/80 dark:text-amber-400/80" : "text-muted-foreground/70"
             )}
             aria-hidden="true"
+            title={
+              seg.encoding === "GSM-7"
+                ? "GSM-7 plain text: 1 segment carries up to 160 chars; longer texts travel as 153-char concatenated segments"
+                : "Contains non-Latin characters — encoded UCS-2, so 1 segment carries only 70 chars"
+            }
           >
             {seg.encoding === "GSM-7" ? "SMS-ready" : "unicode"} · {seg.segments} segment{seg.segments === 1 ? "" : "s"} · {seg.chars} chars
           </span>

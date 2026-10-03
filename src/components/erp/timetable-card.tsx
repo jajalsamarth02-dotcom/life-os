@@ -16,6 +16,7 @@ import {
   Loader2,
   Play,
   Settings2,
+  Target,
   Trash2,
   TriangleAlert,
 } from "lucide-react";
@@ -45,7 +46,7 @@ import { downloadTimetableIcs } from "@/lib/ics";
 import { applyBatchPicks, parallelCells } from "@/lib/batch-picks";
 import { createSlot, deleteSlot, fetchTimetable, setBatchPick, qk, ApiError, type SlotConflict } from "./api";
 import { useNow } from "./shared";
-import type { AppMode, SubjectView, TimetableSlotRow } from "./types";
+import type { AppMode, AttendanceView, SubjectView, TimetableSlotRow } from "./types";
 
 const DAY_NAMES = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
 const WEEK_ORDER = [1, 2, 3, 4, 5, 6, 0]; // Mon → Sun
@@ -562,6 +563,30 @@ function ManageTimetableDialog({
 
 /* ------------------------------------------------------------------ */
 
+/** The milestone stakes of today's next (or ongoing) class, computed from
+ *  the REAL overall record: only when attending exactly ONE class crosses
+ *  the target does this return a value — any other state stays quiet
+ *  (null), so the badge is a rare, high-signal fact and never noise.
+ *  pctAfter is the honest after-percentage (p+1)/(t+1) — it can land
+ *  ABOVE the target, not exactly on it. */
+export interface TodayStakes {
+  /** Overall % if this class is attended — e.g. 2/3 → 3/4 = 75. */
+  pctAfter: number;
+  targetPct: number;
+}
+
+export function todayStakes(
+  overall: AttendanceView | null | undefined,
+  targetPct: number
+): TodayStakes | null {
+  if (!overall || !Number.isFinite(targetPct) || overall.total <= 0) return null;
+  if (overall.classesToTarget !== 1) return null;
+  const pctAfter = ((overall.present + 1) / (overall.total + 1)) * 100;
+  // Honesty guard: classesToTarget===1 must mean one class reaches/crosses.
+  if (!(pctAfter >= targetPct - 1e-9)) return null;
+  return { pctAfter, targetPct };
+}
+
 export function TimetableCard({
   subjects,
   mode = "demo",
@@ -569,6 +594,8 @@ export function TimetableCard({
   onManageClose,
   highlightParallel = false,
   focusSignal = 0,
+  overall = null,
+  target,
 }: {
   subjects: SubjectView[];
   mode?: AppMode;
@@ -581,6 +608,12 @@ export function TimetableCard({
    *  spotlight on the next/ongoing row — the results-family deep-link
    *  language, applied to the schedule. */
   focusSignal?: number;
+  /** Real overall attendance + target % — when attending exactly ONE more
+   *  class crosses the target, today's next/ongoing row gains an amber
+   *  "attend → X%" stakes line (same fact the milestones strip shows,
+   *  surfaced where the decision actually happens). */
+  overall?: AttendanceView | null;
+  target?: number;
 }) {
   const now = useNow(30_000);
   const nowDay = new Date(now).getDay();
@@ -632,6 +665,11 @@ export function TimetableCard({
   const excludedIds = useMemo(() => new Set(batch.excluded.map((s) => s.id)), [batch]);
   const ongoing = todaySlots.find((s) => nowMin >= s.startMin && nowMin < s.endMin);
   const next = todaySlots.find((s) => s.startMin > nowMin);
+  /* Milestone stakes: rendered on the next/ongoing row only when attending
+     exactly one class crosses the target (today's REAL stakes, Saturday
+     11:00 RWM → 3/4 = 75% at the moment of writing). */
+  const stakes = useMemo(() => todayStakes(overall, target ?? NaN), [overall, target]);
+  const classesLeftToday = todaySlots.some((s) => s.endMin > nowMin);
 
   return (
     <Card
@@ -646,7 +684,32 @@ export function TimetableCard({
           <h3 className="flex items-center gap-2 text-base font-semibold tracking-tight">
             <CalendarDays className="size-4 text-emerald-500" aria-hidden="true" />
             Today&apos;s schedule
-            <Badge variant="secondary" className="text-[11px] font-medium">{DAY_NAMES[nowDay]}</Badge>
+            <Badge
+              variant="secondary"
+              className={cn(
+                "gap-1.5 text-[11px] font-medium transition-colors",
+                classesLeftToday &&
+                  "border-emerald-500/30 bg-emerald-500/10 text-emerald-700 dark:text-emerald-400"
+              )}
+              title={
+                classesLeftToday
+                  ? "Classes are still ahead of you today"
+                  : todaySlots.length > 0
+                    ? "All of today's classes are over"
+                    : "No classes scheduled today"
+              }
+            >
+              {classesLeftToday && (
+                <span className="relative flex size-1.5" aria-hidden="true">
+                  <span
+                    className="absolute inline-flex h-full w-full animate-ping rounded-full bg-emerald-500 opacity-60"
+                    style={{ animationDuration: "2.2s" }}
+                  />
+                  <span className="relative inline-flex size-1.5 rounded-full bg-emerald-500" />
+                </span>
+              )}
+              {DAY_NAMES[nowDay]}
+            </Badge>
           </h3>
           <p className="mt-0.5 text-xs text-muted-foreground">
             {todaySlots.length === 0 ? "Nothing planned" : `${todaySlots.length} class${todaySlots.length === 1 ? "" : "es"} today`}
@@ -701,7 +764,9 @@ export function TimetableCard({
         ) : (
           <div className="space-y-2">
             {ongoing && (
-              <div className="mb-2.5 flex items-center gap-2.5 rounded-xl border border-emerald-500/40 bg-emerald-500/[0.07] px-3.5 py-2.5">
+              <div
+                aria-live="polite"
+                className="mb-2.5 flex items-center gap-2.5 rounded-xl border border-emerald-500/40 bg-emerald-500/[0.07] px-3.5 py-2.5">
                 <span className="flex size-8 shrink-0 items-center justify-center rounded-lg bg-emerald-500/15 text-emerald-600 dark:text-emerald-400">
                   <Play className="size-4" aria-hidden="true" />
                 </span>
@@ -753,6 +818,15 @@ export function TimetableCard({
                           {s.source === "demo" && " · demo"}
                           {s.source === "erp" && " · synced from ERP"}
                         </p>
+                        {stakes && (isNext || st.key === "ongoing") && (
+                          <p
+                            className="mt-0.5 flex items-center gap-1 text-[11px] font-medium text-amber-700 tabular-nums dark:text-amber-400"
+                            title={`Attending this class takes your overall to ${stakes.pctAfter.toFixed(2)}% (${(overall?.present ?? 0) + 1}/${(overall?.total ?? 0) + 1}), meeting your ${stakes.targetPct}% target`}
+                          >
+                            <Target className="size-3 shrink-0" aria-hidden="true" />
+                            attend → {stakes.pctAfter.toFixed(2)}% · hits your {stakes.targetPct}% target
+                          </p>
+                        )}
                       </div>
                       {st.key === "ongoing" ? (
                         <Badge variant="outline" className="shrink-0 border-emerald-500/40 text-emerald-700 dark:text-emerald-400">

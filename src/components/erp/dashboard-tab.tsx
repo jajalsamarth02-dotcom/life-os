@@ -1748,6 +1748,8 @@ export function DashboardTab({
           highlightParallel={parallelSignal}
           onManageClose={() => setParallelSignal(false)}
           focusSignal={todayFocusSignal}
+          overall={data.overall}
+          target={data.target}
         />
       )}
 
