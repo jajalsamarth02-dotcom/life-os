@@ -432,6 +432,7 @@ function StoryRow({ story, onFocusExam }: { story: SubjectStory; onFocusExam: (t
 
 export function ResultsCard({ className }: { className?: string }) {
   const queryClient = useQueryClient();
+  const rootRef = useRef<HTMLDivElement>(null);
   const [refreshing, setRefreshing] = useState(false);
   const [copied, setCopied] = useState(false);
   const [whatIfSgpa, setWhatIfSgpa] = useState("");
@@ -468,7 +469,10 @@ export function ResultsCard({ className }: { className?: string }) {
   };
 
   const onCopy = async () => {
-    if (!data?.exams.length) return;
+    if (!data?.exams.length) {
+      toast.message(query.isLoading ? "Results are still loading — try again in a moment" : "Nothing to copy yet — no exam results loaded");
+      return;
+    }
     const text = resultsSummaryText(data.exams);
     if (!text) {
       toast.message("Nothing to copy yet — no regular exam published");
@@ -483,6 +487,25 @@ export function ResultsCard({ className }: { className?: string }) {
       toast.error("Copy failed — the clipboard is unavailable here");
     }
   };
+
+  /* Command-palette hooks: the palette navigates to the dashboard then fires
+     these CustomEvents. A ref keeps the listener stable while the closure
+     inside stays fresh (it always sees the latest state/data). */
+  const copyRef = useRef(onCopy);
+  copyRef.current = onCopy;
+  useEffect(() => {
+    const onCopyEvt = () => copyRef.current();
+    const onHistoryEvt = () => {
+      setStoriesOpen(true);
+      rootRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+    };
+    window.addEventListener("erp:copy-summary", onCopyEvt);
+    window.addEventListener("erp:open-retry-history", onHistoryEvt);
+    return () => {
+      window.removeEventListener("erp:copy-summary", onCopyEvt);
+      window.removeEventListener("erp:open-retry-history", onHistoryEvt);
+    };
+  }, []);
 
   const creditsPct =
     summary && summary.creditsEarned != null && summary.creditsOffered
@@ -501,7 +524,7 @@ export function ResultsCard({ className }: { className?: string }) {
       : null;
 
   return (
-    <Card className={cn("overflow-hidden", className)} data-testid="results-card">
+    <Card ref={rootRef} className={cn("overflow-hidden", className)} data-testid="results-card">
       <CardHeader className="pb-3">
         <div className="flex items-start gap-3">
           <span

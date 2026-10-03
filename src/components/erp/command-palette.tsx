@@ -12,10 +12,12 @@ import {
   BarChart3,
   CalendarClock,
   Check,
+  Copy as CopyIcon,
   ExternalLink,
   Flag,
   FlaskConical,
   GraduationCap,
+  History,
   Keyboard,
   LayoutDashboard,
   ListFilter,
@@ -449,6 +451,31 @@ export function CommandPalette({
               <CommandShortcut>{n.kbd}</CommandShortcut>
             </CommandItem>
           ))}
+        </CommandGroup>
+
+        <CommandGroup heading="Academic record">
+          <CommandItem
+            onSelect={() =>
+              run(() => {
+                onNavigate("dashboard");
+                window.dispatchEvent(new CustomEvent("erp:copy-summary"));
+              })
+            }
+          >
+            <CopyIcon className="size-4 text-muted-foreground" aria-hidden="true" />
+            Copy academic summary as text
+          </CommandItem>
+          <CommandItem
+            onSelect={() =>
+              run(() => {
+                onNavigate("dashboard");
+                window.dispatchEvent(new CustomEvent("erp:open-retry-history"));
+              })
+            }
+          >
+            <History className="size-4 text-muted-foreground" aria-hidden="true" />
+            Open retry history (grade timelines)
+          </CommandItem>
         </CommandGroup>
 
         <CommandGroup heading="Actions">

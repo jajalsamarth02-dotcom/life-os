@@ -1614,7 +1614,7 @@ export function DashboardTab({
       </motion.div>
 
       {/* Milestones — best ever, days at target, streak (honest from snapshot history) */}
-      <MilestonesStrip history={history.data} overallPct={overall.percentage} target={target} />
+      <MilestonesStrip history={history.data} overallPct={overall.percentage} target={target} present={overall.present} total={overall.total} />
 
       {/* One-time celebration when the target is (re)crossed or a personal best lands */}
       <MilestoneCelebration

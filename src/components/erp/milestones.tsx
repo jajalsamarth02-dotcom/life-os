@@ -3,7 +3,7 @@
 import * as React from "react";
 import { AnimatePresence, motion } from "framer-motion";
 import { format } from "date-fns";
-import { CalendarCheck, Flame, Trophy, X, Zap } from "lucide-react";
+import { CalendarCheck, Flame, Target as TargetIcon, Trophy, X, Zap } from "lucide-react";
 import { toast } from "sonner";
 import { Card, CardContent } from "@/components/ui/card";
 import { cn } from "@/lib/utils";
@@ -79,6 +79,28 @@ export function computeMilestones(history: HistoryResponse | undefined, target: 
   };
 }
 
+/**
+ * Minimum number of CONSECUTIVE attended classes needed to reach the target,
+ * assuming every future class is attended: smallest n ≥ 0 with
+ * (present+n)/(total+n) ≥ targetPct/100. Returns 0 when already at/above,
+ * null when there is no data or the target cannot be reached by attending
+ * alone (e.g. a 100% target with an imperfect record).
+ */
+export function classesToTarget(present: number, total: number, targetPct: number): number | null {
+  if (!Number.isFinite(present) || !Number.isFinite(total) || total <= 0) return null;
+  if (targetPct <= 0) return 0;
+  const r = targetPct / 100;
+  if (present / total >= r - 1e-9) return 0;
+  if (r >= 1) return null; // perfect target with an imperfect record — unreachable
+  // n(1-r) ≥ r·total − present  →  n ≥ (r·total − present)/(1−r)
+  const raw = (r * total - present) / (1 - r);
+  let n = Math.max(0, Math.ceil(raw - 1e-9));
+  // Float-guard: verify the candidate honestly, adjust ±1 if rounding lied.
+  while (n > 0 && (present + n) / (total + n) >= r - 1e-9) n--;
+  while ((present + n) / (total + n) < r - 1e-9) n++;
+  return n;
+}
+
 /* ------------------------------------------------------------------ */
 /* Milestones strip (dashboard)                                        */
 /* ------------------------------------------------------------------ */
@@ -87,16 +109,22 @@ export function MilestonesStrip({
   history,
   overallPct,
   target,
+  present = null,
+  total = null,
 }: {
   history: HistoryResponse | undefined;
   overallPct: number;
   target: number;
+  /** Live overall counts — power the "classes to target" status line. */
+  present?: number | null;
+  total?: number | null;
 }) {
   const stats = React.useMemo(() => computeMilestones(history, target), [history, target]);
   if (stats.snapshots === 0 || !stats.best) return null;
 
   const bestPct = Math.max(stats.best.percentage, overallPct);
   const atTarget = overallPct >= target;
+  const toTarget = present != null && total != null ? classesToTarget(present, total, target) : null;
 
   return (
     <Card className="erp-card-accent rounded-xl border-border/60 transition-shadow hover:shadow-md">
@@ -105,9 +133,10 @@ export function MilestonesStrip({
           <Trophy className="size-3.5 text-amber-500" aria-hidden="true" />
           Milestones
         </p>
-        <div className="grid flex-1 gap-2 sm:grid-cols-2 lg:grid-cols-4">
+        <div className="flex min-w-0 flex-1 flex-col gap-2">
+        <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-4">
           <div
-            className="flex items-center gap-2.5 rounded-lg border border-amber-500/25 bg-amber-500/[0.06] px-3 py-2"
+            className="flex items-center gap-2.5 rounded-lg border border-amber-500/25 bg-amber-500/[0.06] px-3 py-2 transition-colors hover:border-amber-500/45 hover:bg-amber-500/[0.1]"
             title="Your highest overall attendance ever recorded by the tracker"
           >
             <Trophy className="size-4 shrink-0 text-amber-500" aria-hidden="true" />
@@ -125,7 +154,9 @@ export function MilestonesStrip({
           </div>
 
           <div
-            className="flex items-center gap-2.5 rounded-lg border border-emerald-500/25 bg-emerald-500/[0.06] px-3 py-2"
+            className={cn(
+              "flex items-center gap-2.5 rounded-lg border border-emerald-500/25 bg-emerald-500/[0.06] px-3 py-2 transition-colors hover:border-emerald-500/45 hover:bg-emerald-500/[0.1]"
+            )}
             title="Distinct days whose final snapshot was at or above your target"
           >
             <CalendarCheck className="size-4 shrink-0 text-emerald-500" aria-hidden="true" />
@@ -142,10 +173,10 @@ export function MilestonesStrip({
 
           <div
             className={cn(
-              "flex items-center gap-2.5 rounded-lg border px-3 py-2",
+              "flex items-center gap-2.5 rounded-lg border px-3 py-2 transition-colors",
               stats.streak > 0
-                ? "border-orange-500/25 bg-orange-500/[0.06]"
-                : "border-border/60 bg-muted/40"
+                ? "border-orange-500/25 bg-orange-500/[0.06] hover:border-orange-500/45 hover:bg-orange-500/[0.1]"
+                : "border-border/60 bg-muted/40 hover:border-border"
             )}
             title="Consecutive most-recent sync days at or above the target"
           >
@@ -168,10 +199,10 @@ export function MilestonesStrip({
 
           <div
             className={cn(
-              "flex items-center gap-2.5 rounded-lg border px-3 py-2",
+              "flex items-center gap-2.5 rounded-lg border px-3 py-2 transition-colors",
               stats.classStreak > 0
-                ? "border-emerald-500/25 bg-emerald-500/[0.06]"
-                : "border-border/60 bg-muted/40"
+                ? "border-emerald-500/25 bg-emerald-500/[0.06] hover:border-emerald-500/45 hover:bg-emerald-500/[0.1]"
+                : "border-border/60 bg-muted/40 hover:border-border"
             )}
             title="Consecutive attended classes, derived from your sync snapshot deltas"
           >
@@ -191,6 +222,43 @@ export function MilestonesStrip({
               </p>
             </div>
           </div>
+        </div>
+
+        {/* Distance-to-target status line — honest, assumes every future class attended */}
+        {toTarget != null && (
+          <p
+            className={cn(
+              "flex items-center gap-1.5 rounded-lg border px-3 py-1.5 text-[11px] font-medium",
+              atTarget
+                ? "border-emerald-500/30 bg-emerald-500/[0.07] text-emerald-700 dark:text-emerald-300"
+                : "border-amber-500/30 bg-amber-500/[0.07] text-amber-700 dark:text-amber-300"
+            )}
+            data-testid="classes-to-target"
+            title={
+              atTarget
+                ? `Overall attendance ${overallPct.toFixed(2)}% is at or above your ${target}% target`
+                : `Overall ${overallPct.toFixed(2)}% now — attending ${toTarget === 1 ? "one class" : `${toTarget} classes in a row`} lifts the overall to ${target}% or above`
+            }
+          >
+            {atTarget ? (
+              <Trophy className="size-3.5 shrink-0" aria-hidden="true" />
+            ) : (
+              <TargetIcon className="size-3.5 shrink-0" aria-hidden="true" />
+            )}
+            {atTarget ? (
+              <span>
+                At or above your {target}% target — {overallPct.toFixed(2)}% right now
+              </span>
+            ) : (
+              <span>
+                {toTarget === 1 ? "1 attended class" : `${toTarget} attended classes in a row`} reaches your {target}% target
+                <span className="ml-1 font-normal text-muted-foreground">
+                  ({overallPct.toFixed(2)}% now, assuming every class is attended)
+                </span>
+              </span>
+            )}
+          </p>
+        )}
         </div>
       </CardContent>
     </Card>
