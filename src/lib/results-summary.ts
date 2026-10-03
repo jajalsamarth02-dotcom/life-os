@@ -148,3 +148,81 @@ export function gradeTier(grade: string | null): "top" | "good" | "ok" | "weak" 
   if (g === "F" || g === "FT" || g === "AB") return "fail";
   return "muted";
 }
+
+/* ------------------------------------------------------------------ */
+/* Attempt history / progression / projection (all client-safe, pure)  */
+/* ------------------------------------------------------------------ */
+
+export interface AttemptMention {
+  typeId: string;
+  semester: number | null;
+  kind: ExamLike["examKind"];
+  dateKey: string | null;
+  dateLabel: string | null;
+  grade: string | null;
+  creditPoint: number | null;
+}
+
+/** Every published mention of one subject code across all exams, latest first. */
+export function attemptHistory(exams: ExamLike[], code: string): AttemptMention[] {
+  const pairs: { exam: ExamLike; row: ExamLike["subjects"][number] }[] = [];
+  for (const e of exams) {
+    const row = e.subjects.find((s) => s.code === code);
+    if (row) pairs.push({ exam: e, row });
+  }
+  pairs.sort((a, b) => byExamDateDesc(a.exam, b.exam));
+  return pairs.map(({ exam, row }) => ({
+    typeId: exam.typeId,
+    semester: exam.semester,
+    kind: exam.examKind,
+    dateKey: exam.examDateKey,
+    dateLabel: exam.examDateLabel,
+    grade: row.grade,
+    creditPoint: row.creditPoint,
+  }));
+}
+
+export interface CgpaPoint {
+  semester: number | null;
+  cgpa: number;
+  creditsOffered: number | null;
+  dateKey: string | null;
+}
+
+/** Career CGPA exactly as printed on each REGULAR exam, ascending by exam
+ *  date (null-dated exams last, never assumed newer). */
+export function cgpaProgression(exams: ExamLike[]): CgpaPoint[] {
+  const asc = (a: ExamLike, b: ExamLike): number => {
+    if (a.examDateKey && b.examDateKey && a.examDateKey !== b.examDateKey) {
+      return a.examDateKey.localeCompare(b.examDateKey);
+    }
+    if (a.examDateKey && !b.examDateKey) return -1;
+    if (!a.examDateKey && b.examDateKey) return 1;
+    if (a.semester !== null && b.semester !== null && a.semester !== b.semester) {
+      return a.semester - b.semester;
+    }
+    return a.typeId.localeCompare(b.typeId);
+  };
+  return exams
+    .filter((e) => e.examKind === "REGULAR" && e.cgpa != null)
+    .sort(asc)
+    .map((e) => ({ semester: e.semester, cgpa: e.cgpa as number, creditsOffered: e.totalOfferedCredit, dateKey: e.examDateKey }));
+}
+
+/**
+ * Estimate the career CGPA after one more semester. The ERP's career CGPA is
+ * treated as cumulative credit-points ÷ credit-offered (points = cgpa ×
+ * offered); the UI must label the result an estimate — the university's exact
+ * rounding is unknown. Returns null when any input is missing/invalid.
+ */
+export function projectCgpa(
+  baseCgpa: number | null,
+  baseOffered: number | null,
+  nextSgpa: number | null,
+  nextCredits: number | null,
+): number | null {
+  if (baseCgpa == null || baseOffered == null || nextSgpa == null || nextCredits == null) return null;
+  if (baseOffered < 0 || nextCredits <= 0) return null;
+  const points = baseCgpa * baseOffered + nextSgpa * nextCredits;
+  return Math.round((points / (baseOffered + nextCredits)) * 1000) / 1000;
+}

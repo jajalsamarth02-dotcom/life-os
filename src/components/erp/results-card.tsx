@@ -24,6 +24,8 @@ import {
   GraduationCap,
   RefreshCw,
   IdCard,
+  TrendingDown,
+  TrendingUp,
 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -31,7 +33,15 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { cn } from "@/lib/utils";
 import { toast } from "sonner";
 import { compactErrorText } from "@/lib/compact-error";
-import { deriveResultsSummary, gradeTier } from "@/lib/results-summary";
+import {
+  attemptHistory,
+  cgpaProgression,
+  deriveResultsSummary,
+  gradeTier,
+  projectCgpa,
+  type CgpaPoint,
+  type PendingSubject,
+} from "@/lib/results-summary";
 import { fetchResults, qk } from "./api";
 import { ago } from "./shared";
 import type { ErpResultExam, ErpResultSubjectRow } from "./types";
@@ -56,6 +66,77 @@ function GradeChip({ grade }: { grade: string | null }) {
       )}
     >
       {grade}
+    </span>
+  );
+}
+
+/** Tiny CGPA sparkline from the REGULAR exams' printed career CGPA line. */
+function CgpaSparkline({ points }: { points: CgpaPoint[] }) {
+  if (points.length < 2) return null;
+  const W = 96;
+  const H = 26;
+  const PAD = 3;
+  const vals = points.map((p) => p.cgpa);
+  const min = Math.min(...vals);
+  const max = Math.max(...vals);
+  const span = Math.max(max - min, 0.8); // never amplify a near-flat line
+  const xs = points.map((_, i) => PAD + (i * (W - 2 * PAD)) / (points.length - 1));
+  const ys = vals.map((v) => H - PAD - ((v - min) / span) * (H - 2 * PAD));
+  const line = xs.map((x, i) => `${i ? "L" : "M"}${x.toFixed(1)},${ys[i].toFixed(1)}`).join(" ");
+  const area = `${line} L${xs[xs.length - 1].toFixed(1)},${H - PAD} L${xs[0].toFixed(1)},${H - PAD} Z`;
+  const last = points.length - 1;
+  return (
+    <svg
+      width={W}
+      height={H}
+      viewBox={`0 0 ${W} ${H}`}
+      className="mt-1.5"
+      role="img"
+      aria-label={`CGPA progression: ${vals.map((v) => v.toFixed(2)).join(" → ")}`}
+    >
+      <defs>
+        <linearGradient id="cgpa-spark-fill" x1="0" y1="0" x2="0" y2="1">
+          <stop offset="0%" stopColor="rgb(139 92 246)" stopOpacity="0.28" />
+          <stop offset="100%" stopColor="rgb(139 92 246)" stopOpacity="0" />
+        </linearGradient>
+      </defs>
+      <path d={area} fill="url(#cgpa-spark-fill)" />
+      <path d={line} fill="none" stroke="rgb(139 92 246)" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
+      {xs.map((x, i) => (
+        <circle
+          key={i}
+          cx={x}
+          cy={ys[i]}
+          r={i === last ? 2.2 : 1.5}
+          fill="rgb(139 92 246)"
+          opacity={i === last ? 1 : 0.65}
+        />
+      ))}
+      <text x={xs[last]} y={ys[last] - 4} textAnchor="end" fontSize="6.5" fill="currentColor" opacity="0.6">
+        S{points[last].semester ?? "?"}
+      </text>
+    </svg>
+  );
+}
+
+function DeltaChip({ delta }: { delta: number }) {
+  const up = delta > 0.0005;
+  const down = delta < -0.0005;
+  return (
+    <span
+      className={cn(
+        "inline-flex items-center gap-0.5 rounded-full border px-1.5 py-0.5 font-mono text-[10px] tabular-nums",
+        up
+          ? "border-emerald-500/40 bg-emerald-500/10 text-emerald-700 dark:text-emerald-300"
+          : down
+            ? "border-rose-500/40 bg-rose-500/10 text-rose-700 dark:text-rose-300"
+            : "border-border bg-muted text-muted-foreground"
+      )}
+    >
+      {up && <TrendingUp className="size-3" aria-hidden="true" />}
+      {down && <TrendingDown className="size-3" aria-hidden="true" />}
+      {up ? "+" : ""}
+      {delta.toFixed(2)}
     </span>
   );
 }
@@ -182,9 +263,70 @@ function ExamRow({ exam, defaultOpen = false }: { exam: ErpResultExam; defaultOp
   );
 }
 
+/** One pending subject row + its full published attempt history. */
+function PendingItem({ pending, exams }: { pending: PendingSubject; exams: ErpResultExam[] }) {
+  const [open, setOpen] = useState(false);
+  const history = attemptHistory(exams, pending.code);
+  return (
+    <li>
+      <button
+        type="button"
+        onClick={() => setOpen((v) => !v)}
+        aria-expanded={open}
+        className="-mx-1 flex w-full items-center gap-2 rounded px-1 py-0.5 text-left text-xs transition-colors hover:bg-amber-500/10"
+        title={open ? "Hide every published attempt" : "Show every published attempt"}
+      >
+        <span className="font-mono text-[10px] text-muted-foreground">{pending.code}</span>
+        <span className="min-w-0 flex-1 truncate">{pending.name}</span>
+        {history.length > 1 && (
+          <span className="shrink-0 rounded border border-amber-500/30 px-1 font-mono text-[9px] tabular-nums text-amber-700 dark:text-amber-300">
+            {history.length} tries
+          </span>
+        )}
+        {pending.credit != null && <span className="shrink-0 tabular-nums text-muted-foreground">{pending.credit} cr</span>}
+        <GradeChip grade={pending.grade} />
+        <span className="hidden shrink-0 text-[10px] text-muted-foreground sm:inline">
+          latest: {pending.examDateKey ?? pending.examLabel.slice(0, 24)}
+        </span>
+        <ChevronDown
+          className={cn("size-3 shrink-0 text-muted-foreground transition-transform", open && "rotate-180")}
+          aria-hidden="true"
+        />
+      </button>
+      {open && (
+        <div className="mb-1 ml-1 space-y-1 rounded-md border border-amber-500/20 bg-background/60 px-2 py-1.5">
+          <p className="text-[10px] font-medium uppercase tracking-wide text-muted-foreground">
+            Every published attempt
+          </p>
+          {history.map((h) => (
+            <div key={h.typeId} className="flex items-center gap-2 text-[11px]">
+              <Badge variant="outline" className="shrink-0 font-mono text-[9px]">
+                S{h.semester ?? "?"}
+              </Badge>
+              <span className="w-14 shrink-0">{h.kind === "REMEDIAL" ? "Remedial" : h.kind === "REGULAR" ? "Regular" : "Exam"}</span>
+              <span className="min-w-0 flex-1 truncate text-muted-foreground">{h.dateLabel ?? h.dateKey ?? "date not printed"}</span>
+              <GradeChip grade={h.grade} />
+              <span
+                className={cn(
+                  "w-9 shrink-0 text-right font-mono tabular-nums",
+                  h.creditPoint === 0 && "font-semibold text-rose-600 dark:text-rose-400"
+                )}
+              >
+                {h.creditPoint ?? "—"} CP
+              </span>
+            </div>
+          ))}
+        </div>
+      )}
+    </li>
+  );
+}
+
 export function ResultsCard({ className }: { className?: string }) {
   const queryClient = useQueryClient();
   const [refreshing, setRefreshing] = useState(false);
+  const [whatIfSgpa, setWhatIfSgpa] = useState("");
+  const [whatIfCredits, setWhatIfCredits] = useState("");
   const query = useQuery({ queryKey: qk.results, queryFn: () => fetchResults() });
   const data = query.data;
   const summary = data ? deriveResultsSummary(data.exams) : null;
@@ -208,6 +350,16 @@ export function ResultsCard({ className }: { className?: string }) {
       ? Math.min(100, Math.round((summary.creditsEarned / summary.creditsOffered) * 100))
       : null;
   const maxSgpa = Math.max(10, ...(summary?.regularSeries.map((p) => p.sgpa) ?? [0]));
+  const progression = data ? cgpaProgression(data.exams) : [];
+  const defaultNextCredits = summary?.latestRegular?.offeredCredit ?? null;
+  const parsedSgpa = parseFloat(whatIfSgpa);
+  const parsedCredits = parseFloat(whatIfCredits) || defaultNextCredits;
+  const sgpaValid = whatIfSgpa.trim() !== "" && !isNaN(parsedSgpa) && parsedSgpa >= 0 && parsedSgpa <= 10;
+  const creditsValid = parsedCredits != null && parsedCredits > 0;
+  const projected =
+    summary && sgpaValid && creditsValid
+      ? projectCgpa(summary.cgpa, summary.creditsOffered, parsedSgpa, parsedCredits)
+      : null;
 
   return (
     <Card className={cn("overflow-hidden", className)} data-testid="results-card">
@@ -272,19 +424,22 @@ export function ResultsCard({ className }: { className?: string }) {
           <>
             {/* hero — latest REGULAR exam is the career line */}
             <div className="flex flex-wrap items-center justify-between gap-4 rounded-lg border border-violet-500/20 bg-gradient-to-br from-violet-500/10 via-indigo-500/5 to-transparent px-4 py-3">
-              <div className="flex items-baseline gap-2">
-                <Award className="size-5 self-center text-violet-500/70" aria-hidden="true" />
-                <span className="text-3xl font-bold tabular-nums tracking-tight text-violet-700 dark:text-violet-300">
-                  {summary.cgpa?.toFixed(2) ?? "—"}
-                </span>
-                <div className="leading-tight">
-                  <p className="text-sm font-medium">CGPA</p>
-                  <p className="text-[11px] text-muted-foreground">
-                    {summary.latestRegular?.examDateLabel
-                      ? `career line after ${summary.latestRegular.examDateLabel}`
-                      : "career cumulative"}
-                  </p>
+              <div>
+                <div className="flex items-baseline gap-2">
+                  <Award className="size-5 self-center text-violet-500/70" aria-hidden="true" />
+                  <span className="text-3xl font-bold tabular-nums tracking-tight text-violet-700 dark:text-violet-300">
+                    {summary.cgpa?.toFixed(2) ?? "—"}
+                  </span>
+                  <div className="leading-tight">
+                    <p className="text-sm font-medium">CGPA</p>
+                    <p className="text-[11px] text-muted-foreground">
+                      {summary.latestRegular?.examDateLabel
+                        ? `career line after ${summary.latestRegular.examDateLabel}`
+                        : "career cumulative"}
+                    </p>
+                  </div>
                 </div>
+                <CgpaSparkline points={progression} />
               </div>
               <div className="min-w-40 flex-1 sm:max-w-56">
                 <div className="mb-1 flex items-baseline justify-between text-[11px]">
@@ -312,17 +467,9 @@ export function ResultsCard({ className }: { className?: string }) {
                   <AlertTriangle className="size-3.5" aria-hidden="true" />
                   {summary.pending.length} subject{summary.pending.length === 1 ? "" : "s"} not cleared yet
                 </p>
-                <ul className="mt-1.5 space-y-1">
+                <ul className="mt-1.5 space-y-0.5">
                   {summary.pending.map((p) => (
-                    <li key={p.code} className="flex items-center gap-2 text-xs">
-                      <span className="font-mono text-[10px] text-muted-foreground">{p.code}</span>
-                      <span className="min-w-0 flex-1 truncate">{p.name}</span>
-                      {p.credit != null && <span className="shrink-0 tabular-nums text-muted-foreground">{p.credit} cr</span>}
-                      <GradeChip grade={p.grade} />
-                      <span className="hidden shrink-0 text-[10px] text-muted-foreground sm:inline">
-                        latest: {p.examDateKey ?? p.examLabel.slice(0, 24)}
-                      </span>
-                    </li>
+                    <PendingItem key={p.code} pending={p} exams={data.exams} />
                   ))}
                 </ul>
                 <p className="mt-1.5 text-[10px] leading-relaxed text-muted-foreground">
@@ -337,6 +484,63 @@ export function ResultsCard({ className }: { className?: string }) {
               </p>
             )}
 
+            {/* what-if — honest CGPA projection for the next semester */}
+            {summary.hasRecord && summary.cgpa != null && summary.creditsOffered != null && (
+              <div
+                className="rounded-lg border border-dashed border-violet-500/30 bg-violet-500/5 px-3 py-2.5"
+                data-testid="cgpa-whatif"
+              >
+                <div className="flex flex-wrap items-center gap-2 text-xs">
+                  <TrendingUp className="size-3.5 shrink-0 text-violet-500/70" aria-hidden="true" />
+                  <span className="font-medium">What if</span>
+                  <input
+                    type="number"
+                    inputMode="decimal"
+                    min={0}
+                    max={10}
+                    step={0.1}
+                    placeholder="SGPA"
+                    value={whatIfSgpa}
+                    onChange={(e) => setWhatIfSgpa(e.target.value)}
+                    aria-label="Projected SGPA for your next semester (0 to 10)"
+                    className="h-7 w-16 rounded border border-border bg-background px-1.5 text-center font-mono text-xs tabular-nums outline-none focus-visible:ring-2 focus-visible:ring-violet-500/40"
+                  />
+                  <span className="text-muted-foreground">next semester with</span>
+                  <input
+                    type="number"
+                    inputMode="numeric"
+                    min={1}
+                    max={45}
+                    step={1}
+                    value={whatIfCredits}
+                    onChange={(e) => setWhatIfCredits(e.target.value)}
+                    placeholder={defaultNextCredits != null ? String(defaultNextCredits) : "cr"}
+                    aria-label="Credits you will take next semester"
+                    className="h-7 w-14 rounded border border-border bg-background px-1.5 text-center font-mono text-xs tabular-nums outline-none placeholder:text-muted-foreground/60 focus-visible:ring-2 focus-visible:ring-violet-500/40"
+                  />
+                  <span className="text-muted-foreground">credits —</span>
+                  {projected != null && summary.cgpa != null ? (
+                    <span className="ml-auto inline-flex items-baseline gap-1.5">
+                      <span className="text-[11px] text-muted-foreground">CGPA →</span>
+                      <span className="text-lg font-bold tabular-nums tracking-tight text-violet-700 dark:text-violet-300">
+                        {projected.toFixed(3)}
+                      </span>
+                      <DeltaChip delta={projected - summary.cgpa} />
+                    </span>
+                  ) : (
+                    <span className="ml-auto text-[11px] text-muted-foreground">
+                      {sgpaValid && !creditsValid ? "credits must be 1–45" : "enter a target SGPA (0–10)"}
+                    </span>
+                  )}
+                </div>
+                <p className="mt-1 text-[10px] leading-relaxed text-muted-foreground">
+                  Estimate only — treats the ERP&apos;s career CGPA as cumulative points ÷ offered credits
+                  ({summary.cgpa.toFixed(3)} × {summary.creditsOffered}). Your real result follows the
+                  university&apos;s exact rules; clearing a pending subject next semester lifts it further.
+                </p>
+              </div>
+            )}
+
             {/* SGPA trend — REGULAR exams as bars, remedials as markers */}
             <div>
               <p className="mb-1.5 text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
@@ -348,7 +552,7 @@ export function ResultsCard({ className }: { className?: string }) {
                     <div key={p.typeId} className="flex min-w-0 flex-1 flex-col items-center gap-1">
                       <span className="font-mono text-[10px] tabular-nums text-muted-foreground">{p.sgpa.toFixed(2)}</span>
                       <div
-                        className="flex w-full max-w-14 items-end justify-center rounded-t-md"
+                        className="flex w-full max-w-14 items-end justify-center rounded-t-md border-b border-border/60"
                         style={{ height: 64 }}
                         role="presentation"
                       >
