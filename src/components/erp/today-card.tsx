@@ -23,6 +23,7 @@ import { createPortal } from "react-dom";
 import { CalendarClock, Check, CheckCheck, Copy, MessageSquareText, Printer, Share2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { cn } from "@/lib/utils";
 import type { AlaUpcomingRow, AttendanceView, SubjectView, TimetableSlotRow } from "./types";
 import { DAY_NAMES_SHORT, istNow, humanizeMins } from "./shared";
@@ -779,23 +780,41 @@ export function TodayCard(props: TodaySmsInput & { className?: string; /** r93: 
             /* r93: the week-ahead pill — the today-card's chip keeps answering
                "when IS the next one?" after the bridge closes, in the muted
                r87 ladder tone. Same deep-link (erp:focus-timetable) as the
-               live/bridge chips; visually the QUIETEST member of the family. */
-            <button
-              type="button"
-              onClick={focusTimetable}
-              className="inline-flex cursor-pointer items-center gap-1.5 whitespace-nowrap rounded-full border border-border/70 bg-muted/50 px-2.5 py-1 text-[11px] font-medium tabular-nums text-muted-foreground transition-all hover:brightness-105 hover:shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-violet-500/40 active:scale-[0.98] print:hidden"
-              aria-label={`Next class this week — ${weekNextInfo.slot.subjectCode} ${DAY_NAMES_SHORT[weekNextInfo.slot.dayOfWeek]} ${hhmmFromMin(weekNextInfo.slot.startMin)} (${weekNextInfo.label})`}
-              title="Today's classes are done — the next one later this week. Click to jump to the schedule."
-            >
-              <CalendarClock className="size-3 shrink-0" aria-hidden="true" />
-              <span className="font-mono text-[10px] font-semibold">{weekNextInfo.slot.subjectCode}</span>
-              <span className="tabular-nums">
-                {DAY_NAMES_SHORT[weekNextInfo.slot.dayOfWeek]} {hhmmFromMin(weekNextInfo.slot.startMin)}
-              </span>
-              <span className={`tabular-nums ${daysAheadQualifierClass(weekNextInfo.d)}`} aria-hidden="true">
-                · {weekNextInfo.label}
-              </span>
-            </button>
+               live/bridge chips; visually the QUIETEST member of the family.
+               r95: the native title retires in favor of a RICH tooltip with
+               information parity with the header chip's tooltip — the full
+               subject name + the start–end range — plus the click hint the
+               header chip can't offer (it isn't clickable). The aria-label is
+               UNCHANGED: the header/pill twin stays byte-identical. */
+            <TooltipProvider delayDuration={150}>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <button
+                    type="button"
+                    onClick={focusTimetable}
+                    className="inline-flex cursor-pointer items-center gap-1.5 whitespace-nowrap rounded-full border border-border/70 bg-muted/50 px-2.5 py-1 text-[11px] font-medium tabular-nums text-muted-foreground transition-all hover:brightness-105 hover:shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-violet-500/40 active:scale-[0.98] print:hidden"
+                    aria-label={`Next class this week — ${weekNextInfo.slot.subjectCode} ${DAY_NAMES_SHORT[weekNextInfo.slot.dayOfWeek]} ${hhmmFromMin(weekNextInfo.slot.startMin)} (${weekNextInfo.label})`}
+                  >
+                    <CalendarClock className="size-3 shrink-0" aria-hidden="true" />
+                    <span className="font-mono text-[10px] font-semibold">{weekNextInfo.slot.subjectCode}</span>
+                    <span className="tabular-nums">
+                      {DAY_NAMES_SHORT[weekNextInfo.slot.dayOfWeek]} {hhmmFromMin(weekNextInfo.slot.startMin)}
+                    </span>
+                    <span className={`tabular-nums ${daysAheadQualifierClass(weekNextInfo.d)}`} aria-hidden="true">
+                      · {weekNextInfo.label}
+                    </span>
+                  </button>
+                </TooltipTrigger>
+                <TooltipContent className="max-w-xs">
+                  <p className="text-xs">
+                    Next class this week:{" "}
+                    {subjects?.find((x) => x.code === weekNextInfo.slot.subjectCode)?.name ?? weekNextInfo.slot.subjectCode}
+                    {" "}· {DAY_NAMES_SHORT[weekNextInfo.slot.dayOfWeek]} {hhmmFromMin(weekNextInfo.slot.startMin)}–{hhmmFromMin(weekNextInfo.slot.endMin)} · {weekNextInfo.label}
+                  </p>
+                  <p className="text-[11px] text-muted-foreground">Click to jump to the schedule</p>
+                </TooltipContent>
+              </Tooltip>
+            </TooltipProvider>
           )}
           <span
             className={cn(
