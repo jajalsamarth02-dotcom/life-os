@@ -39,7 +39,7 @@ import { applyBatchPicks } from "@/lib/batch-picks";
 import { promptInstall, useCanInstall } from "./install-prompt";
 import { fetchDashboard, fetchTimetable, markAllNotificationsRead, postSync, qk } from "./api";
 import { ago, fmtDT, humanizeMins, istNow, useNow } from "./shared";
-import { chipUrgency, type TodayLiveClass } from "./today-card";
+import { chipUrgency, justEndedChip, type TodayLiveClass } from "./today-card";
 import type { AppMode, AppNotification, NotificationSeverity } from "./types";
 
 /** Status dot with a soft radiating ping — marks the live/demo connection.
@@ -303,12 +303,66 @@ function NextClassChip({ subjects }: { subjects: { code: string; name: string }[
   const next = todaySlots.find((s) => s.startMin > nowMin);
   const shown = ongoing ?? next;
 
-  if (!shown || timetable.isPending) return null;
+  const hhmm = (m: number) =>
+    `${String(Math.floor(m / 60)).padStart(2, "0")}:${String(m % 60).padStart(2, "0")}`;
+
+  /* r86: the post-class bridge reaches the header chip — the SIXTH surface
+     of the drain family. r83 gave the bridge to the today-card chip, but
+     this chip still vanished the instant the last class ended (no ongoing,
+     no next → null) and stayed gone through the same 15-min record-pending
+     window. justEndedChip already owns the precedence (null while any live
+     state speaks), so the two chips can never disagree about who talks. */
+  const justEnded = !shown ? justEndedChip(todaySlots, now) : null;
+  if ((!shown && !justEnded) || timetable.isPending) return null;
+
+  if (!shown && justEnded) {
+    const jName =
+      subjects?.find((x) => x.code === justEnded.cls.subjectCode)?.name ??
+      justEnded.cls.subjectCode;
+    return (
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <span
+            className="relative hidden shrink-0 cursor-default items-center gap-1.5 overflow-hidden whitespace-nowrap rounded-full border border-amber-500/40 bg-amber-500/10 px-2.5 py-1 text-xs font-medium tabular-nums text-amber-700 lg:inline-flex dark:text-amber-300"
+            aria-label="Class just ended — the next auto-sync records it"
+            title="The class finished — the next auto-sync (within 15 minutes) records it."
+          >
+            <span className="relative flex size-1.5" aria-hidden="true">
+              <span
+                className="absolute inline-flex h-full w-full animate-ping rounded-full bg-amber-500 opacity-60 motion-reduce:hidden"
+                style={{ animationDuration: "2.2s" }}
+              />
+              <span className="relative inline-flex size-1.5 rounded-full bg-amber-500" />
+            </span>
+            <CalendarClock className="size-3.5 shrink-0" aria-hidden="true" />
+            <span className="font-mono text-[11px] font-semibold">{justEnded.cls.subjectCode}</span>
+            <span className="tabular-nums">just ended {humanizeMins(justEnded.sinceMin)} ago</span>
+            {/* r84 drain strip twin — the window visibly burns down (the
+                honest anchor stays the tooltip's worst-case window). */}
+            <span
+              aria-hidden="true"
+              className="absolute inset-x-1.5 bottom-0 h-0.5 overflow-hidden rounded-full bg-amber-500/15"
+            >
+              <span
+                className="block h-full rounded-full bg-gradient-to-r from-amber-500/50 to-amber-500 transition-[width] duration-1000 ease-linear"
+                style={{ width: `${justEnded.drainPct}%` }}
+              />
+            </span>
+          </span>
+        </TooltipTrigger>
+        <TooltipContent>
+          Class just ended: {jName} · ended {hhmm(justEnded.cls.endMin)} — the next auto-sync records it
+        </TooltipContent>
+      </Tooltip>
+    );
+  }
+
+  /* Past this point shown is always defined: !shown either returned via the
+     first guard (bridge closed) or via the bridge chip above. */
+  if (!shown) return null;
 
   const name = subjects?.find((x) => x.code === shown.subjectCode)?.name ?? shown.subjectCode;
   const minsTo = ongoing ? shown.endMin - nowMin : shown.startMin - nowMin;
-  const hhmm = (m: number) =>
-    `${String(Math.floor(m / 60)).padStart(2, "0")}:${String(m % 60).padStart(2, "0")}`;
 
   /* Urgency ladder — the SAME pure helper the today-card chip uses, so the
      header can never disagree with the card on how loud to be (r82 ladder:
