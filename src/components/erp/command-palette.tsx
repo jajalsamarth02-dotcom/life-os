@@ -2,6 +2,7 @@
 
 import * as React from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { defaultFilter as cmdkDefaultFilter } from "cmdk";
 import { useTheme } from "next-themes";
 import { toast } from "sonner";
 import { formatDistanceToNowStrict } from "date-fns";
@@ -11,6 +12,7 @@ import {
   ArrowRight,
   BarChart3,
   CalendarClock,
+  CalendarPlus,
   Check,
   Copy as CopyIcon,
   ExternalLink,
@@ -43,9 +45,11 @@ import {
 } from "@/components/ui/command";
 import { cn } from "@/lib/utils";
 import { cycleTextSize, TEXT_SIZES } from "@/lib/text-size";
-import { fetchAlaNotes, fetchAssignments, fetchResults, postDemoEvolve, postSync, putSelectedSemester, qk, type RetryFocusHandoff, type SubjectFocusHandoff } from "./api";
+import { fetchAlaNotes, fetchAssignments, fetchResults, fetchTimetable, postDemoEvolve, postSync, putSelectedSemester, qk, type RetryFocusHandoff, type SubjectFocusHandoff } from "./api";
 import { subjectStories } from "@/lib/results-summary";
-import { ERP_BASE } from "./shared";
+import { buildSingleClassIcs, upcomingClassSlots } from "./ics";
+import { downloadTextFile } from "./download";
+import { DAY_NAMES_SHORT, ERP_BASE } from "./shared";
 import { ALA_PRIORITY_META } from "./reminders-tab";
 import type { AttendanceStatus, ResultsResponse, SubjectView } from "./types";
 import { useTextSize } from "./text-size-card";
@@ -56,6 +60,19 @@ const STATUS_DOT: Record<AttendanceStatus, string> = {
   danger: "bg-red-500",
   none: "bg-muted-foreground/50",
 };
+
+/** 24h wall clock for class rows: 660 → "11:00". */
+const hhmm = (m: number) =>
+  `${String(Math.floor(m / 60)).padStart(2, "0")}:${String(m % 60).padStart(2, "0")}`;
+
+/** r102 — ONE source of truth for a class row's search string: the memo
+ *  that ranks matches and the CommandItem's `value` prop both call this,
+ *  so what the student sees is always what the filter scored. */
+const classRowValue = (
+  slot: { dayOfWeek: number; startMin: number; endMin: number; subjectCode: string },
+  name: string | null
+) =>
+  `${slot.subjectCode} ${name ?? ""} ${DAY_NAMES_SHORT[slot.dayOfWeek] ?? ""} ${hhmm(slot.startMin)} add to calendar ics export download class timetable weekly every`;
 
 export type PaletteTab = "dashboard" | "attendance" | "reminders" | "settings";
 
@@ -250,6 +267,85 @@ export function CommandPalette({
     });
   };
 
+  /* r102 — "Add a class to your calendar" group. The synced routine joins
+     through the shared qk.timetable cache (the dashboard tab already loads
+     it; a cold cache fetches ONCE on first open, then 60s staleTime). Rows
+     are the UNIQUE classes ordered by next occurrence, so the soonest
+     class is one Enter away. Display names resolve from the subjects list
+     the page already passed in — a subject-less code falls back to itself. */
+  const timetableQ = useQuery({
+    queryKey: qk.timetable,
+    queryFn: fetchTimetable,
+    enabled: open,
+    staleTime: 60_000,
+  });
+  const subjectName = React.useMemo(() => {
+    const m = new Map<string, string>();
+    for (const s of subjects ?? []) m.set(s.code, s.name);
+    return m;
+  }, [subjects]);
+  const allClassEntries = React.useMemo(
+    () => upcomingClassSlots(timetableQ.data?.slots ?? [], new Date()),
+    [timetableQ.data]
+  );
+  /* Search-aware capping (r102): idle, the group shows the 8 SOONEST
+     classes; while typing, ALL unique classes are scored with cmdk's OWN
+     filter and the best 8 matches win — a class sitting deep in the week
+     ("network calendar" → Wed's COMPUTER-NETWORKS) stays reachable without
+     the 8-row cap hiding it from cmdk's per-row filter. Rank order puts the
+     strongest match first. The search string comes from CommandInput's
+     onValueChange (NOT useCommandState — that hook reads the cmdk store
+     context, which does not exist in this component: the palette RENDERS
+     the Command, it is not inside it — calling it here crashed the app). */
+  const [paletteSearch, setPaletteSearch] = React.useState("");
+  /* The Command root remounts on close (fresh cmdk store) while this state
+     lives on — reset it so a reopened palette never shows a stale query. */
+  React.useEffect(() => {
+    if (!open) setPaletteSearch("");
+  }, [open]);
+  const classEntries = React.useMemo(() => {
+    const q = paletteSearch.trim();
+    if (!q) return allClassEntries.slice(0, 8);
+    return allClassEntries
+      .map((slot) => ({
+        slot,
+        rank: cmdkDefaultFilter(classRowValue(slot, subjectName.get(slot.subjectCode) ?? null), q),
+      }))
+      .filter((x) => x.rank > 0)
+      .sort((a, b) => b.rank - a.rank)
+      .slice(0, 8)
+      .map((x) => x.slot);
+  }, [allClassEntries, paletteSearch, subjectName]);
+  const classTotal = allClassEntries.length;
+  /* r102: transient "saved" feedback — the row's icon swaps to a check for
+     two seconds after the download fires (the r101 chip's landing pattern). */
+  const [savedClassUid, setSavedClassUid] = React.useState<string | null>(null);
+  React.useEffect(() => {
+    if (!savedClassUid) return;
+    const t = setTimeout(() => setSavedClassUid(null), 2000);
+    return () => clearTimeout(t);
+  }, [savedClassUid]);
+  const downloadClass = (slot: {
+    dayOfWeek: number;
+    startMin: number;
+    endMin: number;
+    subjectCode: string;
+  }) => {
+    const name = subjectName.get(slot.subjectCode) ?? null;
+    const res = buildSingleClassIcs(slot, name);
+    if (!res) {
+      toast.error("Couldn't build the calendar file", {
+        description: "This class slot is missing valid time information.",
+      });
+      return;
+    }
+    downloadTextFile(res.text, res.filename);
+    setSavedClassUid(`${slot.dayOfWeek}-${slot.startMin}-${slot.endMin}-${slot.subjectCode}`);
+    toast.success(`Saved ${res.filename}`, {
+      description: `${slot.subjectCode} · every ${DAY_NAMES_SHORT[slot.dayOfWeek] ?? "week"} — import it into your calendar; importing an updated export updates the same event.`,
+    });
+  };
+
   const NAV = [
     { tab: "dashboard" as const, label: "Dashboard", icon: LayoutDashboard, kbd: "1" },
     { tab: "attendance" as const, label: "Attendance", icon: BarChart3, kbd: "2" },
@@ -259,7 +355,11 @@ export function CommandPalette({
 
   return (
     <CommandDialog open={open} onOpenChange={onOpenChange}>
-      <CommandInput placeholder="Search subjects or run a command…" />
+      <CommandInput
+        placeholder="Search subjects or run a command…"
+        value={paletteSearch}
+        onValueChange={setPaletteSearch}
+      />
       <CommandList className="max-h-[min(60vh,26rem)]">
         <CommandEmpty>No results found.</CommandEmpty>
 
@@ -293,6 +393,71 @@ export function CommandPalette({
                   </span>
                 </CommandItem>
               ))}
+            </CommandGroup>
+            <CommandSeparator />
+          </>
+        )}
+
+        {classEntries.length > 0 && (
+          <>
+            <CommandGroup
+              heading={`Add a class to your calendar${
+                classTotal > classEntries.length
+                  ? ` · next ${classEntries.length} of ${classTotal}`
+                  : ""
+              }`}
+            >
+              {classEntries.map((slot) => {
+                const uid = `${slot.dayOfWeek}-${slot.startMin}-${slot.endMin}-${slot.subjectCode}`;
+                const saved = savedClassUid === uid;
+                const name = subjectName.get(slot.subjectCode) ?? null;
+                return (
+                  <CommandItem
+                    key={uid}
+                    value={classRowValue(slot, name)}
+                    onSelect={() => downloadClass(slot)}
+                  >
+                    {saved ? (
+                      <Check className="size-4 shrink-0 text-emerald-500" aria-hidden="true" />
+                    ) : (
+                      <CalendarPlus className="size-4 shrink-0 text-violet-500" aria-hidden="true" />
+                    )}
+                    <span className="font-mono text-xs font-semibold">{slot.subjectCode}</span>
+                    <span className="truncate text-sm text-muted-foreground">
+                      {name ?? "Class"}
+                    </span>
+                    <span className="ml-auto flex shrink-0 items-center gap-1.5 whitespace-nowrap text-xs tabular-nums text-muted-foreground">
+                      <span className="font-medium text-foreground/70">
+                        {DAY_NAMES_SHORT[slot.dayOfWeek] ?? "—"} {hhmm(slot.startMin)}–{hhmm(slot.endMin)}
+                      </span>
+                      <span
+                        className={cn(
+                          "rounded border px-1 font-mono text-[10px] font-semibold",
+                          saved
+                            ? "border-emerald-500/40 bg-emerald-500/10 text-emerald-600 dark:text-emerald-400"
+                            : "border-violet-500/40 bg-violet-500/10 text-violet-600 dark:text-violet-400"
+                        )}
+                      >
+                        .ics
+                      </span>
+                    </span>
+                  </CommandItem>
+                );
+              })}
+              {classTotal > classEntries.length && (
+                <CommandItem
+                  value="open full timetable all classes weekly schedule"
+                  onSelect={() => run(() => onNavigate("dashboard"))}
+                  className="text-muted-foreground"
+                >
+                  <CalendarClock className="size-4 shrink-0" aria-hidden="true" />
+                  <span>
+                    All <b className="font-semibold tabular-nums text-foreground">{classTotal}</b> classes live in
+                    the timetable
+                  </span>
+                  <span className="ml-auto text-xs text-muted-foreground">Dashboard tab</span>
+                </CommandItem>
+              )}
             </CommandGroup>
             <CommandSeparator />
           </>

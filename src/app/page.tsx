@@ -37,8 +37,8 @@ import { SettingsTab, type SettingsFocus } from "@/components/erp/settings-tab";
 import { CommandPalette } from "@/components/erp/command-palette";
 import { useDueNotifications } from "@/components/erp/use-due-notifications";
 import { useOffline } from "@/components/erp/use-offline";
-import { useAppBadge } from "@/components/erp/use-app-badge";
-import { fetchAssignments, fetchDashboard, postSync, qk } from "@/components/erp/api";
+import { duePersonalCount, useAppBadge } from "@/components/erp/use-app-badge";
+import { fetchAssignments, fetchDashboard, fetchReminders, postSync, qk } from "@/components/erp/api";
 import { fmtDT } from "@/components/erp/shared";
 
 type TabKey = "dashboard" | "attendance" | "reminders" | "settings";
@@ -232,9 +232,13 @@ export default function Home() {
   /* Offline awareness: views keep rendering from the last synced cache. */
   const online = useOffline();
 
-  /* PWA badge: overdue (ACTIVE, past-due) ERP ALA count on the installed app
-     icon. Same rows/rule as the Reminders tab's overdue banner; no-ops without
-     setAppBadge. Manual reminders aren't counted — ALAs are the actionable queue. */
+  /* PWA badge (r102, two halves — the app icon's actionable queue):
+     (1) overdue ERP ALAs — ACTIVE + past-due, same rows/rule as the
+         Reminders tab's overdue banner;
+     (2) due PERSONAL reminders — ACTIVE + past-due, counted by the pinned
+         duePersonalCount pure (ERP reminder rows are deliberately excluded
+         there: they mirror the ALAs half #1 already counts).
+     No-ops without setAppBadge. */
   const { data: alaData } = useQuery({
     queryKey: qk.assignments,
     queryFn: fetchAssignments,
@@ -246,20 +250,33 @@ export default function Home() {
       (a) => a.status === "ACTIVE" && new Date(a.dueAt).getTime() < now
     ).length;
   }, [alaData?.assignments]);
-  useAppBadge(overdueAlaCount);
+  /* Joins the "personal, no done" reminders endpoint (60s cadence, same as
+     the ALA poll) — the count only, no rendering cost. */
+  const { data: personalData } = useQuery({
+    queryKey: qk.reminders("personal", false),
+    queryFn: () => fetchReminders("personal", false),
+    refetchInterval: 60_000,
+  });
+  const duePersonal = useMemo(() => {
+    const now = Date.now();
+    return duePersonalCount(personalData ?? [], now);
+  }, [personalData]);
+  const badgeCount = overdueAlaCount + duePersonal;
+  useAppBadge(badgeCount);
 
   /* Live tab title: overall attendance at a glance + the unread-convention
-     "(N)" prefix mirroring the app badge (same ACTIVE + past-due rule). Gives
-     desktop tabs and iOS <17 (no setAppBadge) the same at-a-glance signal.
-     Written only on change to avoid needless document mutations. */
+     "(N)" prefix mirroring the app badge (same two-half rule: overdue ALAs
+     + due personal reminders). Gives desktop tabs and iOS <17 (no
+     setAppBadge) the same at-a-glance signal. Written only on change to
+     avoid needless document mutations. */
   useEffect(() => {
     const pct = data?.overall?.percentage;
     const next =
       typeof pct === "number"
-        ? `${overdueAlaCount > 0 ? `(${overdueAlaCount}) ` : ""}ERP Sync · ${pct.toFixed(2)}%`
+        ? `${badgeCount > 0 ? `(${badgeCount}) ` : ""}ERP Sync · ${pct.toFixed(2)}%`
         : "ERP Sync — Automatic ERP-Sync Student System";
     if (document.title !== next) document.title = next;
-  }, [data?.overall?.percentage, overdueAlaCount]);
+  }, [data?.overall?.percentage, badgeCount]);
 
   const sync = data?.erp?.sync;
   const mode = data?.mode;

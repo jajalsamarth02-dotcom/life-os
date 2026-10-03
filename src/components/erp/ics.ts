@@ -261,6 +261,46 @@ export function buildClassEvents(
 }
 
 /* ------------------------------------------------------------------ */
+/* r102 — palette-ready slot list (dedup + next-occurrence order)       */
+/* ------------------------------------------------------------------ */
+
+/**
+ * r102 — the command palette's "Add a class to your calendar" group.
+ *
+ * Takes the raw synced slot rows (which contain exact duplicates from the
+ * ERP's parallel-batch rows) and returns the UNIQUE classes ordered by how
+ * soon each happens next, so the palette leads with the most actionable
+ * class. Filtering/dedup mirrors buildClassEvents exactly (same validity
+ * rules, same classSlotUid identity) — a slot this function keeps is a
+ * slot buildSingleClassIcs can export, guaranteed.
+ *
+ * Pure: no DOM, no toasts — the caller owns the browser work.
+ */
+export function upcomingClassSlots(
+  slots: ClassSlotInput[],
+  now: Date = new Date(),
+  limit?: number
+): ClassSlotInput[] {
+  const seen = new Set<string>();
+  const unique: ClassSlotInput[] = [];
+  for (const s of slots) {
+    if (!Number.isInteger(s.dayOfWeek) || s.dayOfWeek < 0 || s.dayOfWeek > 6) continue;
+    if (s.endMin <= s.startMin) continue;
+    const uid = classSlotUid(s);
+    if (seen.has(uid)) continue;
+    seen.add(uid);
+    unique.push(s);
+  }
+  const withNext = unique.map((s) => ({
+    slot: s,
+    next: nextWeeklyInstant(s.dayOfWeek, s.startMin, now).getTime(),
+  }));
+  withNext.sort((a, b) => a.next - b.next);
+  const ordered = withNext.map((w) => w.slot);
+  return typeof limit === "number" ? ordered.slice(0, limit) : ordered;
+}
+
+/* ------------------------------------------------------------------ */
 /* r101 — per-class one-shot export ("Add to calendar" on a chip)       */
 /* ------------------------------------------------------------------ */
 
