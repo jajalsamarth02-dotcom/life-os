@@ -1000,7 +1000,9 @@ export function TimetableCard({
                       className={cn(
                         "flex items-center gap-3 rounded-lg border p-2.5 transition-colors",
                         st.key === "ongoing"
-                          ? "border-emerald-500/40 bg-emerald-500/[0.06]"
+                          ? s.endMin - nowMin <= JUST_ENDED_WINDOW_MIN
+                            ? "border-amber-500/40 bg-amber-500/[0.06]"
+                            : "border-emerald-500/40 bg-emerald-500/[0.06]"
                           : st.key === "done"
                             ? drain !== null
                               ? "border-amber-500/30 bg-amber-500/[0.06] opacity-70"
