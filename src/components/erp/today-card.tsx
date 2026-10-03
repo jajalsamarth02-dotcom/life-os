@@ -20,7 +20,7 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
-import { Check, CheckCheck, Copy, MessageSquareText, Printer, Share2 } from "lucide-react";
+import { CalendarClock, Check, CheckCheck, Copy, MessageSquareText, Printer, Share2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { cn } from "@/lib/utils";
@@ -452,6 +452,12 @@ export const SMS_TONE_CLASS: Record<SmsKeywordTone, string> = {
   violet: "text-violet-700 dark:text-violet-400",
 };
 
+/* Short weekday labels for the week-ahead pill (r93) — the same strings the
+   header chip (r87 local DAYS) and the deadline strip (r90 DAY_NAMES) print.
+   A future consolidation into shared.tsx can retire the three copies; the
+   VALUES are stable constants, the pinned MATH is what must stay single. */
+const DAY_SHORT = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"] as const;
+
 /** Legacy clipboard fallback for insecure contexts (plain-HTTP views, older
  *  WebViews where navigator.clipboard is undefined or rejects): an off-screen
  *  textarea + execCommand("copy"). execCommand is deprecated but STILL the
@@ -491,7 +497,7 @@ export function legacyCopy(text: string): boolean {
   }
 }
 
-export function TodayCard(props: TodaySmsInput & { className?: string }) {
+export function TodayCard(props: TodaySmsInput & { className?: string; /** r93: the full-week attending list — feeds the week-ahead pill (FIFTH surface of the "next up this week" family); null/undefined = no timetable synced → the pill stays honestly absent. */ weekSlots?: TimetableSlotRow[] | null }) {
   const {
     now,
     overall,
@@ -506,6 +512,7 @@ export function TodayCard(props: TodaySmsInput & { className?: string }) {
     notedCount,
     lastSyncAt,
     todayClasses,
+    weekSlots,
     className,
   } = props;
 
@@ -543,6 +550,18 @@ export function TodayCard(props: TodaySmsInput & { className?: string }) {
      last class, the chip keeps speaking (amber, elapsed clock) instead of
      vanishing; the deep-link lands on the timetable row's drain bar. */
   const justEnded = useMemo(() => justEndedChip(todayClasses, now), [todayClasses, now]);
+  /* r93: after the bridge closes, the today-card's chip no longer goes dark
+     while the header chip, strip and grid all speak — the FIFTH surface of
+     the week-ahead family, the SAME pinned pures (selection + distance),
+     muted by the r87 ladder (information, not an alarm). Precedence: the
+     live state first, the bridge second, the week ahead last — one voice
+     at a time. */
+  const weekNextInfo = useMemo(() => {
+    const w = nextUpcomingThisWeek(weekSlots ?? null, now);
+    return w
+      ? { slot: w, label: daysAheadLabel(daysAheadThisWeek(w.dayOfWeek, now)) }
+      : null;
+  }, [weekSlots, now]);
 
   /* Chip click → deep-link to the timetable card. Event-based (same pattern
      as the palette's erp:copy-summary commands): TodayCard stays prop-light
@@ -748,6 +767,28 @@ export function TodayCard(props: TodaySmsInput & { className?: string }) {
                   className="block h-full rounded-full bg-gradient-to-r from-amber-500/50 to-amber-500 transition-[width] duration-1000 ease-linear"
                   style={{ width: `${justEnded.drainPct}%` }}
                 />
+              </span>
+            </button>
+          )}
+          {!liveClass && !justEnded && weekNextInfo && (
+            /* r93: the week-ahead pill — the today-card's chip keeps answering
+               "when IS the next one?" after the bridge closes, in the muted
+               r87 ladder tone. Same deep-link (erp:focus-timetable) as the
+               live/bridge chips; visually the QUIETEST member of the family. */
+            <button
+              type="button"
+              onClick={focusTimetable}
+              className="inline-flex cursor-pointer items-center gap-1.5 whitespace-nowrap rounded-full border border-border/70 bg-muted/50 px-2.5 py-1 text-[11px] font-medium tabular-nums text-muted-foreground transition-all hover:brightness-105 hover:shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-violet-500/40 active:scale-[0.98] print:hidden"
+              aria-label={`Next class this week — ${weekNextInfo.slot.subjectCode} ${DAY_SHORT[weekNextInfo.slot.dayOfWeek]} ${hhmmFromMin(weekNextInfo.slot.startMin)} (${weekNextInfo.label})`}
+              title="Today's classes are done — the next one later this week. Click to jump to the schedule."
+            >
+              <CalendarClock className="size-3 shrink-0" aria-hidden="true" />
+              <span className="font-mono text-[10px] font-semibold">{weekNextInfo.slot.subjectCode}</span>
+              <span className="tabular-nums">
+                {DAY_SHORT[weekNextInfo.slot.dayOfWeek]} {hhmmFromMin(weekNextInfo.slot.startMin)}
+              </span>
+              <span className="tabular-nums text-muted-foreground/70" aria-hidden="true">
+                · {weekNextInfo.label}
               </span>
             </button>
           )}

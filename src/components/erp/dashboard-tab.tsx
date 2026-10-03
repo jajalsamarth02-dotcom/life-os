@@ -1246,6 +1246,16 @@ export function DashboardTab({
       .sort((a, b) => a.startMin - b.startMin)
       .map((s) => ({ startMin: s.startMin, endMin: s.endMin, subjectCode: s.subjectCode }));
   }, [ttTodayQ.data, now]);
+  /* r93: the full-week attending list for the Today card's week-ahead pill —
+     same query cache (zero extra requests), same batch-pick math, so the
+     pill can never disagree with the strip/header/grid about the week. */
+  const weekSlots = useMemo(
+    () =>
+      ttTodayQ.data
+        ? applyBatchPicks(ttTodayQ.data.slots ?? [], ttTodayQ.data.picks ?? {}).attending
+        : null,
+    [ttTodayQ.data]
+  );
   /* Soonest ALA deadline that is NOT overdue — the actionable "next". */
   const nextDue = useMemo(
     () =>
@@ -1453,6 +1463,7 @@ export function DashboardTab({
           notedCount={alaNotesQ.data?.length ?? 0}
           lastSyncAt={data.erp?.sync?.lastSuccessAt ?? null}
           todayClasses={todayClasses}
+          weekSlots={weekSlots}
         />
       </div>
 
