@@ -333,6 +333,27 @@ export function resultsSummaryText(exams: ExamLike[]): string | null {
   if (s.remedialSeries.length > 0) {
     lines.push(`Remedial: ${s.remedialSeries.map((p) => `↺S${p.semester} ${p.sgpa.toFixed(2)}`).join(" · ")}`);
   }
+  // Retry narratives — only subjects re-attempted across exams (a single
+  // failed attempt is already fully described by the Pending line above).
+  const retried = subjectStories(exams).filter((st) => st.attempts.length > 1);
+  const openRetries = retried.filter((st) => !st.cleared);
+  const recoveredRetries = retried.filter((st) => st.cleared);
+  if (openRetries.length > 0) {
+    lines.push(
+      `Retries still open (${openRetries.length}): ` +
+        openRetries
+          .map((st) => `${st.code} ${st.name} ${st.attempts.map((a) => a.grade ?? "—").join("→")}`)
+          .join("; "),
+    );
+  }
+  if (recoveredRetries.length > 0) {
+    lines.push(
+      `Retries recovered (${recoveredRetries.length}): ` +
+        recoveredRetries
+          .map((st) => `${st.code} ${st.name} ${st.attempts.map((a) => a.grade ?? "—").join("→")}`)
+          .join("; "),
+    );
+  }
   lines.push("(from the ERP Final Results page — published exams only)");
   return lines.join("\n");
 }

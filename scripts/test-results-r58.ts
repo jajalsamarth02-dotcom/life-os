@@ -158,9 +158,15 @@ const exams: ExamLike[] = [
   );
   check("text: SGPA series with pass/fail flags", text.includes("SGPA: S1 1.74 (F) · S2 3.48 (F) · S3 6.42 (P) · S4 5.17 (F)"), text.split("\n")[3]);
   check("text: remedial line", text.includes("Remedial: ↺S2 4.52"));
+  check(
+    "text: retry line — OOP-II re-attempted F→C→F, still open",
+    text.includes("Retries still open (1): BETCE12302 OBJECT-ORIENTED PROGRAMMING - II F→C→F"),
+    text.split("\n")[5],
+  );
+  check("text: no recovered-retries line in this fixture", !text.includes("Retries recovered"));
   check("text: honest provenance footer", text.endsWith("(from the ERP Final Results page — published exams only)"));
   const lines = text.split("\n");
-  check("text: exactly 6 lines (no padding)", lines.length === 6, `got ${lines.length}`);
+  check("text: exactly 7 lines (6 + the OOP-II retry line)", lines.length === 7, `got ${lines.length}`);
 
   check("text: empty exams → null", resultsSummaryText([]) === null);
   check("text: remedial-only → null", resultsSummaryText([exams[0] as ExamLike]) === null);

@@ -176,12 +176,18 @@ function ExamRow({
   exam,
   defaultOpen = false,
   focusNonce = 0,
+  closeNonce = 0,
+  accented = false,
   careerDelta = null,
 }: {
   exam: ErpResultExam;
   defaultOpen?: boolean;
   /** Bump to programmatically open + scroll to + flash this row. */
   focusNonce?: number;
+  /** Bump to programmatically COLLAPSE this row — deep-links spotlight one row by closing its siblings. */
+  closeNonce?: number;
+  /** This row was the deep-link target — subtle violet left edge while open. */
+  accented?: boolean;
   /** Career-CGPA change this REGULAR exam printed vs the previous one. */
   careerDelta?: number | null;
 }) {
@@ -198,6 +204,11 @@ function ExamRow({
       return () => clearTimeout(t);
     }
   }, [focusNonce]);
+  // Spotlight: when a sibling row is deep-linked, this one quietly collapses.
+  // Manual toggles are untouched — closeNonce only changes on deep-links.
+  useEffect(() => {
+    if (closeNonce > 0) setOpen((v) => (v ? false : v));
+  }, [closeNonce]);
   return (
     <div
       ref={rootRef}
@@ -205,6 +216,7 @@ function ExamRow({
         "overflow-hidden rounded-lg border transition-all duration-300",
         exam.examKind === "REMEDIAL" ? "border-amber-500/25" : "border-border/70",
         open && "bg-muted/30",
+        accented && open && "border-l-2 border-l-violet-500/50",
         flash && "border-violet-500/60 ring-2 ring-violet-500/40"
       )}
     >
@@ -212,7 +224,7 @@ function ExamRow({
         type="button"
         aria-expanded={open}
         onClick={() => setOpen((v) => !v)}
-        className="flex w-full items-center gap-2 px-3 py-2 text-left transition-colors hover:bg-muted/40"
+        className="flex w-full items-center gap-2 px-3 py-2 text-left transition-colors hover:bg-muted/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-violet-500/40"
       >
         <Badge variant="outline" className="shrink-0 font-mono text-[10px]">
           S{exam.semester ?? "?"}
@@ -322,7 +334,7 @@ function PendingItem({
         type="button"
         onClick={() => setOpen((v) => !v)}
         aria-expanded={open}
-        className="-mx-1 flex w-full items-center gap-2 rounded border-l-2 border-l-amber-500/40 px-1 py-0.5 text-left text-xs transition-colors hover:bg-amber-500/10 hover:border-l-amber-500/70"
+        className="-mx-1 flex w-full items-center gap-2 rounded border-l-2 border-l-amber-500/40 px-1 py-0.5 text-left text-xs transition-colors hover:bg-amber-500/10 hover:border-l-amber-500/70 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-500/40"
         title={open ? "Hide every published attempt" : "Show every published attempt"}
       >
         <span className="font-mono text-[10px] text-muted-foreground">{pending.code}</span>
@@ -434,6 +446,7 @@ export function ResultsCard({ className }: { className?: string }) {
   const summary = data ? deriveResultsSummary(data.exams) : null;
   const deltas = data ? careerDeltas(data.exams) : null;
   const stories = data ? subjectStories(data.exams) : [];
+  const openStoryCount = stories.filter((st) => !st.cleared).length;
 
   const onFocusExam = (typeId: string) => {
     setFocusTarget(typeId);
@@ -769,13 +782,21 @@ export function ResultsCard({ className }: { className?: string }) {
                   type="button"
                   onClick={() => setStoriesOpen((v) => !v)}
                   aria-expanded={storiesOpen}
-                  className="flex w-full items-center gap-2 px-3 py-2 text-left text-xs font-medium transition-colors hover:bg-muted/40"
+                  className="flex w-full items-center gap-2 px-3 py-2 text-left text-xs font-medium transition-colors hover:bg-muted/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-violet-500/40"
                 >
                   <History className="size-3.5 shrink-0 text-muted-foreground" aria-hidden="true" />
                   Retry history
                   <Badge variant="outline" className="shrink-0 font-mono text-[10px]">
                     {stories.length}
                   </Badge>
+                  {openStoryCount > 0 && (
+                    <span
+                      className="shrink-0 rounded-full border border-amber-500/40 bg-amber-500/10 px-1.5 py-px text-[9px] font-medium tabular-nums text-amber-700 dark:text-amber-300"
+                      title="Subjects whose latest attempt is not cleared"
+                    >
+                      {openStoryCount} open
+                    </span>
+                  )}
                   <span className="hidden min-w-0 flex-1 truncate text-[10px] font-normal text-muted-foreground sm:inline">
                     every subject with a retry or a fail — grade timeline, oldest → latest
                   </span>
@@ -803,6 +824,8 @@ export function ResultsCard({ className }: { className?: string }) {
                   exam={exam}
                   defaultOpen={i === 0}
                   focusNonce={exam.typeId === focusTarget ? focusNonce : 0}
+                  closeNonce={exam.typeId === focusTarget ? 0 : focusNonce}
+                  accented={exam.typeId === focusTarget}
                   careerDelta={deltas?.get(exam.typeId) ?? null}
                 />
               ))}
