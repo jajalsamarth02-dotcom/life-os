@@ -142,6 +142,11 @@ function SlotChip({
      banner and row bars already expose the value as progressbars, so a
      third aria progressbar would only add screen-reader noise. */
   const prog = ongoing ? classProgress(slot.startMin, slot.endMin, nowMin) : null;
+  /* r81: the just-ended bridge drains visibly — a depleting amber bar (the
+     honest inverse of the ongoing emerald fill) plus an elapsed clock on
+     the "just ended" line, so "when will this record?" has a concrete
+     shape instead of only a tooltip promise. */
+  const drain = justEnded ? justEndedDrainPct(slot.endMin, nowMin) : null;
   return (
     <div
       title={
@@ -209,8 +214,16 @@ function SlotChip({
           className="mt-0.5 flex items-center gap-1 text-[10px] font-medium text-amber-600/90 dark:text-amber-400/90"
           title="Class just finished — attendance updates on the next auto-sync (within 15 minutes)"
         >
-          <Check className="size-3 shrink-0" aria-hidden="true" /> just ended
+          <Check className="size-3 shrink-0" aria-hidden="true" /> just ended {humanizeMins(nowMin - slot.endMin)} ago
         </p>
+      )}
+      {drain !== null && (
+        <div aria-hidden="true" className="mt-1 h-0.5 w-full overflow-hidden rounded-full bg-amber-500/15">
+          <div
+            className="h-full rounded-full bg-gradient-to-r from-amber-500/50 to-amber-500 transition-[width] duration-1000 ease-linear"
+            style={{ width: `${drain}%` }}
+          />
+        </div>
       )}
       {prog !== null && (
         <div
@@ -707,6 +720,19 @@ export function isJustEnded(endMin: number, nowMin: number): boolean {
   return since >= 0 && since <= JUST_ENDED_WINDOW_MIN;
 }
 
+/** Remaining life of the just-ended bridge as a 0–100 fraction — 100 the
+ *  moment the class ends, 0 at the JUST_ENDED_WINDOW_MIN boundary, null
+ *  outside the window. The UI renders it as a depleting amber micro-bar:
+ *  the honest inverse of the ongoing emerald fill (the window is burning
+ *  down, not the class). The tooltip stays the honesty anchor — this bar
+ *  visualizes the designed worst-case window, not the exact sync instant.
+ *  Pure — boundary-pinned in tests. */
+export function justEndedDrainPct(endMin: number, nowMin: number): number | null {
+  if (!isJustEnded(endMin, nowMin)) return null;
+  const since = nowMin - endMin;
+  return ((JUST_ENDED_WINDOW_MIN - since) / JUST_ENDED_WINDOW_MIN) * 100;
+}
+
 export function TimetableCard({
   subjects,
   mode = "demo",
@@ -957,6 +983,8 @@ export function TimetableCard({
                 const st = slotStatus(s, nowDay, nowMin);
                 const isNext = next?.id === s.id;
                 const prog = st.key === "ongoing" ? classProgress(s.startMin, s.endMin, nowMin) : null;
+                /* r81: depleting just-ended bridge (null outside the window). */
+                const drain = st.key === "done" ? justEndedDrainPct(s.endMin, nowMin) : null;
                 return (
                   <motion.div
                     key={s.id}
@@ -970,7 +998,9 @@ export function TimetableCard({
                         st.key === "ongoing"
                           ? "border-emerald-500/40 bg-emerald-500/[0.06]"
                           : st.key === "done"
-                            ? "border-border/40 opacity-55"
+                            ? drain !== null
+                              ? "border-amber-500/30 bg-amber-500/[0.06] opacity-70"
+                              : "border-border/40 opacity-55"
                             : "border-border/50 hover:bg-muted/30",
                         spotlit && (isNext || st.key === "ongoing") &&
                           "border-l-2 border-l-violet-500/60 bg-violet-500/[0.05]"
@@ -1022,6 +1052,17 @@ export function TimetableCard({
                             />
                           </div>
                         )}
+                        {drain !== null && (
+                          <div
+                            aria-hidden="true"
+                            className="mt-1.5 h-1 w-full overflow-hidden rounded-full bg-amber-500/15"
+                          >
+                            <div
+                              className="h-full rounded-full bg-gradient-to-r from-amber-500/50 to-amber-500 transition-[width] duration-1000 ease-linear"
+                              style={{ width: `${drain}%` }}
+                            />
+                          </div>
+                        )}
                         {stakes && (isNext || st.key === "ongoing") && (
                           <p
                             className="mt-0.5 flex items-center gap-1 text-[11px] font-medium text-amber-700 tabular-nums dark:text-amber-400"
@@ -1058,7 +1099,7 @@ export function TimetableCard({
                             className="shrink-0 border-amber-500/30 bg-amber-500/[0.06] text-amber-600/90 dark:text-amber-400/90"
                             title="Class just finished — attendance updates on the next auto-sync (within 15 minutes)"
                           >
-                            <Check className="size-3" aria-hidden="true" /> just ended
+                            <Check className="size-3" aria-hidden="true" /> just ended {humanizeMins(nowMin - s.endMin)} ago
                           </Badge>
                         ) : (
                           <Badge variant="outline" className="shrink-0 border-border/40 text-muted-foreground">done</Badge>
