@@ -126,6 +126,22 @@ function SlotChip({
      so "attendance updates on the next sync" would be a false promise. */
   const justEnded =
     state === "attending" && st.key === "done" && isJustEnded(slot.endMin, nowMin);
+  /* r80: symmetric "wrapping up" reaches the FIFTH and last schedule surface
+     — the week-grid chip. In the final JUST_ENDED_WINDOW_MIN the emerald
+     ongoing chip flips amber (border + pulse icon + label tint), the same
+     flip the banner badge (r78) and row badge (r79) already speak. The
+     escalation mechanic is identical to r77's imminent chips (tint + title,
+     countdown text unchanged), so "amber chip = transition near" reads as
+     ONE language across both ends of the class lifecycle. No attending
+     gate: unlike just-ended's tooltip promise, this is pure time-factual
+     urgency — the class IS ending, whoever attends it. */
+  const wrappingUp = ongoing && slot.endMin - nowMin <= JUST_ENDED_WINDOW_MIN;
+  /* r80 style: the chip joins the live-progress family — a 2px gradient
+     strip (the banner/row bar language: emerald brightening toward full)
+     climbs while the class runs. Decorative on purpose (aria-hidden): the
+     banner and row bars already expose the value as progressbars, so a
+     third aria progressbar would only add screen-reader noise. */
+  const prog = ongoing ? classProgress(slot.startMin, slot.endMin, nowMin) : null;
   return (
     <div
       title={
@@ -133,14 +149,18 @@ function SlotChip({
           ? "You picked a different class for this window — not counted in your plan"
           : state === "duplicate"
             ? "Another batch of the same class — counted once"
-            : imminent
-              ? "Starting imminently"
-              : undefined
+            : wrappingUp
+              ? "Wrapping up — class ends imminently"
+              : imminent
+                ? "Starting imminently"
+                : undefined
       }
       className={cn(
         "group rounded-lg border px-2 py-1.5 text-left transition-colors",
         ongoing
-          ? "border-emerald-500/50 bg-emerald-500/10"
+          ? wrappingUp
+            ? "border-amber-500/40 bg-amber-500/10"
+            : "border-emerald-500/50 bg-emerald-500/10"
           : justEnded
             ? "border-amber-500/30 bg-amber-500/[0.06] opacity-70"
             : st.key === "done"
@@ -155,7 +175,15 @@ function SlotChip({
       <div className="flex items-center gap-1.5">
         <span className="size-2 shrink-0 rounded-full" style={{ backgroundColor: color }} aria-hidden="true" />
         <span className="min-w-0 flex-1 truncate font-mono text-[11px] font-semibold">{slot.subjectCode}</span>
-        {ongoing && <CircleDot className="size-3 shrink-0 animate-pulse text-emerald-500" aria-hidden="true" />}
+        {ongoing && (
+          <CircleDot
+            className={cn(
+              "size-3 shrink-0 animate-pulse",
+              wrappingUp ? "text-amber-500" : "text-emerald-500"
+            )}
+            aria-hidden="true"
+          />
+        )}
       </div>
       <p className="mt-0.5 text-[11px] tabular-nums text-muted-foreground">
         {hhmm(slot.startMin)}–{hhmm(slot.endMin)}
@@ -165,7 +193,9 @@ function SlotChip({
           className={cn(
             "mt-0.5 text-[10px] font-medium",
             ongoing
-              ? "text-emerald-600 dark:text-emerald-400"
+              ? wrappingUp
+                ? "text-amber-600 dark:text-amber-400"
+                : "text-emerald-600 dark:text-emerald-400"
               : imminent
                 ? "text-amber-600 dark:text-amber-400"
                 : "text-muted-foreground"
@@ -181,6 +211,17 @@ function SlotChip({
         >
           <Check className="size-3 shrink-0" aria-hidden="true" /> just ended
         </p>
+      )}
+      {prog !== null && (
+        <div
+          aria-hidden="true"
+          className="mt-1 h-0.5 w-full overflow-hidden rounded-full bg-emerald-500/15"
+        >
+          <div
+            className="h-full rounded-full bg-gradient-to-r from-emerald-500/45 to-emerald-500 transition-[width] duration-1000 ease-linear"
+            style={{ width: `${prog}%` }}
+          />
+        </div>
       )}
     </div>
   );
