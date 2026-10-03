@@ -9,6 +9,7 @@ import {
   type AppSettings,
 } from "@/lib/settings";
 import { attendancePercentage, classesToReachTarget } from "@/lib/attendance";
+import { fmtDateIST, fmtDateTimeIST } from "@/lib/ist";
 import { compactErrorText } from "@/lib/compact-error";
 import { fetchDemoSnapshot } from "@/lib/erp/demo";
 import { fetchLiveSnapshot, isSubmissionComplete } from "@/lib/erp/live";
@@ -406,7 +407,7 @@ async function applySnapshot(snapshot: ErpSnapshot, settings: AppSettings): Prom
           dueAt,
         },
       });
-      await changeEvent("REMINDER_UPSERTED", null, `${r.title} — ${dueAt.toLocaleString()}`);
+      await changeEvent("REMINDER_UPSERTED", null, `${r.title} — ${formatDateTime(dueAt)}`);
       changes++;
     } else {
       const dueChanged = existing.dueAt.getTime() !== dueAt.getTime();
@@ -422,7 +423,7 @@ async function applySnapshot(snapshot: ErpSnapshot, settings: AppSettings): Prom
           await changeEvent(
             "REMINDER_DATE_CHANGED",
             null,
-            `${r.title}: ${oldDue.toLocaleString()} → ${dueAt.toLocaleString()}`
+            `${r.title}: ${formatDateTime(oldDue)} → ${formatDateTime(dueAt)}`
           );
           await notify(
             "REMINDER_CHANGE",
@@ -690,20 +691,14 @@ function endOfToday(): Date {
   return d;
 }
 
-/** Compact date-only rendering for deadline change messages. */
+/** Compact date-only rendering for deadline change messages.
+ *  r99: moved to lib/ist — a UTC server shifted every delivered time by -5:30. */
 function formatDate(d: Date): string {
-  return d.toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" });
+  return fmtDateIST(d);
 }
 
 function formatDateTime(d: Date): string {
-  return d.toLocaleString("en-IN", {
-    day: "2-digit",
-    month: "short",
-    year: "numeric",
-    hour: "2-digit",
-    minute: "2-digit",
-    hour12: true,
-  });
+  return fmtDateTimeIST(d);
 }
 
 /** Called by the background scheduler once a minute. */

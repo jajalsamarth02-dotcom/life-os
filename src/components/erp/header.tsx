@@ -2,7 +2,6 @@
 
 import * as React from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { format } from "date-fns";
 import {
   AlertCircle,
   Bell,
@@ -35,6 +34,7 @@ import {
   TooltipTrigger,
 } from "@/components/ui/tooltip";
 import { cn } from "@/lib/utils";
+import { istFormat } from "@/lib/ist";
 import { applyBatchPicks } from "@/lib/batch-picks";
 import { promptInstall, useCanInstall } from "./install-prompt";
 import { fetchDashboard, fetchTimetable, markAllNotificationsRead, postSync, qk } from "./api";
@@ -554,7 +554,7 @@ export function AppHeader({ onOpenPalette }: { onOpenPalette?: () => void }) {
                   {isSyncing
                     ? "Syncing with the ERP now…"
                     : sync?.nextScheduledSyncAt
-                      ? `Next auto-sync ${format(new Date(sync.nextScheduledSyncAt), "h:mm a")}`
+                      ? `Next auto-sync ${istFormat(sync.nextScheduledSyncAt, "h:mm a")}`
                       : "Auto-sync schedule unavailable."}
                 </p>
               </TooltipContent>
@@ -606,7 +606,7 @@ export function AppHeader({ onOpenPalette }: { onOpenPalette?: () => void }) {
         </div>
       </TooltipProvider>
       <p className="sr-only">
-        Data synchronized from the college ERP, read-only. {lastSyncAt ? `Last sync ${format(new Date(lastSyncAt), "d MMM, h:mm a")}.` : "Not synced yet."}
+        Data synchronized from the college ERP, read-only. {lastSyncAt ? `Last sync ${fmtDT(lastSyncAt)}.` : "Not synced yet."}
       </p>
     </header>
   );

@@ -1,7 +1,6 @@
 "use client";
 
 import { useQuery } from "@tanstack/react-query";
-import { format } from "date-fns";
 import {
   ArrowDownRight,
   ArrowUpRight,
@@ -27,6 +26,7 @@ import {
 import { Separator } from "@/components/ui/separator";
 import { Skeleton } from "@/components/ui/skeleton";
 import { cn } from "@/lib/utils";
+import { istFormat } from "@/lib/ist";
 import { fetchDigest } from "./api";
 import { SourceBadge } from "./shared";
 import type { DigestResponse } from "./types";
@@ -65,7 +65,9 @@ function DeltaChip({ pts, className }: { pts: number | null; className?: string 
 /* ------------------------------------------------------------------ */
 
 function buildSummary(d: DigestResponse): string {
-  const range = `${format(new Date(d.window.from), "d MMM")} – ${format(new Date(d.window.to), "d MMM yyyy")}`;
+  // r99: the digest is a shareable artifact — its window labels and due times
+  // are IST-pinned so a copy pasted abroad matches the student's clock.
+  const range = `${istFormat(d.window.from, "d MMM")} – ${istFormat(d.window.to, "d MMM yyyy")}`;
   const lines: string[] = [];
   lines.push(`ERP Sync — ${d.days}-day report (${range})`);
   if (d.overall) {
@@ -82,7 +84,7 @@ function buildSummary(d: DigestResponse): string {
   if (d.upcoming.length > 0) {
     lines.push("Upcoming:");
     for (const u of d.upcoming.slice(0, 5)) {
-      lines.push(`  • ${format(new Date(u.dueAt), "d MMM h:mm a")} — ${u.title} (${u.source})`);
+      lines.push(`  • ${istFormat(u.dueAt, "d MMM h:mm a")} — ${u.title} (${u.source})`);
     }
   }
   return lines.join("\n");
@@ -125,7 +127,7 @@ function downloadCsv(d: DigestResponse) {
   const url = URL.createObjectURL(blob);
   const a = document.createElement("a");
   a.href = url;
-  a.download = `erp-sync-report-${d.days}d-${format(new Date(), "yyyy-MM-dd")}.csv`;
+  a.download = `erp-sync-report-${d.days}d-${istFormat(new Date(), "yyyy-MM-dd")}.csv`;
   a.click();
   URL.revokeObjectURL(url);
 }
@@ -213,7 +215,7 @@ export function WeeklyDigestDialog({
           </DialogTitle>
           <DialogDescription className="text-xs">
             {data
-              ? `${format(new Date(data.window.from), "d MMM")} – ${format(new Date(data.window.to), "d MMM yyyy")} · computed from your synchronized mirror`
+              ? `${istFormat(data.window.from, "d MMM")} – ${istFormat(data.window.to, "d MMM yyyy")} · computed from your synchronized mirror`
               : "Computed from your synchronized mirror"}
           </DialogDescription>
         </DialogHeader>
@@ -351,7 +353,7 @@ export function WeeklyDigestDialog({
                       <div className="min-w-0 flex-1">
                         <p className="truncate text-sm font-medium">{u.title}</p>
                         <p className="text-[11px] text-muted-foreground">
-                          {format(new Date(u.dueAt), "EEE d MMM, h:mm a")}
+                          {istFormat(u.dueAt, "EEE d MMM, h:mm a")}
                         </p>
                       </div>
                       <SourceBadge source={u.source === "ERP" ? "ERP" : "PERSONAL"} />

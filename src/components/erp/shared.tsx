@@ -31,6 +31,7 @@ import {
   Target,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { istFormat } from "@/lib/ist";
 import type { AttendanceStatus, ChangeKind, ReminderSource, ReminderType } from "./types";
 import { AnimatedNumber } from "./trend-chart";
 
@@ -144,18 +145,17 @@ export function minutesFromHHMMClient(hhmm: string): number {
   return (Number.isFinite(h) ? h : 0) * 60 + (Number.isFinite(m) ? m : 0);
 }
 
+/** r99: instant stamps are IST-pinned via lib/ist — a UTC browser used to
+ *  read 10:21 AM where the student's clock said 3:51 PM. Same "d MMM, h:mm a"
+ *  shape, so every existing call site (37 of them) keeps its byte shape. */
 export function fmtDT(iso: string | null | undefined): string {
   if (!iso) return "—";
-  const d = new Date(iso);
-  if (Number.isNaN(d.getTime())) return "—";
-  return format(d, "d MMM, h:mm a");
+  return istFormat(iso, "d MMM, h:mm a");
 }
 
 export function fmtDay(iso: string | null | undefined): string {
   if (!iso) return "—";
-  const d = new Date(iso);
-  if (Number.isNaN(d.getTime())) return "—";
-  return format(d, "d MMM yyyy");
+  return istFormat(iso, "d MMM yyyy");
 }
 
 export function ago(iso: string | null | undefined, now: number = Date.now()): string {

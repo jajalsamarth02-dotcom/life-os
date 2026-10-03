@@ -82,6 +82,7 @@ import {
   TooltipTrigger,
 } from "@/components/ui/tooltip";
 import { cn } from "@/lib/utils";
+import { istFormat } from "@/lib/ist";
 import {
   isEnabled as browserRemindersEnabled,
   permissionState as browserRemindersPermission,
@@ -1344,8 +1345,10 @@ const LAST_RESTORE_KEY = "erp:lastRestoreAt";
 
 function readLocalStamp(key: string): string | null {
   try {
+    // r99: device-local toLocaleString() → IST-pinned stamp (and a nicer face:
+    // "3 Oct, 3:51 PM" instead of "10/3/2026, 3:51:51 PM").
     const v = localStorage.getItem(key);
-    return v ? new Date(v).toLocaleString() : null;
+    return v ? istFormat(v, "d MMM, h:mm a") : null;
   } catch {
     return null;
   }
@@ -1478,7 +1481,7 @@ function DataBackupCard() {
     try {
       const filename = await downloadBackup();
       localStorage.setItem(LAST_BACKUP_KEY, new Date().toISOString());
-      setStamps((s) => ({ ...s, backup: new Date().toLocaleString() }));
+      setStamps((s) => ({ ...s, backup: istFormat(new Date(), "d MMM, h:mm a") }));
       setStaleDays(null);
       toast.success("Backup downloaded", { description: filename });
     } catch (e) {
@@ -1697,7 +1700,7 @@ function DataBackupCard() {
     try {
       const res = await restoreAlaNotes(staged.rows);
       localStorage.setItem(LAST_RESTORE_KEY, new Date().toISOString());
-      setStamps((s) => ({ ...s, restore: new Date().toLocaleString() }));
+      setStamps((s) => ({ ...s, restore: istFormat(new Date(), "d MMM, h:mm a") }));
       const parts: string[] = [];
       if (res.created) parts.push(`${res.created} added`);
       if (res.updated) parts.push(`${res.updated} updated`);
@@ -2103,7 +2106,7 @@ function DataBackupCard() {
                 <p>
                   From <span className="font-medium text-foreground">{staged?.fileName}</span>
                   {staged?.exportedAt && (
-                    <> · exported {new Date(staged.exportedAt).toLocaleString()}</>
+                    <> · exported {istFormat(staged.exportedAt, "d MMM, h:mm a")}</>
                   )}
                 </p>
                 <ul className="space-y-1 text-muted-foreground">

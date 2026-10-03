@@ -14,6 +14,7 @@ import {
   type PermissionState,
 } from "@/lib/browser-reminders";
 import type { Reminder } from "./types";
+import { istFormat } from "@/lib/ist";
 
 /**
  * Watches ACTIVE reminders and fires a system notification (plus an in-app
@@ -63,12 +64,11 @@ export function useDueNotifications() {
     });
 
     for (const r of due) {
+      // r99: this body leaves the page (system notification) — pin the clock
+      // to IST and SAY so, or a device abroad would misread the due time.
       const body = r.description?.trim()
         ? r.description.trim().slice(0, 140)
-        : `Due ${new Date(r.dueAt).toLocaleString(undefined, {
-            dateStyle: "medium",
-            timeStyle: "short",
-          })}`;
+        : `Due ${istFormat(r.dueAt, "d MMM, h:mm a")} IST`;
       showSystemNotification(`⏰ ${r.title}`, body, `erp-reminder-${r.id}`);
       // Toast as well, so the reminder is visible even when the tab is focused.
       toast.warning(`Reminder due: ${r.title}`, { description: body, duration: 8000 });
