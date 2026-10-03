@@ -568,6 +568,7 @@ export function TimetableCard({
   manageOpen = false,
   onManageClose,
   highlightParallel = false,
+  focusSignal = 0,
 }: {
   subjects: SubjectView[];
   mode?: AppMode;
@@ -575,11 +576,37 @@ export function TimetableCard({
   manageOpen?: boolean;
   onManageClose?: () => void;
   highlightParallel?: boolean;
+  /** Increment-only counter from the Today card chip (erp:focus-timetable):
+   *  every increment scrolls this card into view and flashes a violet
+   *  spotlight on the next/ongoing row — the results-family deep-link
+   *  language, applied to the schedule. */
+  focusSignal?: number;
 }) {
   const now = useNow(30_000);
   const nowDay = new Date(now).getDay();
   const nowMin = new Date(now).getHours() * 60 + new Date(now).getMinutes();
   const [weekOpen, setWeekOpen] = useState(false);
+
+  /* Spotlight state: armed by focusSignal increments, self-disarming after
+     ~2.6s (matches the results-card flash language). The card ref drives the
+     scroll; the flash marks the way in and the next row keeps the accent
+     while lit so the eye lands on the right class. */
+  const cardRef = useRef<HTMLDivElement | null>(null);
+  const [spotlit, setSpotlit] = useState(false);
+  const spotTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useEffect(() => {
+    if (!focusSignal) return;
+    cardRef.current?.scrollIntoView({ behavior: "smooth", block: "center" });
+    setSpotlit(true);
+    if (spotTimer.current) clearTimeout(spotTimer.current);
+    spotTimer.current = setTimeout(() => setSpotlit(false), 2600);
+  }, [focusSignal]);
+  useEffect(
+    () => () => {
+      if (spotTimer.current) clearTimeout(spotTimer.current);
+    },
+    []
+  );
 
   const { data, isPending, isError } = useQuery({
     queryKey: qk.timetable,
@@ -607,7 +634,13 @@ export function TimetableCard({
   const next = todaySlots.find((s) => s.startMin > nowMin);
 
   return (
-    <Card className="rounded-xl border-border/60 transition-shadow hover:shadow-md">
+    <Card
+      ref={cardRef}
+      className={cn(
+        "rounded-xl border-border/60 transition-all hover:shadow-md",
+        spotlit && "border-violet-500/40 ring-2 ring-violet-500/40"
+      )}
+    >
       <div className="flex flex-row items-center justify-between gap-2 px-6 pt-6 pb-2">
         <div>
           <h3 className="flex items-center gap-2 text-base font-semibold tracking-tight">
@@ -701,7 +734,9 @@ export function TimetableCard({
                           ? "border-emerald-500/40 bg-emerald-500/[0.06]"
                           : st.key === "done"
                             ? "border-border/40 opacity-55"
-                            : "border-border/50 hover:bg-muted/30"
+                            : "border-border/50 hover:bg-muted/30",
+                        spotlit && (isNext || st.key === "ongoing") &&
+                          "border-l-2 border-l-violet-500/60 bg-violet-500/[0.05]"
                       )}
                     >
                       <span

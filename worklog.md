@@ -2405,3 +2405,29 @@ Unresolved issues / risks & next-phase priorities:
 4. Dead/thin seeds unchanged: /student/exam-routine ERP-500 (no probe before Nov 2026); /student/assessment redirect (covered).
 5. QA notes carried + NEW: scope DOM assertions to the specific card (data-slot=card + card-title match) — generic text regexes cross-match sibling cards (loose regex produced 4 false chip positives from NextUpStrip dot spans).
 6. Keeper cron 430680 alive; worklog protocol unchanged.
+
+---
+Task ID: 63
+Agent: Z.ai Code (main orchestrator)
+Task: Today-chip → timetable deep-link (erp:focus-timetable spotlight) + chip button upgrade (display-only, RSS-frugal round)
+
+Work Log (Round 63 — 3 Oct, 09:45–10:15 +08):
+- Round start: server 200 (pid 29666), RSS 1,923,264KB ≈ 1878MB — still ABOVE the 1.8GB attention line, climbing from Task 62's 1849MB. Worklog tail verified = Task 62, no parallel-loop entries. Round kept deliberately RSS-frugal (3 files, no data walks, TTL-cache QA).
+- Baseline: console 0, all APIs healthy.
+
+Completed modifications / verified:
+1. FEATURE — Today-chip deep-links to the timetable: the live-class chip (Round 62) is now a real <button> that dispatches window CustomEvent "erp:focus-timetable" (same event pattern as the palette's erp:copy-summary commands — TodayCard stays prop-light, and headless QA can drive the jump without the chip being rendered, which matters because the chip is honestly ABSENT >90 min out). dashboard-tab listens once (useEffect + erp:focus-timetable → todayFocusSignal increment) and passes focusSignal to TimetableCard.
+2. FEATURE — TimetableCard spotlight: new focusSignal prop (increment-only counter). On every increment: cardRef.scrollIntoView({behavior:"smooth", block:"center"}) + violet flash for 2.6s (ring-2 ring-violet-500/40 + border-violet-500/40 on the Card — shadcn Card forwards refs per the Task-61 lesson) + the next/ongoing today-row gains border-l-2 border-l-violet-500/60 + bg-violet-500/[0.05] while lit — the results-family deep-link language applied to the schedule. Timer cleanup on unmount + re-arm.
+3. STYLE — chip button upgrade: cursor-pointer, hover:brightness-105 + shadow lift, active:scale-[0.98], focus-visible ring (violet, consistent with Round 60's ring work), print:hidden; aria-label + title now explain the jump ("click to jump to the schedule"). QA browser note: "starts in 554 min" badge in the timetable uses the QA browser's local clock mix — pre-existing floating-IST pattern, correct for the real IST student.
+4. TESTS: no new pure logic (event wiring is UI) — full regression battery green: today-r62 37, results-r60 18, r59 17, r58 27, features 24, parse-results 70, batch-picks 39, milestones-r61 24 = 256 green.
+5. tsc ONCE: src/ ZERO errors.
+6. BROWSER QA ALL GREEN: console 0 after clear+reload; eval-dispatched erp:focus-timetable → scrollY 0→3815 (card y=4094 → centered, inView true), spotlitRing true, exactly 1 lit row = "RESPONSIVE-WEB-MOBILE 11:00 – 13:00 · synced from ERP" (today's real next class), auto-disarm verified after 3s (ring gone); light /tmp/qa-r63-flash.png + dark /tmp/qa-r63-dark-flash.png + mobile-390 /tmp/qa-r63-mobile-flash.png (docW=390, hScroll=false) — violet spotlight visible in all three.
+7. End state PRISTINE: changeEvents(1h)=0, notifications(1h)=0, scheduled syncs success/0-changes; zero WhatsApp sends (display-only; the deep-link is local scroll+flash only). Final RSS 1,864,436KB ≈ 1821MB — DROPPED ~57MB this round (light QA + reload GC), now ~22MB BELOW the 1.8GB line but with only ~430MB OOM headroom the risk stands.
+
+Unresolved issues / risks & next-phase priorities:
+1. ⚠️ MEMORY REMAINS THE #1 RISK: 1821MB vs OOM ~2.2GB. This round proved RSS can also DROP (~57MB) when a round avoids results-walks and heavy HMR — RSS-frugal round design is a real mitigation. STANDING USER PROPOSAL unchanged (keeper-side restart at RSS > 1.8GB, double-fork subshell form — needs explicit user go-ahead, NOT added silently). Next round: check RSS first; if >1.8GB again, keep the round minimal (bug-fix/style-only) until a decision arrives.
+2. Milestone watch: the 11:00–13:00 IST RWM lab (today's only Saturday class) is the crossing class — attend → 3/4 = 75% → MilestoneCelebration fires once. When the chip goes live (~09:30 IST at the 90-min boundary), it will now also deep-link to the schedule row. After 13:00 IST: honest QA of the milestone moment if attended (no data faking).
+3. Deep-link residuals (non-urgent): the timetable row itself could deep-link back (e.g. click RWM row → open subject drawer); "Open retry history" palette command could deep-link a specific story chip.
+4. Dead/thin seeds unchanged: /student/exam-routine ERP-500 (no probe before Nov 2026); /student/assessment redirect (covered).
+5. QA notes carried + NEW: for state that is conditionally rendered (the chip is absent >90 min out), wire features as window CustomEvents from the start — headless QA can then drive the full path via eval dispatch instead of waiting for real clock conditions or faking data.
+6. Keeper cron 430680 alive; worklog protocol unchanged.

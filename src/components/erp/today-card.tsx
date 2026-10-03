@@ -319,6 +319,17 @@ export function TodayCard(props: TodaySmsInput & { className?: string }) {
      90-min calm window (an 18:00 class at 07:00 must not shout). */
   const liveClass = useMemo(() => todayChipClass(todayClasses, now), [todayClasses, now]);
 
+  /* Chip click → deep-link to the timetable card. Event-based (same pattern
+     as the palette's erp:copy-summary commands): TodayCard stays prop-light
+     and headless QA can drive the jump without clicking the chip. */
+  const focusTimetable = () => {
+    try {
+      window.dispatchEvent(new CustomEvent("erp:focus-timetable"));
+    } catch {
+      /* exotic env without CustomEvent — the chip stays a calm status pill */
+    }
+  };
+
   /* --- copy ---------------------------------------------------------- */
   const [copied, setCopied] = useState(false);
   const copyTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -420,17 +431,24 @@ export function TodayCard(props: TodaySmsInput & { className?: string }) {
             Print card
           </Button>
           {liveClass && (
-            <span
+            <button
+              type="button"
+              onClick={focusTimetable}
               className={cn(
-                "inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-[11px] font-medium tabular-nums",
+                "inline-flex cursor-pointer items-center gap-1.5 rounded-full border px-2.5 py-1 text-[11px] font-medium tabular-nums transition-all hover:brightness-105 hover:shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-violet-500/40 active:scale-[0.98] print:hidden",
                 liveClass.kind === "ongoing"
                   ? "border-amber-500/40 bg-amber-500/10 text-amber-700 dark:text-amber-300"
                   : "border-emerald-500/40 bg-emerald-500/10 text-emerald-700 dark:text-emerald-300"
               )}
+              aria-label={
+                liveClass.kind === "ongoing"
+                  ? "Ongoing class — jump to today's schedule in the timetable"
+                  : "Next class — jump to today's schedule in the timetable"
+              }
               title={
                 liveClass.kind === "ongoing"
-                  ? "One of today's classes is happening right now"
-                  : "Today's next class starts within 90 minutes"
+                  ? "One of today's classes is happening right now — click to jump to the schedule"
+                  : "Today's next class starts within 90 minutes — click to jump to the schedule"
               }
             >
               <span className="relative flex size-1.5" aria-hidden="true">
@@ -451,7 +469,7 @@ export function TodayCard(props: TodaySmsInput & { className?: string }) {
               {liveClass.kind === "ongoing"
                 ? `In class ${liveClass.cls.subjectCode} · ends ${hhmmFromMin(liveClass.cls.endMin)}`
                 : `Next ${liveClass.cls.subjectCode} ${hhmmFromMin(liveClass.cls.startMin)} · in ${liveClass.mins} min`}
-            </span>
+            </button>
           )}
           <span
             className={cn(

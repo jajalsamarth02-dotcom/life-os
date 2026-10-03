@@ -1084,6 +1084,16 @@ export function DashboardTab({
   // One-shot signal: the week plan's "Resolve now" opens the timetable's
   // Manage dialog directly on the Parallel classes picker (and highlights it).
   const [parallelSignal, setParallelSignal] = useState(false);
+  /* Today-card chip → timetable spotlight: the chip dispatches
+     erp:focus-timetable (same event pattern as the palette commands); this
+     listener turns it into a render signal the TimetableCard consumes
+     (scrollIntoView + violet flash on the next/ongoing row). */
+  const [todayFocusSignal, setTodayFocusSignal] = useState(0);
+  useEffect(() => {
+    const onFocusTimetable = () => setTodayFocusSignal((s) => s + 1);
+    window.addEventListener("erp:focus-timetable", onFocusTimetable as EventListener);
+    return () => window.removeEventListener("erp:focus-timetable", onFocusTimetable as EventListener);
+  }, []);
   const [selectedCode, setSelectedCode] = useState<string | null>(null);
   const [digestOpen, setDigestOpen] = useState(false);
   const [showAllChanges, setShowAllChanges] = useState(false);
@@ -1737,6 +1747,7 @@ export function DashboardTab({
           manageOpen={parallelSignal}
           highlightParallel={parallelSignal}
           onManageClose={() => setParallelSignal(false)}
+          focusSignal={todayFocusSignal}
         />
       )}
 
