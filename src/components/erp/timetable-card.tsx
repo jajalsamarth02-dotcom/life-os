@@ -46,7 +46,7 @@ import { downloadTimetableIcs } from "@/lib/ics";
 import { applyBatchPicks, parallelCells } from "@/lib/batch-picks";
 import { createSlot, deleteSlot, fetchTimetable, setBatchPick, qk, ApiError, type SlotConflict } from "./api";
 import { humanizeMins, istNow, useNow } from "./shared";
-import { IMMINENT_MIN } from "./today-card";
+import { IMMINENT_MIN, JUST_ENDED_WINDOW_MIN } from "./today-card";
 import type { AppMode, AttendanceView, SubjectView, TimetableSlotRow } from "./types";
 
 const DAY_NAMES = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
@@ -707,8 +707,12 @@ export function classProgress(
 
 /** How long (minutes) a row keeps saying "just ended" after its class
  *  finishes — deliberately one auto-sync cadence (15 min): the bridge
- *  closes the moment the sync can actually record the class. */
-export const JUST_ENDED_WINDOW_MIN = 15;
+ *  closes the moment the sync can actually record the class.
+ *  r82: the constant's home moved to today-card (next to IMMINENT_MIN —
+ *  the lifecycle thresholds live together, and the chip-urgency ladder
+ *  consumes it there); re-exported so existing row/chip/bar consumers
+ *  and the pinned r75/r81 test imports keep working unchanged. */
+export { JUST_ENDED_WINDOW_MIN };
 
 /** True while the clock sits within the first JUST_ENDED_WINDOW_MIN minutes
  *  after a class ends — the honest gap between "class over" and the next

@@ -72,7 +72,10 @@ console.log("chipUrgency:");
 
 check("null state → null (no chip)", chipUrgency(null) === null);
 check("ongoing → 'ongoing' regardless of mins", chipUrgency(st("ongoing", 30)) === "ongoing");
-check("ongoing with 1 min left is still 'ongoing'", chipUrgency(st("ongoing", 1)) === "ongoing");
+/* r82 contract update: ongoing ≤15 min left now returns "wrapping" (amber),
+   matching the banner/row/chip flip from r78-r80 — 1 min left is a
+   transition, not calm. mins > 15 stays "ongoing". */
+check("ongoing with 1 min left is 'wrapping' (r82 contract)", chipUrgency(st("ongoing", 1)) === "wrapping");
 check(`upcoming at ${IMMINENT_MIN} → 'imminent' (boundary inclusive)`,
   chipUrgency(st("upcoming", IMMINENT_MIN)) === "imminent");
 check("upcoming at 1 min → 'imminent'", chipUrgency(st("upcoming", 1)) === "imminent");

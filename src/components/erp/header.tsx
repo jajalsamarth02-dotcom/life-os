@@ -311,9 +311,12 @@ function NextClassChip({ subjects }: { subjects: { code: string; name: string }[
     `${String(Math.floor(m / 60)).padStart(2, "0")}:${String(m % 60).padStart(2, "0")}`;
 
   /* Urgency ladder — the SAME pure helper the today-card chip uses, so the
-     header can never disagree with the card on how loud to be:
-     ongoing → amber pulse · ≤10 min → amber FAST pulse · ≤90 min → emerald
-     · beyond → muted gray ("in 4h" is information, not an alarm). */
+     header can never disagree with the card on how loud to be (r82 ladder:
+     amber now means "a transition is approaching", matching banner/rows/
+     week-chips since r78):
+     ongoing → EMERALD pulse · ≤15 min left → amber pulse (wrapping up) ·
+     ≤10 min to start → amber FAST pulse · ≤90 min → emerald calm ·
+     beyond → muted gray ("in 4h" is information, not an alarm). */
   const st: TodayLiveClass = ongoing
     ? { kind: "ongoing", cls: shown, mins: minsTo, leftCount: 1 }
     : { kind: "upcoming", cls: shown, mins: minsTo, leftCount: 1 };
@@ -325,9 +328,9 @@ function NextClassChip({ subjects }: { subjects: { code: string; name: string }[
         <span
           className={cn(
             "hidden shrink-0 cursor-default items-center gap-1.5 whitespace-nowrap rounded-full border px-2.5 py-1 text-xs font-medium lg:inline-flex",
-            urgency === "ongoing" || urgency === "imminent"
+            urgency === "imminent" || urgency === "wrapping"
               ? "border-amber-500/40 bg-amber-500/10 text-amber-700 dark:text-amber-300"
-              : urgency === "soon"
+              : urgency === "soon" || urgency === "ongoing"
                 ? "border-emerald-500/40 bg-emerald-500/10 text-emerald-700 dark:text-emerald-400"
                 : "border-border/70 bg-muted/50 text-muted-foreground"
           )}
@@ -335,10 +338,10 @@ function NextClassChip({ subjects }: { subjects: { code: string; name: string }[
           <span
             className={cn(
               "size-1.5 rounded-full",
-              urgency === "ongoing" || urgency === "imminent"
+              urgency === "imminent" || urgency === "wrapping"
                 ? "bg-amber-500 erp-pulse-dot"
-                : urgency === "soon"
-                  ? "bg-emerald-500"
+                : urgency === "soon" || urgency === "ongoing"
+                  ? "bg-emerald-500 erp-pulse-dot"
                   : "bg-muted-foreground/50"
             )}
             aria-hidden="true"
@@ -351,7 +354,13 @@ function NextClassChip({ subjects }: { subjects: { code: string; name: string }[
         </span>
       </TooltipTrigger>
       <TooltipContent>
-        {ongoing ? "Class in progress" : urgency === "imminent" ? "Starting imminently" : "Next class today"}: {name} · {hhmm(shown.startMin)}–{hhmm(shown.endMin)}
+        {ongoing
+          ? urgency === "wrapping"
+            ? "Wrapping up — ends imminently"
+            : "Class in progress"
+          : urgency === "imminent"
+            ? "Starting imminently"
+            : "Next class today"}: {name} · {hhmm(shown.startMin)}–{hhmm(shown.endMin)}
       </TooltipContent>
     </Tooltip>
   );

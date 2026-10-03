@@ -185,17 +185,35 @@ export function todayChipClass(
 
 /** How LOUD the chip should be — the urgency ladder both class chips share
  *  (today-card + header), so the surfaces can never disagree on tone:
- *   - "ongoing":  class happening NOW → amber, slow pulse;
- *   - "imminent": starts in ≤ IMMINENT_MIN → amber, FAST pulse (get moving);
+ *   - "ongoing":  class happening NOW → EMERALD, live pulse (r82: was amber
+ *                 — amber now means "a transition is approaching", the same
+ *                 language the banner/rows/week-chips speak since r78);
+ *   - "wrapping": ongoing with ≤ JUST_ENDED_WINDOW_MIN left → amber, slow
+ *                 ping (the end is near — symmetric with imminent);
+ *   - "imminent": starts in ≤ IMMINENT_MIN → amber, FAST ping (get moving);
  *   - "soon":     inside the 90-min calm window → emerald, calm;
  *   - null:       nothing to say (no class / too far out). */
-export type ChipUrgency = "ongoing" | "imminent" | "soon";
+export type ChipUrgency = "ongoing" | "wrapping" | "imminent" | "soon";
 
 export const IMMINENT_MIN = 10;
 
+/** The end-of-class mirror of IMMINENT_MIN (r78 "wrapping up"): the last
+ *  JUST_ENDED_WINDOW_MIN minutes of an ongoing class flip amber across ALL
+ *  schedule surfaces. Home moved here in r82 so the chip-urgency ladder can
+ *  consume it without a today-card → timetable-card import (which would
+ *  cycle — timetable-card imports IMMINENT_MIN from here). One constant,
+ *  re-exported by timetable-card for its row/chip/bar consumers. */
+export const JUST_ENDED_WINDOW_MIN = 15;
+
 export function chipUrgency(st: TodayLiveClass | null): ChipUrgency | null {
   if (!st) return null;
-  if (st.kind === "ongoing") return "ongoing";
+  if (st.kind === "ongoing") {
+    /* r82: the last sync-cadence window of the class is a TRANSITION — the
+       chips now flip amber for it exactly like the banner (r78), row (r79)
+       and week-grid chip (r80) already do. One threshold, imported from
+       this module by every surface. */
+    return st.mins <= JUST_ENDED_WINDOW_MIN ? "wrapping" : "ongoing";
+  }
   return st.mins <= IMMINENT_MIN ? "imminent" : "soon";
 }
 
@@ -577,45 +595,51 @@ export function TodayCard(props: TodaySmsInput & { className?: string }) {
               onClick={focusTimetable}
               className={cn(
                 "inline-flex cursor-pointer items-center gap-1.5 rounded-full border px-2.5 py-1 text-[11px] font-medium tabular-nums transition-all hover:brightness-105 hover:shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-violet-500/40 active:scale-[0.98] print:hidden",
-                urgency === "soon"
+                urgency === "soon" || urgency === "ongoing"
                   ? "border-emerald-500/40 bg-emerald-500/10 text-emerald-700 dark:text-emerald-300"
                   : "border-amber-500/40 bg-amber-500/10 text-amber-700 dark:text-amber-300"
               )}
               aria-label={
                 urgency === "ongoing"
                   ? "Ongoing class — jump to today's schedule in the timetable"
-                  : urgency === "imminent"
-                    ? "Class starting imminently — jump to today's schedule in the timetable"
-                    : "Next class — jump to today's schedule in the timetable"
+                  : urgency === "wrapping"
+                    ? "Class wrapping up — jump to today's schedule in the timetable"
+                    : urgency === "imminent"
+                      ? "Class starting imminently — jump to today's schedule in the timetable"
+                      : "Next class — jump to today's schedule in the timetable"
               }
               title={
                 urgency === "ongoing"
                   ? "One of today's classes is happening right now — click to jump to the schedule"
-                  : urgency === "imminent"
-                    ? "This class starts within minutes — click to jump to the schedule"
-                    : "Today's next class starts within 90 minutes — click to jump to the schedule"
+                  : urgency === "wrapping"
+                    ? "This class ends within minutes — click to jump to the schedule"
+                    : urgency === "imminent"
+                      ? "This class starts within minutes — click to jump to the schedule"
+                      : "Today's next class starts within 90 minutes — click to jump to the schedule"
               }
             >
               <span className="relative flex size-1.5" aria-hidden="true">
                 <span
                   className={cn(
                     "absolute inline-flex h-full w-full animate-ping rounded-full opacity-60",
-                    urgency === "soon" ? "bg-emerald-500" : "bg-amber-500"
+                    urgency === "soon" || urgency === "ongoing" ? "bg-emerald-500" : "bg-amber-500"
                   )}
                   style={{ animationDuration: urgency === "imminent" ? "1.1s" : "2.2s" }}
                 />
                 <span
                   className={cn(
                     "relative inline-flex size-1.5 rounded-full",
-                    urgency === "soon" ? "bg-emerald-500" : "bg-amber-500"
+                    urgency === "soon" || urgency === "ongoing" ? "bg-emerald-500" : "bg-amber-500"
                   )}
                 />
               </span>
               {urgency === "ongoing"
                 ? `In class ${liveClass.cls.subjectCode} · ends ${hhmmFromMin(liveClass.cls.endMin)}`
-                : urgency === "imminent"
-                  ? `${liveClass.cls.subjectCode} starts in ${humanizeMins(liveClass.mins)}`
-                  : `Next ${liveClass.cls.subjectCode} ${hhmmFromMin(liveClass.cls.startMin)} · in ${humanizeMins(liveClass.mins)}`}
+                : urgency === "wrapping"
+                  ? `Wrapping up ${liveClass.cls.subjectCode} · ends ${hhmmFromMin(liveClass.cls.endMin)}`
+                  : urgency === "imminent"
+                    ? `${liveClass.cls.subjectCode} starts in ${humanizeMins(liveClass.mins)}`
+                    : `Next ${liveClass.cls.subjectCode} ${hhmmFromMin(liveClass.cls.startMin)} · in ${humanizeMins(liveClass.mins)}`}
             </button>
           )}
           <span
