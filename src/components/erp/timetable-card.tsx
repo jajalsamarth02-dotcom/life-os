@@ -183,7 +183,7 @@ function SlotChip({
         {ongoing && (
           <CircleDot
             className={cn(
-              "size-3 shrink-0 animate-pulse",
+              "size-3 shrink-0 animate-pulse motion-reduce:animate-none",
               wrappingUp ? "text-amber-500" : "text-emerald-500"
             )}
             aria-hidden="true"
@@ -846,8 +846,10 @@ export function TimetableCard({
               variant="secondary"
               className={cn(
                 "gap-1.5 text-[11px] font-medium transition-colors",
-                classesLeftToday &&
-                  "border-emerald-500/30 bg-emerald-500/10 text-emerald-700 dark:text-emerald-400"
+                classesLeftToday
+                  ? "border-emerald-500/30 bg-emerald-500/10 text-emerald-700 dark:text-emerald-400"
+                  : todaySlots.length > 0 &&
+                      "border-emerald-500/20 bg-emerald-500/[0.06] text-emerald-700/80 dark:text-emerald-400/80"
               )}
               title={
                 classesLeftToday
@@ -857,14 +859,20 @@ export function TimetableCard({
                     : "No classes scheduled today"
               }
             >
-              {classesLeftToday && (
+              {classesLeftToday ? (
                 <span className="relative flex size-1.5" aria-hidden="true">
                   <span
-                    className="absolute inline-flex h-full w-full animate-ping rounded-full bg-emerald-500 opacity-60"
+                    className="absolute inline-flex h-full w-full animate-ping rounded-full bg-emerald-500 opacity-60 motion-reduce:hidden"
                     style={{ animationDuration: "2.2s" }}
                   />
                   <span className="relative inline-flex size-1.5 rounded-full bg-emerald-500" />
                 </span>
+              ) : (
+                /* r88: the completion state finally reads at a glance — a
+                   quiet check on the day badge when every class is over
+                   (before this, a done Saturday was visually identical to
+                   an empty day). Data-derived only: no attendance claim. */
+                todaySlots.length > 0 && <Check className="size-3 shrink-0" aria-hidden="true" />
               )}
               {DAY_NAMES[nowDay]}
             </Badge>
@@ -1087,11 +1095,11 @@ export function TimetableCard({
                            both ends). */
                         s.endMin - nowMin <= JUST_ENDED_WINDOW_MIN ? (
                           <Badge variant="outline" className="shrink-0 border-amber-500/40 text-amber-700 dark:text-amber-400">
-                            <CircleDot className="size-3 animate-pulse" aria-hidden="true" /> wrapping up
+                            <CircleDot className="size-3 animate-pulse motion-reduce:animate-none" aria-hidden="true" /> wrapping up
                           </Badge>
                         ) : (
                           <Badge variant="outline" className="shrink-0 border-emerald-500/40 text-emerald-700 dark:text-emerald-400">
-                            <CircleDot className="size-3 animate-pulse" aria-hidden="true" /> now
+                            <CircleDot className="size-3 animate-pulse motion-reduce:animate-none" aria-hidden="true" /> now
                           </Badge>
                         )
                       ) : isNext && st.label ? (
@@ -1174,7 +1182,7 @@ export function TimetableCard({
                             {isToday && (
                               <span className="relative flex size-1.5" aria-hidden="true">
                                 <span
-                                  className="absolute inline-flex h-full w-full animate-ping rounded-full bg-emerald-500 opacity-60"
+                                  className="absolute inline-flex h-full w-full animate-ping rounded-full bg-emerald-500 opacity-60 motion-reduce:hidden"
                                   style={{ animationDuration: "2.2s" }}
                                 />
                                 <span className="relative inline-flex size-1.5 rounded-full bg-emerald-500" />

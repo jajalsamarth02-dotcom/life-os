@@ -657,7 +657,7 @@ export function TodayCard(props: TodaySmsInput & { className?: string }) {
               <span className="relative flex size-1.5" aria-hidden="true">
                 <span
                   className={cn(
-                    "absolute inline-flex h-full w-full animate-ping rounded-full opacity-60",
+                    "absolute inline-flex h-full w-full animate-ping rounded-full opacity-60 motion-reduce:hidden",
                     urgency === "soon" || urgency === "ongoing" ? "bg-emerald-500" : "bg-amber-500"
                   )}
                   style={{ animationDuration: urgency === "imminent" ? "1.1s" : "2.2s" }}
@@ -688,7 +688,7 @@ export function TodayCard(props: TodaySmsInput & { className?: string }) {
             >
               <span className="relative flex size-1.5" aria-hidden="true">
                 <span
-                  className="absolute inline-flex h-full w-full animate-ping rounded-full bg-amber-500 opacity-60"
+                  className="absolute inline-flex h-full w-full animate-ping rounded-full bg-amber-500 opacity-60 motion-reduce:hidden"
                   style={{ animationDuration: "2.2s" }}
                 />
                 <span className="relative inline-flex size-1.5 rounded-full bg-amber-500" />
