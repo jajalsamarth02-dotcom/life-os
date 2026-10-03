@@ -614,6 +614,21 @@ export function classProgress(
   return ((nowMin - startMin) / (endMin - startMin)) * 100;
 }
 
+/** How long (minutes) a row keeps saying "just ended" after its class
+ *  finishes — deliberately one auto-sync cadence (15 min): the bridge
+ *  closes the moment the sync can actually record the class. */
+export const JUST_ENDED_WINDOW_MIN = 15;
+
+/** True while the clock sits within the first JUST_ENDED_WINDOW_MIN minutes
+ *  after a class ends — the honest gap between "class over" and the next
+ *  15-min auto-sync actually recording it. The row then reads "just ended"
+ *  (amber = in flight) instead of the flat dimmed "done", and the tooltip
+ *  says the attendance updates on the next sync. Pure — pinned in tests. */
+export function isJustEnded(endMin: number, nowMin: number): boolean {
+  const since = nowMin - endMin;
+  return since >= 0 && since <= JUST_ENDED_WINDOW_MIN;
+}
+
 export function TimetableCard({
   subjects,
   mode = "demo",
@@ -934,7 +949,17 @@ export function TimetableCard({
                           <Clock className="size-3" aria-hidden="true" /> {st.label}
                         </Badge>
                       ) : st.key === "done" ? (
-                        <Badge variant="outline" className="shrink-0 border-border/40 text-muted-foreground">done</Badge>
+                        isJustEnded(s.endMin, nowMin) ? (
+                          <Badge
+                            variant="outline"
+                            className="shrink-0 border-amber-500/30 bg-amber-500/[0.06] text-amber-600/90 dark:text-amber-400/90"
+                            title="Class just finished — attendance updates on the next auto-sync (within 15 minutes)"
+                          >
+                            <Check className="size-3" aria-hidden="true" /> just ended
+                          </Badge>
+                        ) : (
+                          <Badge variant="outline" className="shrink-0 border-border/40 text-muted-foreground">done</Badge>
+                        )
                       ) : null}
                     </div>
                   </motion.div>

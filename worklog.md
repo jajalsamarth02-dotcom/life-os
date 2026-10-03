@@ -2709,3 +2709,24 @@ Unresolved issues / risks & next-phase priorities:
 3. Feature residuals: drawer retry-story data-hidden (namespace split); SMS bubble raw ASCII deliberate.
 4. QA notes carried: Radix tabs snapshot+click-by-ref; MultiEdit partial-apply → re-READ; enabled:false generic; old-format tests → exit code.
 5. Keeper cron 430680 alive; worklog protocol unchanged.
+
+---
+Task ID: 75
+Agent: Super Z (dev cron 430711)
+Task: Round 75 — "just ended" bridge (post-class, pre-sync honest state) on the timetable rows.
+
+Work Log:
+1. STATUS: no parallel entries above 74. RSS AT START: 1949MB (+29 from r74's 1920 — under 2.0GB, lean round: 2 loads). Clock: 10:15 IST, RWM class 11:00 (44 min out).
+2. FEATURE — the just-ended bridge: between a class's endMin and the next 15-min auto-sync the row now says "just ended" (amber outline badge + Check icon + tooltip "attendance updates on the next auto-sync (within 15 minutes)") instead of the flat dimmed "done". Exported pure `isJustEnded(endMin, nowMin)` + `JUST_ENDED_WINDOW_MIN = 15` — the window is deliberately ONE sync cadence, so the badge can never outlive the data that replaces it. Amber = in-flight language (matches the stakes line + next-row badge), NOT emerald (the record isn't confirmed yet — honesty first).
+3. STYLE (mandatory): the badge itself (amber-500/30 border, /0.06 bg, muted-amber text) inside the dimmed done-row; visual vocabulary stays coherent: emerald = happening/confirmed, amber = pending/imminent, violet = deep-link.
+4. TESTS: scripts/test-today-r75.ts — 10 checks: window=15, inclusive both ends (0 and +15 true, +16 false), pre-end false, far-future false. Suite: ALL 20 test files pass by exit code (r75 added). tsc src/ ZERO errors.
+5. BROWSER QA (2 loads, LIVE, honest scope): today column renders "starts in 44 min"; NO done badges observable right now (today's only class hasn't run) — the just-ended state is pinned by unit tests and becomes LIVE-observable in the 14:30–14:45 +08 window (12:00–12:15 IST = RWM class end + 15 min). Console+errors cleared → reload → ZERO fresh errors.
+6. End state PRISTINE: notify path untouched, no sync clicks, display-only language intact. ZERO sends ever.
+7. RSS AFTER ROUND: 1957MB (+8 — flat; lean pattern holds).
+
+Unresolved issues / risks & next-phase priorities:
+1. ⚠️⚠️ MEMORY: 1957MB — under 2.0GB, ratchet stable (r72 1963 → r74 1920 → r75 1957). Keeper-side restart proposal STILL UNAPPROVED. Discipline: net-negative round whenever start ≥2.0GB (r72/r74 patterns), ≤3 loads otherwise.
+2. TIME WINDOW — the live观察 schedule for the next rounds (all times +08): 13:50 → imminent-amber chip flip (10:50 IST); 14:00–15:30 → in-class: "Happening now" banner with gradient bar + % caption + "1h left"-style humanized badge, ongoing-amber chips, classProgress aria-valuenow climbing ~1.4%/min (verify movement between two evals); 14:30–14:45 → RWM ends 12:00 IST → the NEW "just ended" badge live (12:00–12:15 IST); 15:30 → class window ends; after 13:00 IST (15:30+08) → milestone celebration honest QA if attended.
+3. Feature residuals: drawer retry-story data-hidden (namespace split); SMS bubble raw ASCII deliberate; week-grid SlotChips could also show the just-ended badge (cosmetic follow-up, rows own the state today).
+4. QA notes carried: Radix tabs snapshot+click-by-ref; MultiEdit partial-apply → re-READ; enabled:false generic; old-format tests → exit code.
+5. Keeper cron 430680 alive; worklog protocol unchanged.
