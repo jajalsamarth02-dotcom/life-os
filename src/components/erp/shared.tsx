@@ -48,6 +48,18 @@ export function useNow(intervalMs = 30_000): number {
   return now;
 }
 
+/** Humanized countdown for class chips: "45 min", "1h 15m", "2h".
+ *  Raw "in 490 min" reads like a spreadsheet; h/m reads like a clock.
+ *  Under an hour stays "N min" (no "0h 45m" nonsense); exact hours drop
+ *  the zero minutes. Display-only — the SMS bubble keeps raw ASCII. */
+export function humanizeMins(mins: number): string {
+  const m = Math.max(0, Math.floor(mins));
+  if (m < 60) return `${m} min`;
+  const h = Math.floor(m / 60);
+  const rest = m % 60;
+  return rest === 0 ? `${h}h` : `${h}h ${rest}m`;
+}
+
 const IST_DAY_INDEX: Record<string, number> = {
   Sun: 0, Mon: 1, Tue: 2, Wed: 3, Thu: 4, Fri: 5, Sat: 6,
 };

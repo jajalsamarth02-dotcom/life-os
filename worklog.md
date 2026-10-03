@@ -2665,3 +2665,25 @@ Unresolved issues / risks & next-phase priorities:
 3. Feature residuals: drawer retry-story button stays data-hidden for THIS student (namespace split slug vs ERP-code — revisit only if a future sync introduces overlap); violet NEXT tone now live infrastructure — if the bubble ever grows a "NEXT" line (an ALA due item), it will paint violet automatically.
 4. QA notes carried: controlled Radix tabs ignore eval synthetic .click() (snapshot + click by ref); MultiEdit partial-apply → re-READ before retry; enabled:false useQuery needs explicit generic; old-format test scripts (class-ics, parse-assignments, routine-parse) have no summary line — count them by exit code, not regex.
 5. Keeper cron 430680 alive; worklog protocol unchanged.
+
+---
+Task ID: 73
+Agent: Super Z (dev cron 430711)
+Task: Round 73 — class-start readiness round (chips escalation + humanized countdowns) ahead of the 11:00 IST RWM class.
+
+Work Log:
+1. STATUS: no parallel entries above Task 72. RSS AT START: 1984MB (+21 from r72's 1963 — under 2.0GB but lean round declared: 3 page loads total, same-page evals otherwise). Clock: 09:45 IST, next class RWM 11:00 → header chip was showing flat gray "in 75 min" — the round wrote itself: make the approach to a class READ.
+2. FEATURE — shared `humanizeMins(mins)` (shared.tsx): "45 min" / "1h 15m" / "2h"; <60 never gets an "0h" prefix, exact hours drop minutes, negative clamps to 0 (a chip must never read "in -3 min"). Display-only: the SMS bubble keeps raw ASCII honesty.
+3. FEATURE — `chipUrgency()` + `IMMINENT_MIN = 10` (today-card.tsx): ONE urgency ladder both class chips now share — ongoing → amber slow pulse · upcoming ≤10 min → "imminent" amber FAST pulse (1.1s, get moving) · upcoming ≤90 → "soon" emerald calm · else no chip (card) / muted gray (header). Header chip previously had NO escalation at all (upcoming = gray right up to start) — now emerald inside 90, amber inside 10, tooltip says "Starting imminently".
+4. STYLE (mandatory, visible): header chip escalation palette (gray → emerald → amber two-step); today-card chip text upgraded from "in 85 min" to "in 1h 25m" / imminent "CODE starts in N min"; dot pulse speed doubles when imminent. Both surfaces consume the same pure helper so they can never disagree on tone (the app's recurring cohesion contract).
+5. TESTS: scripts/test-today-r73.ts — 22 checks (humanizeMins table incl. 0/59/60/61/490/negative/fractional; chipUrgency ladder incl. boundary 10→imminent, 11→soon, 90→soon, 0→imminent). Suite: ALL 19 test files pass by EXIT CODE (the "N passed" regex miscounts old-format scripts — r72 lesson encoded). r72 regression 45/45. tsc src/ ZERO errors.
+6. BROWSER QA (3 loads, LIVE): header chip now EMERALD "RESPONSIVE-WEB-MOBILE in 1h 13m" (border/bg/dot all emerald-500 family — was gray); today-card chip same state, pulse 2.2s; dark mode same-page toggle → emerald-400 reads clean on dark (/tmp/qa-r73-light.png, /tmp/qa-r73-dark.png); console+errors cleared → reload → ZERO fresh errors; theme restored to light.
+7. End state PRISTINE: notify path untouched, no sync clicks, display-only language intact, newest notification unchanged. ZERO sends ever.
+8. RSS AFTER ROUND (measured at handover): 2009MB (+25 from 1984 start — flat-ish, NOT the 1987 estimate I first wrote; corrected on measure).
+
+Unresolved issues / risks & next-phase priorities:
+1. ⚠️⚠️ MEMORY: 2009MB measured — back OVER the 2.0GB line (+25 this round). QA loads cost ~8MB each; the lean pattern caps growth but doesn't reverse it — next round start ≥2.0GB → run the r72 net-negative pattern (single file, ≤2 loads, same-page evals). STANDING USER PROPOSAL (keeper-side restart >1.8GB, double-fork subshell) UNAPPROVED — not added silently.
+2. TIME WINDOW — NEXT ROUND IS IN-CLASS: 13:30 +08 = 11:00 IST = RWM class start. That round should FIRST do the classProgress ongoing-progress-bar live visual QA (never seen live in-lecture), AND the chip escalation states are now observable live: ~11:50 +08 (10:50 IST) the chips flip imminent-amber; 11:00 IST onward ongoing-amber. The 13:45/14:00 rounds can catch ongoing state + milestone window continues to 13:00 IST (15:30 +08). After 13:00 IST: milestone celebration honest QA if attended.
+3. Feature residuals: drawer retry-story data-hidden (namespace split — revisit only on future data overlap); SMS bubble keeps raw ASCII (deliberate, do not humanize there).
+4. QA notes carried: Radix tabs need snapshot+click-by-ref; MultiEdit partial-apply → re-READ; enabled:false useQuery needs explicit generic; old-format test scripts → count by exit code.
+5. Keeper cron 430680 alive; worklog protocol unchanged.

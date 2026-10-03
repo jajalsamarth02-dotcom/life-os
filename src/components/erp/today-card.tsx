@@ -25,7 +25,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { cn } from "@/lib/utils";
 import type { AlaUpcomingRow, AttendanceView, SubjectView } from "./types";
-import { istNow } from "./shared";
+import { istNow, humanizeMins } from "./shared";
 
 /* ------------------------------------------------------------------ */
 /* SMS segment math (GSM-7 vs UCS-2, concat rules)                     */
@@ -181,6 +181,22 @@ export function todayChipClass(
   const st = todayLiveClass(todayClasses, now);
   if (st && st.kind === "upcoming" && st.mins > 90) return null;
   return st;
+}
+
+/** How LOUD the chip should be — the urgency ladder both class chips share
+ *  (today-card + header), so the surfaces can never disagree on tone:
+ *   - "ongoing":  class happening NOW → amber, slow pulse;
+ *   - "imminent": starts in ≤ IMMINENT_MIN → amber, FAST pulse (get moving);
+ *   - "soon":     inside the 90-min calm window → emerald, calm;
+ *   - null:       nothing to say (no class / too far out). */
+export type ChipUrgency = "ongoing" | "imminent" | "soon";
+
+export const IMMINENT_MIN = 10;
+
+export function chipUrgency(st: TodayLiveClass | null): ChipUrgency | null {
+  if (!st) return null;
+  if (st.kind === "ongoing") return "ongoing";
+  return st.mins <= IMMINENT_MIN ? "imminent" : "soon";
 }
 
 /** Build the exact SMS text shown in the bubble (and used for copy/share). */
@@ -426,8 +442,10 @@ export function TodayCard(props: TodaySmsInput & { className?: string }) {
   const smsLines = useMemo(() => smsText.split("\n"), [smsText]);
 
   /* Live class chip — same pure core as the CLASSES SMS line, plus the
-     90-min calm window (an 18:00 class at 07:00 must not shout). */
+     90-min calm window (an 18:00 class at 07:00 must not shout) and the
+     ≤10-min IMMINENT escalation (amber + fast pulse — get moving). */
   const liveClass = useMemo(() => todayChipClass(todayClasses, now), [todayClasses, now]);
+  const urgency = chipUrgency(liveClass);
 
   /* Chip click → deep-link to the timetable card. Event-based (same pattern
      as the palette's erp:copy-summary commands): TodayCard stays prop-light
@@ -553,45 +571,51 @@ export function TodayCard(props: TodaySmsInput & { className?: string }) {
             <Printer className="size-3.5" aria-hidden="true" />
             Print card
           </Button>
-          {liveClass && (
+          {liveClass && urgency && (
             <button
               type="button"
               onClick={focusTimetable}
               className={cn(
                 "inline-flex cursor-pointer items-center gap-1.5 rounded-full border px-2.5 py-1 text-[11px] font-medium tabular-nums transition-all hover:brightness-105 hover:shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-violet-500/40 active:scale-[0.98] print:hidden",
-                liveClass.kind === "ongoing"
-                  ? "border-amber-500/40 bg-amber-500/10 text-amber-700 dark:text-amber-300"
-                  : "border-emerald-500/40 bg-emerald-500/10 text-emerald-700 dark:text-emerald-300"
+                urgency === "soon"
+                  ? "border-emerald-500/40 bg-emerald-500/10 text-emerald-700 dark:text-emerald-300"
+                  : "border-amber-500/40 bg-amber-500/10 text-amber-700 dark:text-amber-300"
               )}
               aria-label={
-                liveClass.kind === "ongoing"
+                urgency === "ongoing"
                   ? "Ongoing class — jump to today's schedule in the timetable"
-                  : "Next class — jump to today's schedule in the timetable"
+                  : urgency === "imminent"
+                    ? "Class starting imminently — jump to today's schedule in the timetable"
+                    : "Next class — jump to today's schedule in the timetable"
               }
               title={
-                liveClass.kind === "ongoing"
+                urgency === "ongoing"
                   ? "One of today's classes is happening right now — click to jump to the schedule"
-                  : "Today's next class starts within 90 minutes — click to jump to the schedule"
+                  : urgency === "imminent"
+                    ? "This class starts within minutes — click to jump to the schedule"
+                    : "Today's next class starts within 90 minutes — click to jump to the schedule"
               }
             >
               <span className="relative flex size-1.5" aria-hidden="true">
                 <span
                   className={cn(
                     "absolute inline-flex h-full w-full animate-ping rounded-full opacity-60",
-                    liveClass.kind === "ongoing" ? "bg-amber-500" : "bg-emerald-500"
+                    urgency === "soon" ? "bg-emerald-500" : "bg-amber-500"
                   )}
-                  style={{ animationDuration: "2.2s" }}
+                  style={{ animationDuration: urgency === "imminent" ? "1.1s" : "2.2s" }}
                 />
                 <span
                   className={cn(
                     "relative inline-flex size-1.5 rounded-full",
-                    liveClass.kind === "ongoing" ? "bg-amber-500" : "bg-emerald-500"
+                    urgency === "soon" ? "bg-emerald-500" : "bg-amber-500"
                   )}
                 />
               </span>
-              {liveClass.kind === "ongoing"
+              {urgency === "ongoing"
                 ? `In class ${liveClass.cls.subjectCode} · ends ${hhmmFromMin(liveClass.cls.endMin)}`
-                : `Next ${liveClass.cls.subjectCode} ${hhmmFromMin(liveClass.cls.startMin)} · in ${liveClass.mins} min`}
+                : urgency === "imminent"
+                  ? `${liveClass.cls.subjectCode} starts in ${humanizeMins(liveClass.mins)}`
+                  : `Next ${liveClass.cls.subjectCode} ${hhmmFromMin(liveClass.cls.startMin)} · in ${humanizeMins(liveClass.mins)}`}
             </button>
           )}
           <span

@@ -38,7 +38,8 @@ import { cn } from "@/lib/utils";
 import { applyBatchPicks } from "@/lib/batch-picks";
 import { promptInstall, useCanInstall } from "./install-prompt";
 import { fetchDashboard, fetchTimetable, markAllNotificationsRead, postSync, qk } from "./api";
-import { ago, fmtDT, istNow, useNow } from "./shared";
+import { ago, fmtDT, humanizeMins, istNow, useNow } from "./shared";
+import { chipUrgency, type TodayLiveClass } from "./today-card";
 import type { AppMode, AppNotification, NotificationSeverity } from "./types";
 
 /** Status dot with a soft radiating ping — marks the live/demo connection.
@@ -309,33 +310,48 @@ function NextClassChip({ subjects }: { subjects: { code: string; name: string }[
   const hhmm = (m: number) =>
     `${String(Math.floor(m / 60)).padStart(2, "0")}:${String(m % 60).padStart(2, "0")}`;
 
+  /* Urgency ladder — the SAME pure helper the today-card chip uses, so the
+     header can never disagree with the card on how loud to be:
+     ongoing → amber pulse · ≤10 min → amber FAST pulse · ≤90 min → emerald
+     · beyond → muted gray ("in 4h" is information, not an alarm). */
+  const st: TodayLiveClass = ongoing
+    ? { kind: "ongoing", cls: shown, mins: minsTo, leftCount: 1 }
+    : { kind: "upcoming", cls: shown, mins: minsTo, leftCount: 1 };
+  const urgency = chipUrgency(st);
+
   return (
     <Tooltip>
       <TooltipTrigger asChild>
         <span
           className={cn(
             "hidden shrink-0 cursor-default items-center gap-1.5 whitespace-nowrap rounded-full border px-2.5 py-1 text-xs font-medium lg:inline-flex",
-            ongoing
-              ? "border-emerald-500/40 bg-emerald-500/10 text-emerald-700 dark:text-emerald-400"
-              : "border-border/70 bg-muted/50 text-muted-foreground"
+            urgency === "ongoing" || urgency === "imminent"
+              ? "border-amber-500/40 bg-amber-500/10 text-amber-700 dark:text-amber-300"
+              : urgency === "soon"
+                ? "border-emerald-500/40 bg-emerald-500/10 text-emerald-700 dark:text-emerald-400"
+                : "border-border/70 bg-muted/50 text-muted-foreground"
           )}
         >
           <span
             className={cn(
               "size-1.5 rounded-full",
-              ongoing ? "bg-emerald-500 erp-pulse-dot" : "bg-muted-foreground/50"
+              urgency === "ongoing" || urgency === "imminent"
+                ? "bg-amber-500 erp-pulse-dot"
+                : urgency === "soon"
+                  ? "bg-emerald-500"
+                  : "bg-muted-foreground/50"
             )}
             aria-hidden="true"
           />
           <CalendarClock className="size-3.5 shrink-0" aria-hidden="true" />
           <span className="font-mono text-[11px] font-semibold">{shown.subjectCode}</span>
           <span className="tabular-nums">
-            {ongoing ? `ends in ${minsTo} min` : `in ${minsTo} min`}
+            {ongoing ? `ends in ${humanizeMins(minsTo)}` : `in ${humanizeMins(minsTo)}`}
           </span>
         </span>
       </TooltipTrigger>
       <TooltipContent>
-        {ongoing ? "Class in progress" : "Next class today"}: {name} · {hhmm(shown.startMin)}–{hhmm(shown.endMin)}
+        {ongoing ? "Class in progress" : urgency === "imminent" ? "Starting imminently" : "Next class today"}: {name} · {hhmm(shown.startMin)}–{hhmm(shown.endMin)}
       </TooltipContent>
     </Tooltip>
   );
