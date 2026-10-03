@@ -41,7 +41,7 @@ import { applyBatchPicks } from "@/lib/batch-picks";
 import { compactErrorText } from "@/lib/compact-error";
 import { fetchAssignments, fetchDashboard, fetchHistory, fetchSyncLogs, fetchAlaNotes, fetchTimetable, qk } from "./api";
 import { WeeklyDigestDialog } from "./digest-dialog";
-import { TodayCard, nextUpcomingThisWeek, type TodayClassBrief } from "./today-card";
+import { TodayCard, daysAheadLabel, daysAheadThisWeek, nextUpcomingThisWeek, type TodayClassBrief } from "./today-card";
 import { SkipBudgetCard } from "./skip-budget-card";
 import { WeekPlanCard } from "./week-plan-card";
 import { SetupChecklist } from "./setup-checklist";
@@ -555,7 +555,7 @@ function NextUpStrip({
                 ? ` — ${classInfo.next.subjectCode} ends in ${humanizeMins(classInfo.next.endMin - nowMin)}`
                 : ` — ${classInfo.next.subjectCode} starts in ${humanizeMins(classInfo.next.startMin - nowMin)}`
               : classInfo.weekNext
-                ? ` — all classes done · next ${classInfo.weekNext.subjectCode} ${DAY_NAMES[classInfo.weekNext.dayOfWeek]} ${hhmmFromMin(classInfo.weekNext.startMin)}`
+                ? ` — all classes done · next ${classInfo.weekNext.subjectCode} ${DAY_NAMES[classInfo.weekNext.dayOfWeek]} ${hhmmFromMin(classInfo.weekNext.startMin)} (${daysAheadLabel(daysAheadThisWeek(classInfo.weekNext.dayOfWeek, now))})`
                 : " — all classes done"
           }`}
           className="hidden shrink-0 cursor-pointer items-center gap-3 rounded-lg px-1.5 py-1 text-right transition-colors hover:bg-violet-500/[0.06] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring sm:flex"
@@ -599,6 +599,9 @@ function NextUpStrip({
               (() => {
                 const w = classInfo.weekNext;
                 const hue = hueColors(w.subjectCode);
+                /* r91: same pinned distance qualifier as the header chip —
+                   one math, two surfaces (d=1 "tomorrow", else "in Nd"). */
+                const dAhead = daysAheadThisWeek(w.dayOfWeek, now);
                 return (
                   <p className="flex items-center justify-end gap-1.5 text-xs font-semibold">
                     <CalendarClock
@@ -613,6 +616,9 @@ function NextUpStrip({
                     </span>
                     <span className="tabular-nums text-muted-foreground">
                       {DAY_NAMES[w.dayOfWeek]} {hhmmFromMin(w.startMin)}
+                    </span>
+                    <span className="tabular-nums text-muted-foreground/70" aria-hidden="true">
+                      · {daysAheadLabel(dAhead)}
                     </span>
                   </p>
                 );

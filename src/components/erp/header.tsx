@@ -39,7 +39,7 @@ import { applyBatchPicks } from "@/lib/batch-picks";
 import { promptInstall, useCanInstall } from "./install-prompt";
 import { fetchDashboard, fetchTimetable, markAllNotificationsRead, postSync, qk } from "./api";
 import { ago, fmtDT, humanizeMins, istNow, useNow } from "./shared";
-import { chipUrgency, justEndedChip, nextUpcomingThisWeek, type TodayLiveClass } from "./today-card";
+import { chipUrgency, daysAheadThisWeek, daysAheadLabel, justEndedChip, nextUpcomingThisWeek, type TodayLiveClass } from "./today-card";
 import type { AppMode, AppNotification, NotificationSeverity } from "./types";
 
 /** Status dot with a soft radiating ping — marks the live/demo connection.
@@ -327,12 +327,16 @@ function NextClassChip({ subjects }: { subjects: { code: string; name: string }[
     const uName =
       subjects?.find((x) => x.code === upcoming.subjectCode)?.name ??
       upcoming.subjectCode;
+    /* r91: the wait becomes tangible — one pinned distance math
+       (daysAheadThisWeek) qualifies the wall-clock time; d=1 reads
+       "tomorrow", else "in Nd" (humanizeMins dialect, one unit up). */
+    const dAhead = daysAheadThisWeek(upcoming.dayOfWeek, now);
     return (
       <Tooltip>
         <TooltipTrigger asChild>
           <span
             className="hidden shrink-0 cursor-default items-center gap-1.5 whitespace-nowrap rounded-full border border-border/70 bg-muted/50 px-2.5 py-1 text-xs font-medium tabular-nums text-muted-foreground lg:inline-flex"
-            aria-label={`Next class this week — ${upcoming.subjectCode} ${DAYS[upcoming.dayOfWeek]} ${hhmm(upcoming.startMin)}`}
+            aria-label={`Next class this week — ${upcoming.subjectCode} ${DAYS[upcoming.dayOfWeek]} ${hhmm(upcoming.startMin)} (${daysAheadLabel(dAhead)})`}
             title="Today's classes are done — the next one later this week."
           >
             <span className="size-1.5 rounded-full bg-muted-foreground/50" aria-hidden="true" />
@@ -341,10 +345,13 @@ function NextClassChip({ subjects }: { subjects: { code: string; name: string }[
             <span className="tabular-nums">
               {DAYS[upcoming.dayOfWeek]} {hhmm(upcoming.startMin)}
             </span>
+            <span className="tabular-nums text-muted-foreground/70" aria-hidden="true">
+              · {daysAheadLabel(dAhead)}
+            </span>
           </span>
         </TooltipTrigger>
         <TooltipContent>
-          Next class this week: {uName} · {DAYS[upcoming.dayOfWeek]} {hhmm(upcoming.startMin)}–{hhmm(upcoming.endMin)}
+          Next class this week: {uName} · {DAYS[upcoming.dayOfWeek]} {hhmm(upcoming.startMin)}–{hhmm(upcoming.endMin)} · {daysAheadLabel(dAhead)}
         </TooltipContent>
       </Tooltip>
     );

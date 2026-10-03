@@ -275,6 +275,23 @@ export function nextUpcomingThisWeek(
   );
 }
 
+/** Cyclic days-ahead for one weekday vs the IST clock (r91): 0 = today,
+ *  1 = tomorrow … 6 = the day before today next week. The SAME +7 wrap the
+ *  week-ahead selection uses — exported so the header chip and the strip's
+ *  done line qualify their "Mon 11:00" with ONE distance math instead of
+ *  two drifting re-derivations. Pure — pinned in tests (r91). */
+export function daysAheadThisWeek(dayOfWeek: number, now: number): number {
+  return (dayOfWeek - istNow(now).day + 7) % 7;
+}
+
+/** Display twin of daysAheadThisWeek (r91): 0 reads "today", 1 reads
+ *  "tomorrow" (the friendly, still-honest case), every other gap reads
+ *  "in Nd" — the humanizeMins dialect ("in 4h") one unit up. Pure —
+ *  pinned in tests (r91). */
+export function daysAheadLabel(d: number): string {
+  return d === 0 ? "today" : d === 1 ? "tomorrow" : `in ${d}d`;
+}
+
 /** Build the exact SMS text shown in the bubble (and used for copy/share). */
 export function buildTodaySms(input: TodaySmsInput): string {
   const p = istParts(input.now);
