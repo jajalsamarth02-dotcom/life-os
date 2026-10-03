@@ -3265,6 +3265,19 @@ export function RemindersTab({
     }
   };
 
+  /* r104: palette deep-link (erp:filter-reminders, detail = scope key).
+     The command palette's "Your reminders" group routes here so the rows it
+     advertised are the rows the student lands on. Routes through setFilter
+     so the choice persists like a manual toggle (deliberate user action). */
+  useEffect(() => {
+    const handler = (e: Event) => {
+      const f = (e as CustomEvent<string>).detail;
+      if (f === "all" || f === "erp" || f === "personal") setFilter(f);
+    };
+    window.addEventListener("erp:filter-reminders", handler);
+    return () => window.removeEventListener("erp:filter-reminders", handler);
+  });
+
   const { data, isPending, isError, error } = useQuery({
     queryKey: qk.reminders(filter, includeDone),
     queryFn: () => fetchReminders(filter, includeDone),

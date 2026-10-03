@@ -35,6 +35,40 @@ export function duePersonalCount(
 }
 
 /**
+ * r104 — the palette's "Your reminders" group order, as a pinned pure.
+ *
+ * ACTIVE personal reminders (ATTENDANCE_WARNING excluded, mirroring
+ * duePersonalCount) sorted DUE-FIRST (overdue items lead, red-tinted in the
+ * UI) and then by soonest dueAt. The palette pipes this through rankedCap:
+ * idle = the due/soonest rows visible; searching = cmdk's own scorer picks
+ * the best matches from the full list.
+ *
+ * Deliberately the SAME membership rules as duePersonalCount (PERSONAL +
+ * ACTIVE + not an auto warning) — the badge half and the palette group can
+ * never disagree about what counts as a reminder.
+ */
+export function dueFirstReminderRows<
+  T extends { source: string; status: string; type: string; dueAt: string },
+>(rows: readonly T[], nowMs: number): T[] {
+  return rows
+    .filter(
+      (r) =>
+        r.source === "PERSONAL" &&
+        r.status === "ACTIVE" &&
+        r.type !== "ATTENDANCE_WARNING"
+    )
+    .slice()
+    .sort((a, b) => {
+      const aDue = new Date(a.dueAt).getTime() < nowMs ? 0 : 1;
+      const bDue = new Date(b.dueAt).getTime() < nowMs ? 0 : 1;
+      return (
+        aDue - bDue ||
+        new Date(a.dueAt).getTime() - new Date(b.dueAt).getTime()
+      );
+    });
+}
+
+/**
  * PWA app badge — shows a numeric badge (overdue ALA count) on the installed
  * app's icon (Android home screen, desktop taskbar/dock; iOS 17+ standalone).
  * Feature-detected and fully cosmetic: any failure is swallowed so a missing

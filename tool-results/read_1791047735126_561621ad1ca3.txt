@@ -1,0 +1,963 @@
+     1→"use client";
+     2→
+     3→import * as React from "react";
+     4→import { useQuery, useQueryClient } from "@tanstack/react-query";
+     5→import { defaultFilter as cmdkDefaultFilter } from "cmdk";
+     6→import { useTheme } from "next-themes";
+     7→import { toast } from "sonner";
+     8→import { formatDistanceToNowStrict } from "date-fns";
+     9→import {
+    10→  ALargeSmall,
+    11→  AlertTriangle,
+    12→  ArrowRight,
+    13→  BarChart3,
+    14→  CalendarClock,
+    15→  CalendarDays,
+    16→  CalendarPlus,
+    17→  Check,
+    18→  Copy as CopyIcon,
+    19→  ExternalLink,
+    20→  Flag,
+    21→  FlaskConical,
+    22→  GraduationCap,
+    23→  History,
+    24→  Keyboard,
+    25→  LayoutDashboard,
+    26→  ListFilter,
+    27→  Moon,
+    28→  Printer,
+    29→  RefreshCw,
+    30→  Settings as SettingsIcon,
+    31→  StickyNote,
+    32→  Sun,
+    33→  Target,
+    34→  Timer,
+    35→  Zap,
+    36→} from "lucide-react";
+    37→import {
+    38→  CommandDialog,
+    39→  CommandEmpty,
+    40→  CommandGroup,
+    41→  CommandInput,
+    42→  CommandItem,
+    43→  CommandList,
+    44→  CommandSeparator,
+    45→  CommandShortcut,
+    46→} from "@/components/ui/command";
+    47→import { cn } from "@/lib/utils";
+    48→import { cycleTextSize, TEXT_SIZES } from "@/lib/text-size";
+    49→import { fetchAlaNotes, fetchAssignments, fetchResults, fetchReminders, fetchTimetable, postDemoEvolve, postSync, putSelectedSemester, qk, type RetryFocusHandoff, type SubjectFocusHandoff } from "./api";
+    50→import { subjectStories } from "@/lib/results-summary";
+    51→import { buildSingleClassIcs, upcomingClassSlots } from "./ics";
+    52→import { downloadTextFile } from "./download";
+    53→import { rankedCap } from "./palette-search";
+    54→import { DAY_NAMES_SHORT, ERP_BASE, typeLabel } from "./shared";
+    55→import { ALA_PRIORITY_META } from "./reminders-tab";
+    56→import type { SettingsFocus } from "./settings-tab";
+    57→import { dueFirstReminderRows, duePersonalCount } from "./use-app-badge";
+    58→import type { AttendanceStatus, ResultsResponse, SubjectView } from "./types";
+    59→import { useTextSize } from "./text-size-card";
+    60→
+    61→const STATUS_DOT: Record<AttendanceStatus, string> = {
+    62→  safe: "bg-emerald-500",
+    63→  warning: "bg-amber-500",
+    64→  danger: "bg-red-500",
+    65→  none: "bg-muted-foreground/50",
+    66→};
+    67→
+    68→/** 24h wall clock for class rows: 660 → "11:00". */
+    69→const hhmm = (m: number) =>
+    70→  `${String(Math.floor(m / 60)).padStart(2, "0")}:${String(m % 60).padStart(2, "0")}`;
+    71→
+    72→/** r102 — ONE source of truth for a class row's search string: the memo
+    73→ *  that ranks matches and the CommandItem's `value` prop both call this,
+    74→ *  so what the student sees is always what the filter scored. */
+    75→const classRowValue = (
+    76→  slot: { dayOfWeek: number; startMin: number; endMin: number; subjectCode: string },
+    77→  name: string | null
+    78→) =>
+    79→  `${slot.subjectCode} ${name ?? ""} ${DAY_NAMES_SHORT[slot.dayOfWeek] ?? ""} ${hhmm(slot.startMin)} add to calendar ics export download class timetable weekly every`;
+    80→
+    81→export type PaletteTab = "dashboard" | "attendance" | "reminders" | "settings";
+    82→
+    83→interface CommandPaletteProps {
+    84→  open: boolean;
+    85→  onOpenChange: (open: boolean) => void;
+    86→  onNavigate: (tab: PaletteTab) => void;
+    87→  onShowShortcuts: () => void;
+    88→  onSyncNow: () => void;
+    89→  syncing: boolean;
+    90→  demoMode: boolean;
+    91→  subjects: SubjectView[] | undefined;
+    92→  /** Active semester partition ("all" or "1".."8"). */
+    93→  semester?: string;
+    94→  /** r103: deep-link into Settings with a spotlight target — powers the
+    95→   *  "export the calendar" action (Settings stays the ONE export surface;
+    96→   *  the palette only launches it, never re-builds the file). */
+    97→  onOpenSettingsFocus: (focus: SettingsFocus) => void;
+    98→}
+    99→
+   100→/**
+   101→ * Global command palette (⌘K / Ctrl+K): quick navigation, actions, subject
+   102→ * jump-to-details, ALA quick-filters and ERP portal deep-links.
+   103→ */
+   104→export function CommandPalette({
+   105→  open,
+   106→  onOpenChange,
+   107→  onNavigate,
+   108→  onShowShortcuts,
+   109→  onSyncNow,
+   110→  syncing,
+   111→  demoMode,
+   112→  subjects,
+   113→  semester = "all",
+   114→  onOpenSettingsFocus,
+   115→}: CommandPaletteProps) {
+   116→  const queryClient = useQueryClient();
+   117→  const { resolvedTheme, setTheme } = useTheme();
+   118→
+   119→  /* r102/r103: the palette's live search string, fed by CommandInput's
+   120→     onValueChange (NOT useCommandState — that hook reads the cmdk store
+   121→     context, which does not exist in this component: the palette RENDERS
+   122→     the Command, it is not inside it — calling it here crashed the app in
+   123→     r102 and the lesson stays pinned). Reset on close: the Command root
+   124→     remounts with a fresh store, this state must not outlive it. */
+   125→  const [paletteSearch, setPaletteSearch] = React.useState("");
+   126→  React.useEffect(() => {
+   127→    if (!open) setPaletteSearch("");
+   128→  }, [open]);
+   129→
+   130→  const run = (fn: () => void) => {
+   131→    onOpenChange(false);
+   132→    // let the dialog close before side effects (avoids focus fights)
+   133→    window.setTimeout(fn, 60);
+   134→  };
+   135→
+   136→  /* Subject-drawer deep-link: navigate to the attendance tab, then write the
+   137→     qk.subjectFocus handoff (same 120ms convention; the handoff survives the
+   138→     tab mount either way — the drawer opens on arrival). */
+   139→  const openSubject = (code: string) => {
+   140→    run(() => {
+   141→      onNavigate("attendance");
+   142→      window.setTimeout(() => {
+   143→        queryClient.setQueryData<SubjectFocusHandoff>(qk.subjectFocus, {
+   144→          code,
+   145→          nonce: Date.now(),
+   146→        });
+   147→      }, 120);
+   148→    });
+   149→  };
+   150→
+   151→  /* Retry-story deep-link: write the handoff AFTER the dashboard tab is
+   152→     active (run() already delays 60ms; the extra tick lets the tab's card
+   153→     mount first). code=null = generic "open retry history". */
+   154→  const openRetryStory = (code: string | null) => {
+   155→    run(() => {
+   156→      onNavigate("dashboard");
+   157→      window.setTimeout(() => {
+   158→        queryClient.setQueryData<RetryFocusHandoff>(qk.retryFocus, {
+   159→          code,
+   160→          nonce: Date.now(),
+   161→        });
+   162→      }, 120);
+   163→    });
+   164→  };
+   165→
+   166→  const newReminder = () => {
+   167→    run(() => {
+   168→      onNavigate("reminders");
+   169→      window.setTimeout(() => {
+   170→        window.dispatchEvent(new CustomEvent("erp:new-reminder"));
+   171→      }, 120);
+   172→    });
+   173→  };
+   174→
+   175→  const toggleTheme = () => {
+   176→    run(() => setTheme(resolvedTheme === "dark" ? "light" : "dark"));
+   177→  };
+   178→
+   179→  const [textSize, setTextSizeState] = useTextSize();
+   180→  const cycleText = () => {
+   181→    const nextSize = cycleTextSize(textSize);
+   182→    run(() => {
+   183→      setTextSizeState(nextSize);
+   184→      toast.success(
+   185→        `Text size: ${TEXT_SIZES.find((s) => s.key === nextSize)?.label ?? nextSize}`,
+   186→        { description: "Adjust any time in Settings → Text size." }
+   187→      );
+   188→    });
+   189→  };
+   190→
+   191→  /* Deadline launcher — joins the shared assignments query cache (already
+   192→     polled by the ALA section and the app badge), so it costs no extra fetch. */
+   193→  const assignmentsQ = useQuery({ queryKey: qk.assignments, queryFn: fetchAssignments, staleTime: 15_000 });
+   194→  /* Retry-story launcher — READ-ONLY cache join (enabled:false never fetches):
+   195→     it sees whatever the dashboard's results card already loaded. Cold or
+   196→     garbage-collected cache → undefined → the group simply stays hidden.
+   197→     Story commands write a qk.retryFocus handoff the card consumes — works
+   198→     even when the dashboard tab isn't mounted (no missed CustomEvents). */
+   199→  const resultsQ = useQuery<ResultsResponse | null>({
+   200→    queryKey: qk.results,
+   201→    queryFn: () => fetchResults(),
+   202→    enabled: false,
+   203→  });
+   204→  const retryStoriesBase = React.useMemo(
+   205→    () => (resultsQ.data ? subjectStories(resultsQ.data.exams) : []),
+   206→    [resultsQ.data]
+   207→  );
+   208→  /* r103: search-aware cap — while typing, ALL retry stories are scored
+   209→     (cmdk's own filter) so a cleared subject in week 2 is reachable even
+   210→     when it sits below the idle 8-row cap. */
+   211→  const retryStories = React.useMemo(
+   212→    () =>
+   213→      rankedCap(
+   214→        retryStoriesBase,
+   215→        (s) => `retry-story ${s.code} ${s.name}`,
+   216→        8,
+   217→        paletteSearch
+   218→      ),
+   219→    [retryStoriesBase, paletteSearch]
+   220→  );
+   221→  /* Local note overlay — powers the "Your flagged ALAs" palette group. */
+   222→  const alaNotesQ = useQuery({ queryKey: qk.alaNotes, queryFn: fetchAlaNotes, staleTime: 30_000 });
+   223→  /* The student's own triage layer as palette rows — mirrors the dashboard's
+   224→     "Your flagged ALAs" card: priority desc, then nearest deadline. Selecting
+   225→     any row opens the Reminders tab with the Noted filter applied. */
+   226→  const flaggedAll = React.useMemo(() => {
+   227→    const notes = alaNotesQ.data ?? [];
+   228→    if (notes.length === 0) return [];
+   229→    const prio = new Map(notes.map((n) => [n.externalId, n.priority]));
+   230→    const note = new Map(notes.map((n) => [n.externalId, n.note]));
+   231→    return (assignmentsQ.data?.assignments ?? [])
+   232→      .filter((a) => !!a.externalId && prio.has(a.externalId))
+   233→      .map((a) => ({
+   234→        a,
+   235→        priority: prio.get(a.externalId as string) ?? 0,
+   236→        note: note.get(a.externalId as string) ?? "",
+   237→      }))
+   238→      .sort(
+   239→        (x, y) =>
+   240→          y.priority - x.priority ||
+   241→          new Date(x.a.dueAt).getTime() - new Date(y.a.dueAt).getTime()
+   242→      );
+   243→  }, [assignmentsQ.data, alaNotesQ.data]);
+   244→  /* r103: search-aware cap — a flagged ALA below the idle 3-row cap stays
+   245→     reachable by name while typing (same rankedCap contract everywhere). */
+   246→  const flaggedItems = React.useMemo(
+   247→    () =>
+   248→      rankedCap(
+   249→        flaggedAll,
+   250→        ({ a, note }) => `${a.title} ${a.subjectCode ?? ""} ${note} flagged priority local triage`,
+   251→        3,
+   252→        paletteSearch
+   253→      ),
+   254→    [flaggedAll, paletteSearch]
+   255→  );
+   256→  const nowMs = React.useMemo(() => Date.now(), [assignmentsQ.data]);
+   257→  const { sortedDeadlines, activeDeadlineCount, overdueCount, soonCount } = React.useMemo(() => {
+   258→    const active = (assignmentsQ.data?.assignments ?? []).filter((a) => a.status === "ACTIVE");
+   259→    const sorted = [...active].sort(
+   260→      (a, b) => new Date(a.dueAt).getTime() - new Date(b.dueAt).getTime()
+   261→    );
+   262→    const dueMs = (a: { dueAt: string }) => new Date(a.dueAt).getTime();
+   263→    return {
+   264→      sortedDeadlines: sorted,
+   265→      activeDeadlineCount: active.length,
+   266→      overdueCount: active.filter((a) => dueMs(a) < nowMs).length,
+   267→      soonCount: active.filter((a) => {
+   268→        const d = dueMs(a);
+   269→        return d >= nowMs && d - nowMs <= 7 * 86_400_000;
+   270→      }).length,
+   271→    };
+   272→  }, [assignmentsQ.data, nowMs]);
+   273→  /* r103: search-aware cap — the headline fix this round. 41 active
+   274→     deadlines, 8 rendered: before, a search for a deep deadline ("pdo",
+   275→     week 6's ALA…) found NOTHING because cmdk never saw the row. While
+   276→     typing, all of them are scored and the best 8 matches render. */
+   277→  const deadlineItems = React.useMemo(
+   278→    () =>
+   279→      rankedCap(
+   280→        sortedDeadlines,
+   281→        (a) => `${a.title} ${a.subjectCode ?? ""} ala assignment deadline`,
+   282→        8,
+   283→        paletteSearch
+   284→      ),
+   285→    [sortedDeadlines, paletteSearch]
+   286→  );
+   287→  const openDeadline = (title: string) => {
+   288→    run(() => {
+   289→      onNavigate("reminders");
+   290→      window.setTimeout(() => {
+   291→        window.dispatchEvent(new CustomEvent("erp:focus-ala", { detail: title }));
+   292→      }, 150);
+   293→    });
+   294→  };
+   295→
+   296→  /* r104 — "Your reminders" group: the r102 badge's second half finally has
+   297→     an in-app surface. Joins the SAME qk.reminders("personal", false) cache
+   298→     the page badge polls (60s there; a stale cache refetches once here),
+   299→     orders through the pinned dueFirstReminderRows pure (due-first), and
+   300→     caps via rankedCap like every other group. Selecting a row opens the
+   301→     Reminders tab with the Personal scope pre-applied (erp:filter-reminders
+   302→     → setFilter — persisted like a manual toggle). */
+   303→  const personalRemindersQ = useQuery({
+   304→    queryKey: qk.reminders("personal", false),
+   305→    queryFn: () => fetchReminders("personal", false),
+   306→    staleTime: 30_000,
+   307→  });
+   308→  const allReminderRows = React.useMemo(
+   309→    () => dueFirstReminderRows(personalRemindersQ.data ?? [], nowMs),
+   310→    [personalRemindersQ.data, nowMs]
+   311→  );
+   312→  const reminderItems = React.useMemo(
+   313→    () =>
+   314→      rankedCap(
+   315→        allReminderRows,
+   316→        (r) => `${r.title} ${r.subjectCode ?? ""} personal reminder due reminder`,
+   317→        8,
+   318→        paletteSearch
+   319→      ),
+   320→    [allReminderRows, paletteSearch]
+   321→  );
+   322→  const dueReminderCount = React.useMemo(
+   323→    () => duePersonalCount(personalRemindersQ.data ?? [], nowMs),
+   324→    [personalRemindersQ.data, nowMs]
+   325→  );
+   326→  const openReminders = () => {
+   327→    run(() => {
+   328→      onNavigate("reminders");
+   329→      window.setTimeout(() => {
+   330→        window.dispatchEvent(new CustomEvent("erp:filter-reminders", { detail: "personal" }));
+   331→      }, 150);
+   332→    });
+   333→  };
+   334→
+   335→  /* ALA quick-filter — a fresh triage entry: the AlaSection listener clears
+   336→     every other axis (search/subject/day) and applies the requested status. */
+   337→  const filterAla = (status: string) => {
+   338→    run(() => {
+   339→      onNavigate("reminders");
+   340→      window.setTimeout(() => {
+   341→        window.dispatchEvent(new CustomEvent("erp:filter-ala", { detail: status }));
+   342→      }, 150);
+   343→    });
+   344→  };
+   345→
+   346→  const setSemester = (value: string) => {
+   347→    run(async () => {
+   348→      try {
+   349→        await putSelectedSemester(value);
+   350→        window.dispatchEvent(new CustomEvent("erp:invalidate-all"));
+   351→        toast.success(
+   352→          value === "all" ? "Showing all semesters" : `Showing Semester ${value}`,
+   353→          {
+   354→            description:
+   355→              value === "all"
+   356→                ? "Every ERP-synchronized subject is visible again."
+   357→                : "Only this semester's ERP-synchronized subjects are shown now.",
+   358→          }
+   359→        );
+   360→      } catch (e) {
+   361→        toast.error("Could not change semester", {
+   362→          description: e instanceof Error ? e.message : String(e),
+   363→        });
+   364→      }
+   365→    });
+   366→  };
+   367→
+   368→  /* r102 — "Add a class to your calendar" group. The synced routine joins
+   369→     through the shared qk.timetable cache (the dashboard tab already loads
+   370→     it; a cold cache fetches ONCE on first open, then 60s staleTime). Rows
+   371→     are the UNIQUE classes ordered by next occurrence, so the soonest
+   372→     class is one Enter away. Display names resolve from the subjects list
+   373→     the page already passed in — a subject-less code falls back to itself. */
+   374→  const timetableQ = useQuery({
+   375→    queryKey: qk.timetable,
+   376→    queryFn: fetchTimetable,
+   377→    enabled: open,
+   378→    staleTime: 60_000,
+   379→  });
+   380→  const subjectName = React.useMemo(() => {
+   381→    const m = new Map<string, string>();
+   382→    for (const s of subjects ?? []) m.set(s.code, s.name);
+   383→    return m;
+   384→  }, [subjects]);
+   385→  const allClassEntries = React.useMemo(
+   386→    () => upcomingClassSlots(timetableQ.data?.slots ?? [], new Date()),
+   387→    [timetableQ.data]
+   388→  );
+   389→  /* r103: the r102 inline class-cap is now rankedCap — the SAME search-aware
+   390→     contract as deadlines/flagged/retry (one helper, one behavior, four
+   391→     groups). Idle: the 8 SOONEST classes; typing: all 28 scored, best 8
+   392→     win, strongest match first. */
+   393→  const classEntries = React.useMemo(
+   394→    () =>
+   395→      rankedCap(
+   396→        allClassEntries,
+   397→        (slot) => classRowValue(slot, subjectName.get(slot.subjectCode) ?? null),
+   398→        8,
+   399→        paletteSearch
+   400→      ),
+   401→    [allClassEntries, paletteSearch, subjectName]
+   402→  );
+   403→  const classTotal = allClassEntries.length;
+   404→  /* r102: transient "saved" feedback — the row's icon swaps to a check for
+   405→     two seconds after the download fires (the r101 chip's landing pattern). */
+   406→  const [savedClassUid, setSavedClassUid] = React.useState<string | null>(null);
+   407→  React.useEffect(() => {
+   408→    if (!savedClassUid) return;
+   409→    const t = setTimeout(() => setSavedClassUid(null), 2000);
+   410→    return () => clearTimeout(t);
+   411→  }, [savedClassUid]);
+   412→  const downloadClass = (slot: {
+   413→    dayOfWeek: number;
+   414→    startMin: number;
+   415→    endMin: number;
+   416→    subjectCode: string;
+   417→  }) => {
+   418→    const name = subjectName.get(slot.subjectCode) ?? null;
+   419→    const res = buildSingleClassIcs(slot, name);
+   420→    if (!res) {
+   421→      toast.error("Couldn't build the calendar file", {
+   422→        description: "This class slot is missing valid time information.",
+   423→      });
+   424→      return;
+   425→    }
+   426→    downloadTextFile(res.text, res.filename);
+   427→    setSavedClassUid(`${slot.dayOfWeek}-${slot.startMin}-${slot.endMin}-${slot.subjectCode}`);
+   428→    toast.success(`Saved ${res.filename}`, {
+   429→      description: `${slot.subjectCode} · every ${DAY_NAMES_SHORT[slot.dayOfWeek] ?? "week"} — import it into your calendar; importing an updated export updates the same event.`,
+   430→    });
+   431→  };
+   432→
+   433→  const NAV = [
+   434→    { tab: "dashboard" as const, label: "Dashboard", icon: LayoutDashboard, kbd: "1" },
+   435→    { tab: "attendance" as const, label: "Attendance", icon: BarChart3, kbd: "2" },
+   436→    { tab: "reminders" as const, label: "Reminders", icon: CalendarClock, kbd: "3" },
+   437→    { tab: "settings" as const, label: "Settings", icon: SettingsIcon, kbd: "4" },
+   438→  ];
+   439→
+   440→  return (
+   441→    <CommandDialog open={open} onOpenChange={onOpenChange}>
+   442→      <CommandInput
+   443→        placeholder="Search subjects or run a command…"
+   444→        value={paletteSearch}
+   445→        onValueChange={setPaletteSearch}
+   446→      />
+   447→      <CommandList className="max-h-[min(60vh,26rem)]">
+   448→        <CommandEmpty>
+   449→          <div className="px-4 py-2 text-center">
+   450→            <p className="text-sm font-medium">No results found.</p>
+   451→            <p className="mt-1 text-xs leading-relaxed text-muted-foreground">
+   452→              Try a subject code, "overdue", "calendar", "what-if", "retry" or "print" —
+   453→              every capped group searches its FULL list, not just the visible rows.
+   454→            </p>
+   455→          </div>
+   456→        </CommandEmpty>
+   457→
+   458→        {subjects && subjects.length > 0 && (
+   459→          <>
+   460→            <CommandGroup heading="Subjects">
+   461→              {subjects.map((s) => (
+   462→                <CommandItem
+   463→                  key={s.code}
+   464→                  value={`${s.code} ${s.name} ${s.percentage.toFixed(1)}% target`}
+   465→                  onSelect={() => openSubject(s.code)}
+   466→                >
+   467→                  <span
+   468→                    className={cn("size-2 shrink-0 rounded-full", STATUS_DOT[s.status] ?? "bg-muted-foreground")}
+   469→                    aria-hidden="true"
+   470→                  />
+   471→                  <span className="font-mono text-xs font-semibold">{s.code}</span>
+   472→                  <span className="truncate text-sm text-muted-foreground">{s.name}</span>
+   473→                  <span className="ml-auto flex items-center gap-1.5 whitespace-nowrap text-xs tabular-nums text-muted-foreground">
+   474→                    <span className={cn("font-semibold", s.status === "danger" && "text-red-600 dark:text-red-400", s.status === "warning" && "text-amber-600 dark:text-amber-400", s.status === "safe" && "text-emerald-600 dark:text-emerald-400")}>
+   475→                      {s.percentage.toFixed(1)}%
+   476→                    </span>
+   477→                    <span aria-hidden="true">·</span>
+   478→                    <Target className="size-3" aria-hidden="true" />
+   479→                    {s.targetPct}%
+   480→                    {s.hasCustomTarget && (
+   481→                      <span className="rounded-full border border-amber-500/40 bg-amber-500/10 px-1.5 text-[10px] font-semibold text-amber-700 dark:text-amber-400">
+   482→                        custom
+   483→                      </span>
+   484→                    )}
+   485→                  </span>
+   486→                </CommandItem>
+   487→              ))}
+   488→            </CommandGroup>
+   489→            <CommandSeparator />
+   490→          </>
+   491→        )}
+   492→
+   493→        {classEntries.length > 0 && (
+   494→          <>
+   495→            <CommandGroup
+   496→              heading={`Add a class to your calendar${
+   497→                classTotal > classEntries.length
+   498→                  ? ` · next ${classEntries.length} of ${classTotal}`
+   499→                  : ""
+   500→              }`}
+   501→            >
+   502→              {classEntries.map((slot) => {
+   503→                const uid = `${slot.dayOfWeek}-${slot.startMin}-${slot.endMin}-${slot.subjectCode}`;
+   504→                const saved = savedClassUid === uid;
+   505→                const name = subjectName.get(slot.subjectCode) ?? null;
+   506→                return (
+   507→                  <CommandItem
+   508→                    key={uid}
+   509→                    value={classRowValue(slot, name)}
+   510→                    onSelect={() => downloadClass(slot)}
+   511→                  >
+   512→                    {saved ? (
+   513→                      <Check className="size-4 shrink-0 text-emerald-500" aria-hidden="true" />
+   514→                    ) : (
+   515→                      <CalendarPlus className="size-4 shrink-0 text-violet-500" aria-hidden="true" />
+   516→                    )}
+   517→                    <span className="font-mono text-xs font-semibold">{slot.subjectCode}</span>
+   518→                    <span className="truncate text-sm text-muted-foreground">
+   519→                      {name ?? "Class"}
+   520→                    </span>
+   521→                    <span className="ml-auto flex shrink-0 items-center gap-1.5 whitespace-nowrap text-xs tabular-nums text-muted-foreground">
+   522→                      <span className="font-medium text-foreground/70">
+   523→                        {DAY_NAMES_SHORT[slot.dayOfWeek] ?? "—"} {hhmm(slot.startMin)}–{hhmm(slot.endMin)}
+   524→                      </span>
+   525→                      <span
+   526→                        className={cn(
+   527→                          "rounded border px-1 font-mono text-[10px] font-semibold",
+   528→                          saved
+   529→                            ? "border-emerald-500/40 bg-emerald-500/10 text-emerald-600 dark:text-emerald-400"
+   530→                            : "border-violet-500/40 bg-violet-500/10 text-violet-600 dark:text-violet-400"
+   531→                        )}
+   532→                      >
+   533→                        .ics
+   534→                      </span>
+   535→                    </span>
+   536→                  </CommandItem>
+   537→                );
+   538→              })}
+   539→              {classTotal > classEntries.length && (
+   540→                <CommandItem
+   541→                  value="open full timetable all classes weekly schedule"
+   542→                  onSelect={() => run(() => onNavigate("dashboard"))}
+   543→                  className="text-muted-foreground"
+   544→                >
+   545→                  <CalendarClock className="size-4 shrink-0" aria-hidden="true" />
+   546→                  <span>
+   547→                    All <b className="font-semibold tabular-nums text-foreground">{classTotal}</b> classes live in
+   548→                    the timetable
+   549→                  </span>
+   550→                  <span className="ml-auto text-xs text-muted-foreground">Dashboard tab</span>
+   551→                </CommandItem>
+   552→              )}
+   553→            </CommandGroup>
+   554→            <CommandSeparator />
+   555→          </>
+   556→        )}
+   557→
+   558→        {deadlineItems.length > 0 && (
+   559→          <>
+   560→            <CommandGroup
+   561→              heading={`Upcoming deadlines${assignmentsQ.data ? ` · ${activeDeadlineCount} active` : ""}`}
+   562→            >
+   563→              {deadlineItems.map((a) => {
+   564→                const due = new Date(a.dueAt).getTime();
+   565→                const overdue = due < nowMs;
+   566→                const soon = !overdue && due - nowMs <= 7 * 86_400_000;
+   567→                return (
+   568→                  <CommandItem
+   569→                    key={a.id}
+   570→                    value={`${a.title} ${a.subjectCode ?? ""} ala assignment deadline`}
+   571→                    onSelect={() => openDeadline(a.title)}
+   572→                  >
+   573→                    <span
+   574→                      className={cn(
+   575→                        "size-2 shrink-0 rounded-full",
+   576→                        overdue ? "bg-red-500" : soon ? "bg-amber-500" : "bg-emerald-500"
+   577→                      )}
+   578→                      aria-hidden="true"
+   579→                    />
+   580→                    <span className="truncate font-medium">{a.title}</span>
+   581→                    <span className="truncate text-xs text-muted-foreground">
+   582→                      {a.subjectCode ?? "—"}
+   583→                    </span>
+   584→                    <span
+   585→                      className={cn(
+   586→                        "ml-auto whitespace-nowrap text-xs font-medium tabular-nums",
+   587→                        overdue
+   588→                          ? "text-red-600 dark:text-red-400"
+   589→                          : soon
+   590→                            ? "text-amber-600 dark:text-amber-400"
+   591→                            : "text-emerald-600 dark:text-emerald-400"
+   592→                      )}
+   593→                    >
+   594→                      {overdue
+   595→                        ? `${formatDistanceToNowStrict(new Date(a.dueAt))} overdue`
+   596→                        : `in ${formatDistanceToNowStrict(new Date(a.dueAt))}`}
+   597→                    </span>
+   598→                  </CommandItem>
+   599→                );
+   600→              })}
+   601→              {activeDeadlineCount > deadlineItems.length && (
+   602→                <CommandItem
+   603→                  value="show all deadlines open reminders ala assignments"
+   604→                  onSelect={() => filterAla("all")}
+   605→                  className="text-muted-foreground"
+   606→                >
+   607→                  <ArrowRight className="size-4 shrink-0" aria-hidden="true" />
+   608→                  <span>
+   609→                    Show all <b className="font-semibold tabular-nums text-foreground">{activeDeadlineCount}</b>{" "}
+   610→                    active deadlines
+   611→                  </span>
+   612→                  <span className="ml-auto text-xs text-muted-foreground">Reminders tab</span>
+   613→                </CommandItem>
+   614→              )}
+   615→            </CommandGroup>
+   616→            <CommandSeparator />
+   617→          </>
+   618→        )}
+   619→
+   620→        {reminderItems.length > 0 && (
+   621→          <>
+   622→            <CommandGroup
+   623→              heading={`Your reminders · ${allReminderRows.length} active${
+   624→                dueReminderCount > 0 ? ` · ${dueReminderCount} due` : ""
+   625→              }`}
+   626→            >
+   627→              {reminderItems.map((r) => {
+   628→                const due = new Date(r.dueAt).getTime();
+   629→                const overdue = due < nowMs;
+   630→                const soon = !overdue && due - nowMs <= 24 * 3_600_000;
+   631→                return (
+   632→                  <CommandItem
+   633→                    key={r.id}
+   634→                    value={`${r.title} ${r.subjectCode ?? ""} personal reminder due reminder`}
+   635→                    onSelect={openReminders}
+   636→                  >
+   637→                    <span
+   638→                      className={cn(
+   639→                        "size-2 shrink-0 rounded-full",
+   640→                        overdue ? "bg-red-500" : soon ? "bg-amber-500" : "bg-emerald-500"
+   641→                      )}
+   642→                      aria-hidden="true"
+   643→                    />
+   644→                    <span className="truncate font-medium">{r.title}</span>
+   645→                    <span className="truncate text-xs text-muted-foreground">
+   646→                      {r.subjectCode ?? typeLabel(r.type)}
+   647→                    </span>
+   648→                    <span
+   649→                      className={cn(
+   650→                        "ml-auto whitespace-nowrap text-xs font-medium tabular-nums",
+   651→                        overdue
+   652→                          ? "text-red-600 dark:text-red-400"
+   653→                          : soon
+   654→                            ? "text-amber-600 dark:text-amber-400"
+   655→                            : "text-muted-foreground"
+   656→                      )}
+   657→                    >
+   658→                      {overdue
+   659→                        ? `${formatDistanceToNowStrict(new Date(r.dueAt))} overdue`
+   660→                        : `in ${formatDistanceToNowStrict(new Date(r.dueAt))}`}
+   661→                    </span>
+   662→                  </CommandItem>
+   663→                );
+   664→              })}
+   665→              {allReminderRows.length > reminderItems.length && (
+   666→                <CommandItem
+   667→                  value="open all personal reminders full list"
+   668→                  onSelect={openReminders}
+   669→                  className="text-muted-foreground"
+   670→                >
+   671→                  <ArrowRight className="size-4 shrink-0" aria-hidden="true" />
+   672→                  <span>
+   673→                    Open all <b className="font-semibold tabular-nums text-foreground">{allReminderRows.length}</b>{" "}
+   674→                    active reminders
+   675→                  </span>
+   676→                  <span className="ml-auto text-xs text-muted-foreground">Reminders tab</span>
+   677→                </CommandItem>
+   678→              )}
+   679→            </CommandGroup>
+   680→            <CommandSeparator />
+   681→          </>
+   682→        )}
+   683→
+   684→        {flaggedItems.length > 0 && (
+   685→          <>
+   686→            <CommandGroup heading={`Your flagged ALAs · ${flaggedAll.length}`}>
+   687→              {flaggedItems.map(({ a, priority, note }) => {
+   688→                const due = new Date(a.dueAt).getTime();
+   689→                const overdue = due < nowMs;
+   690→                const soon = !overdue && due - nowMs <= 7 * 86_400_000;
+   691→                const meta = ALA_PRIORITY_META[priority];
+   692→                return (
+   693→                  <CommandItem
+   694→                    key={a.id}
+   695→                    value={`${a.title} ${a.subjectCode ?? ""} ${note} flagged priority local triage`}
+   696→                    onSelect={() => filterAla("noted")}
+   697→                  >
+   698→                    <Flag
+   699→                      className={cn("size-4 shrink-0", meta?.icon ?? "text-muted-foreground")}
+   700→                      aria-hidden="true"
+   701→                    />
+   702→                    <span className="truncate font-medium">{a.title}</span>
+   703→                    <span className="truncate text-xs text-muted-foreground">{a.subjectCode ?? "—"}</span>
+   704→                    <span
+   705→                      className={cn(
+   706→                        "ml-auto whitespace-nowrap text-xs font-medium tabular-nums",
+   707→                        overdue
+   708→                          ? "text-red-600 dark:text-red-400"
+   709→                          : soon
+   710→                            ? "text-amber-600 dark:text-amber-400"
+   711→                            : "text-muted-foreground"
+   712→                      )}
+   713→                    >
+   714→                      {overdue
+   715→                        ? `${formatDistanceToNowStrict(new Date(a.dueAt))} overdue`
+   716→                        : `in ${formatDistanceToNowStrict(new Date(a.dueAt))}`}
+   717→                    </span>
+   718→                  </CommandItem>
+   719→                );
+   720→              })}
+   721→              <CommandItem
+   722→                value="open all noted ala flags annotations private triage list"
+   723→                onSelect={() => filterAla("noted")}
+   724→                className="text-muted-foreground"
+   725→              >
+   726→                <StickyNote className="size-4 shrink-0 text-primary" aria-hidden="true" />
+   727→                <span>
+   728→                  Open all <b className="font-semibold tabular-nums text-foreground">{flaggedAll.length}</b> noted
+   729→                  ALAs — your private triage
+   730→                </span>
+   731→                <span className="ml-auto text-xs text-muted-foreground">Reminders tab</span>
+   732→              </CommandItem>
+   733→            </CommandGroup>
+   734→            <CommandSeparator />
+   735→          </>
+   736→        )}
+   737→
+   738→        {deadlineItems.length > 0 && (
+   739→          <>
+   740→            <CommandGroup heading="ALA quick filters">
+   741→              <CommandItem
+   742→                value="ala overdue filter late assignments triage"
+   743→                onSelect={() => filterAla("overdue")}
+   744→                disabled={overdueCount === 0}
+   745→              >
+   746→                <AlertTriangle className="size-4 shrink-0 text-red-500" aria-hidden="true" />
+   747→                <span>Show overdue ALAs</span>
+   748→                <span className="ml-auto rounded-full bg-red-500/10 px-1.5 text-[10px] font-bold tabular-nums text-red-600 dark:text-red-400">
+   749→                  {overdueCount}
+   750→                </span>
+   751→              </CommandItem>
+   752→              <CommandItem
+   753→                value="ala soon due within week filter triage"
+   754→                onSelect={() => filterAla("soon")}
+   755→                disabled={soonCount === 0}
+   756→              >
+   757→                <Timer className="size-4 shrink-0 text-amber-500" aria-hidden="true" />
+   758→                <span>Show ALAs due within 7 days</span>
+   759→                <span className="ml-auto rounded-full bg-amber-500/15 px-1.5 text-[10px] font-bold tabular-nums text-amber-700 dark:text-amber-400">
+   760→                  {soonCount}
+   761→                </span>
+   762→              </CommandItem>
+   763→              <CommandItem
+   764→                value="ala clear filters show everything reset"
+   765→                onSelect={() => filterAla("all")}
+   766→              >
+   767→                <ListFilter className="size-4 shrink-0 text-muted-foreground" aria-hidden="true" />
+   768→                <span>Clear ALA filters — show the full list</span>
+   769→              </CommandItem>
+   770→            </CommandGroup>
+   771→            <CommandSeparator />
+   772→          </>
+   773→        )}
+   774→
+   775→        <CommandGroup heading="Semester partition">
+   776→          <CommandItem
+   777→            value="semester all show every subject"
+   778→            onSelect={() => setSemester("all")}
+   779→            disabled={semester === "all"}
+   780→          >
+   781→            <GraduationCap className="size-4 text-muted-foreground" aria-hidden="true" />
+   782→            Show all semesters
+   783→            {semester === "all" && <Check className="ml-auto size-3.5 text-primary" aria-hidden="true" />}
+   784→          </CommandItem>
+   785→          {Array.from({ length: 8 }, (_, i) => {
+   786→            const sem = String(i + 1);
+   787→            const active = semester === sem;
+   788→            return (
+   789→              <CommandItem
+   790→                key={sem}
+   791→                value={`semester ${sem} show partition`}
+   792→                onSelect={() => setSemester(sem)}
+   793→                disabled={active}
+   794→              >
+   795→                <GraduationCap className={active ? "size-4 text-primary" : "size-4 text-muted-foreground"} aria-hidden="true" />
+   796→                Show Semester {sem} only
+   797→                {active && <Check className="ml-auto size-3.5 text-primary" aria-hidden="true" />}
+   798→              </CommandItem>
+   799→            );
+   800→          })}
+   801→        </CommandGroup>
+   802→        <CommandSeparator />
+   803→
+   804→        <CommandGroup heading="Navigate">
+   805→          {NAV.map((n) => (
+   806→            <CommandItem key={n.tab} onSelect={() => run(() => onNavigate(n.tab))}>
+   807→              <n.icon className="size-4 text-muted-foreground" aria-hidden="true" />
+   808→              {n.label}
+   809→              <CommandShortcut>{n.kbd}</CommandShortcut>
+   810→            </CommandItem>
+   811→          ))}
+   812→        </CommandGroup>
+   813→
+   814→        <CommandGroup heading="Academic record">
+   815→          <CommandItem
+   816→            onSelect={() =>
+   817→              run(() => {
+   818→                onNavigate("dashboard");
+   819→                window.dispatchEvent(new CustomEvent("erp:copy-summary"));
+   820→              })
+   821→            }
+   822→          >
+   823→            <CopyIcon className="size-4 text-muted-foreground" aria-hidden="true" />
+   824→            Copy academic summary as text
+   825→          </CommandItem>
+   826→          <CommandItem onSelect={() => openRetryStory(null)}>
+   827→            <History className="size-4 text-muted-foreground" aria-hidden="true" />
+   828→            Open retry history (grade timelines)
+   829→          </CommandItem>
+   830→          {retryStories.length > 0 && (
+   831→            <CommandGroup heading="Retry stories">
+   832→              {retryStories.map((s) => (
+   833→                <CommandItem
+   834→                  key={s.code}
+   835→                  value={`retry-story ${s.code} ${s.name}`}
+   836→                  onSelect={() => openRetryStory(s.code)}
+   837→                  className="gap-2"
+   838→                >
+   839→                  <History
+   840→                    className={cn("size-4 shrink-0", s.cleared ? "text-emerald-500/70" : "text-amber-500/70")}
+   841→                    aria-hidden="true"
+   842→                  />
+   843→                  <span className="font-mono text-xs">{s.code}</span>
+   844→                  <span className="min-w-0 flex-1 truncate">{s.name}</span>
+   845→                  <span className="shrink-0 text-[10px] tabular-nums text-muted-foreground">
+   846→                    {s.attempts.length} attempt{s.attempts.length === 1 ? "" : "s"}
+   847→                    {s.latestGrade ? ` · latest ${s.latestGrade}` : ""}
+   848→                  </span>
+   849→                  {s.cleared ? (
+   850→                    <Check className="size-3.5 shrink-0 text-emerald-500" aria-hidden="true" />
+   851→                  ) : (
+   852→                    <AlertTriangle className="size-3.5 shrink-0 text-amber-500" aria-hidden="true" />
+   853→                  )}
+   854→                </CommandItem>
+   855→              ))}
+   856→            </CommandGroup>
+   857→          )}
+   858→        </CommandGroup>
+   859→
+   860→        <CommandGroup heading="Actions">
+   861→          <CommandItem onSelect={() => run(onSyncNow)} disabled={syncing}>
+   862→            <RefreshCw className={syncing ? "size-4 animate-spin text-muted-foreground" : "size-4 text-muted-foreground"} aria-hidden="true" />
+   863→            {syncing ? "Syncing…" : "Sync with ERP now"}
+   864→            <CommandShortcut>S</CommandShortcut>
+   865→          </CommandItem>
+   866→          <CommandItem onSelect={newReminder}>
+   867→            <CalendarClock className="size-4 text-muted-foreground" aria-hidden="true" />
+   868→            New personal reminder
+   869→          </CommandItem>
+   870→          <CommandItem onSelect={toggleTheme}>
+   871→            {resolvedTheme === "dark" ? (
+   872→              <Sun className="size-4 text-muted-foreground" aria-hidden="true" />
+   873→            ) : (
+   874→              <Moon className="size-4 text-muted-foreground" aria-hidden="true" />
+   875→            )}
+   876→            Switch to {resolvedTheme === "dark" ? "light" : "dark"} theme
+   877→            <CommandShortcut>T</CommandShortcut>
+   878→          </CommandItem>
+   879→          {demoMode && (
+   880→            <CommandItem
+   881→              onSelect={() =>
+   882→                run(async () => {
+   883→                  try {
+   884→                    const res = await postDemoEvolve();
+   885→                    toast.success(res.message ?? "ERP change simulated and synced");
+   886→                    window.dispatchEvent(new CustomEvent("erp:invalidate-all"));
+   887→                  } catch (e) {
+   888→                    toast.error("Simulation failed", { description: e instanceof Error ? e.message : String(e) });
+   889→                  }
+   890→                })
+   891→              }
+   892→            >
+   893→              <FlaskConical className="size-4 text-amber-500" aria-hidden="true" />
+   894→              Simulate ERP change (demo)
+   895→            </CommandItem>
+   896→          )}
+   897→          <CommandItem
+   898→            value="what-if simulator overall attendance project miss attend classes future"
+   899→            onSelect={() =>
+   900→              run(() => {
+   901→                onNavigate("attendance");
+   902→                window.setTimeout(() => window.dispatchEvent(new CustomEvent("erp:goto-whatif")), 180);
+   903→              })
+   904→            }
+   905→          >
+   906→            <Zap className="size-4 text-amber-500" aria-hidden="true" />
+   907→            Open the what-if simulator
+   908→          </CommandItem>
+   909→          <CommandItem
+   910→            value="export calendar ics whole week deadlines classes download file google apple outlook"
+   911→            onSelect={() => run(() => onOpenSettingsFocus("backup"))}
+   912→          >
+   913→            <CalendarDays className="size-4 shrink-0 text-violet-500" aria-hidden="true" />
+   914→            <span>Export deadlines &amp; classes as a calendar file</span>
+   915→            <span
+   916→              className="ml-auto rounded border border-violet-500/40 bg-violet-500/10 px-1 font-mono text-[10px] font-semibold text-violet-600 dark:text-violet-400"
+   917→              aria-hidden="true"
+   918→            >
+   919→              .ics
+   920→            </span>
+   921→            <span className="sr-only">opens Settings with the export card highlighted</span>
+   922→          </CommandItem>
+   923→          <CommandItem
+   924→            value="print report save pdf attendance"
+   925→            onSelect={() => run(() => window.print())}
+   926→          >
+   927→            <Printer className="size-4 text-muted-foreground" aria-hidden="true" />
+   928→            Print attendance report (PDF)
+   929→            <CommandShortcut>Ctrl+P</CommandShortcut>
+   930→          </CommandItem>
+   931→          <CommandItem onSelect={cycleText} value="text size font accessibility larger smaller">
+   932→            <ALargeSmall className="size-4 text-muted-foreground" aria-hidden="true" />
+   933→            Text size: {TEXT_SIZES.find((s) => s.key === textSize)?.label ?? "Default"}
+   934→            <CommandShortcut>cycle</CommandShortcut>
+   935→          </CommandItem>
+   936→          <CommandItem onSelect={() => run(onShowShortcuts)}>
+   937→            <Keyboard className="size-4 text-muted-foreground" aria-hidden="true" />
+   938→            Keyboard shortcuts
+   939→            <CommandShortcut>?</CommandShortcut>
+   940→          </CommandItem>
+   941→        </CommandGroup>
+   942→
+   943→        <CommandGroup heading="ERP portal · opens in a new tab">
+   944→          {[
+   945→            { href: `${ERP_BASE}/student/dashboard`, label: "Open the ERP dashboard" },
+   946→            { href: `${ERP_BASE}/student/attendance`, label: "Open the ERP attendance page" },
+   947→            { href: `${ERP_BASE}/student/assignment`, label: "Open the ERP assignments page" },
+   948→          ].map((l) => (
+   949→            <CommandItem
+   950→              key={l.href}
+   951→              value={`${l.label} erp portal website ${l.href}`}
+   952→              onSelect={() => run(() => window.open(l.href, "_blank", "noopener,noreferrer"))}
+   953→            >
+   954→              <ExternalLink className="size-4 shrink-0 text-muted-foreground" aria-hidden="true" />
+   955→              {l.label}
+   956→            </CommandItem>
+   957→          ))}
+   958→        </CommandGroup>
+   959→      </CommandList>
+   960→    </CommandDialog>
+   961→  );
+   962→}
+   963→

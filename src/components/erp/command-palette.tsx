@@ -46,14 +46,15 @@ import {
 } from "@/components/ui/command";
 import { cn } from "@/lib/utils";
 import { cycleTextSize, TEXT_SIZES } from "@/lib/text-size";
-import { fetchAlaNotes, fetchAssignments, fetchResults, fetchTimetable, postDemoEvolve, postSync, putSelectedSemester, qk, type RetryFocusHandoff, type SubjectFocusHandoff } from "./api";
+import { fetchAlaNotes, fetchAssignments, fetchResults, fetchReminders, fetchTimetable, postDemoEvolve, postSync, putSelectedSemester, qk, type RetryFocusHandoff, type SubjectFocusHandoff } from "./api";
 import { subjectStories } from "@/lib/results-summary";
 import { buildSingleClassIcs, upcomingClassSlots } from "./ics";
 import { downloadTextFile } from "./download";
 import { rankedCap } from "./palette-search";
-import { DAY_NAMES_SHORT, ERP_BASE } from "./shared";
+import { DAY_NAMES_SHORT, ERP_BASE, typeLabel } from "./shared";
 import { ALA_PRIORITY_META } from "./reminders-tab";
 import type { SettingsFocus } from "./settings-tab";
+import { dueFirstReminderRows, duePersonalCount } from "./use-app-badge";
 import type { AttendanceStatus, ResultsResponse, SubjectView } from "./types";
 import { useTextSize } from "./text-size-card";
 
@@ -288,6 +289,45 @@ export function CommandPalette({
       onNavigate("reminders");
       window.setTimeout(() => {
         window.dispatchEvent(new CustomEvent("erp:focus-ala", { detail: title }));
+      }, 150);
+    });
+  };
+
+  /* r104 — "Your reminders" group: the r102 badge's second half finally has
+     an in-app surface. Joins the SAME qk.reminders("personal", false) cache
+     the page badge polls (60s there; a stale cache refetches once here),
+     orders through the pinned dueFirstReminderRows pure (due-first), and
+     caps via rankedCap like every other group. Selecting a row opens the
+     Reminders tab with the Personal scope pre-applied (erp:filter-reminders
+     → setFilter — persisted like a manual toggle). */
+  const personalRemindersQ = useQuery({
+    queryKey: qk.reminders("personal", false),
+    queryFn: () => fetchReminders("personal", false),
+    staleTime: 30_000,
+  });
+  const allReminderRows = React.useMemo(
+    () => dueFirstReminderRows(personalRemindersQ.data ?? [], nowMs),
+    [personalRemindersQ.data, nowMs]
+  );
+  const reminderItems = React.useMemo(
+    () =>
+      rankedCap(
+        allReminderRows,
+        (r) => `${r.title} ${r.subjectCode ?? ""} personal reminder due reminder`,
+        8,
+        paletteSearch
+      ),
+    [allReminderRows, paletteSearch]
+  );
+  const dueReminderCount = React.useMemo(
+    () => duePersonalCount(personalRemindersQ.data ?? [], nowMs),
+    [personalRemindersQ.data, nowMs]
+  );
+  const openReminders = () => {
+    run(() => {
+      onNavigate("reminders");
+      window.setTimeout(() => {
+        window.dispatchEvent(new CustomEvent("erp:filter-reminders", { detail: "personal" }));
       }, 150);
     });
   };
@@ -577,10 +617,74 @@ export function CommandPalette({
           </>
         )}
 
+        {reminderItems.length > 0 && (
+          <>
+            <CommandGroup
+              heading={`Your reminders · ${allReminderRows.length} active${
+                dueReminderCount > 0 ? ` · ${dueReminderCount} due` : ""
+              }`}
+            >
+              {reminderItems.map((r) => {
+                const due = new Date(r.dueAt).getTime();
+                const overdue = due < nowMs;
+                const soon = !overdue && due - nowMs <= 24 * 3_600_000;
+                return (
+                  <CommandItem
+                    key={r.id}
+                    value={`${r.title} ${r.subjectCode ?? ""} personal reminder due reminder`}
+                    onSelect={openReminders}
+                  >
+                    <span
+                      className={cn(
+                        "size-2 shrink-0 rounded-full",
+                        overdue ? "bg-red-500" : soon ? "bg-amber-500" : "bg-emerald-500"
+                      )}
+                      aria-hidden="true"
+                    />
+                    <span className="truncate font-medium">{r.title}</span>
+                    <span className="truncate text-xs text-muted-foreground">
+                      {r.subjectCode ?? typeLabel(r.type)}
+                    </span>
+                    <span
+                      className={cn(
+                        "ml-auto whitespace-nowrap text-xs font-medium tabular-nums",
+                        overdue
+                          ? "text-red-600 dark:text-red-400"
+                          : soon
+                            ? "text-amber-600 dark:text-amber-400"
+                            : "text-muted-foreground"
+                      )}
+                    >
+                      {overdue
+                        ? `${formatDistanceToNowStrict(new Date(r.dueAt))} overdue`
+                        : `in ${formatDistanceToNowStrict(new Date(r.dueAt))}`}
+                    </span>
+                  </CommandItem>
+                );
+              })}
+              {allReminderRows.length > reminderItems.length && (
+                <CommandItem
+                  value="open all personal reminders full list"
+                  onSelect={openReminders}
+                  className="text-muted-foreground"
+                >
+                  <ArrowRight className="size-4 shrink-0" aria-hidden="true" />
+                  <span>
+                    Open all <b className="font-semibold tabular-nums text-foreground">{allReminderRows.length}</b>{" "}
+                    active reminders
+                  </span>
+                  <span className="ml-auto text-xs text-muted-foreground">Reminders tab</span>
+                </CommandItem>
+              )}
+            </CommandGroup>
+            <CommandSeparator />
+          </>
+        )}
+
         {flaggedItems.length > 0 && (
           <>
-            <CommandGroup heading={`Your flagged ALAs · ${flaggedItems.length}`}>
-              {flaggedItems.slice(0, 3).map(({ a, priority, note }) => {
+            <CommandGroup heading={`Your flagged ALAs · ${flaggedAll.length}`}>
+              {flaggedItems.map(({ a, priority, note }) => {
                 const due = new Date(a.dueAt).getTime();
                 const overdue = due < nowMs;
                 const soon = !overdue && due - nowMs <= 7 * 86_400_000;
