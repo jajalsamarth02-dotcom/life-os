@@ -225,11 +225,16 @@ export function chipUrgency(st: TodayLiveClass | null): ChipUrgency | null {
  *  The today-card chip thereby keeps speaking the five-state language
  *  until the sync takes over, instead of vanishing the instant the class
  *  ends — the same honest gap the timetable rows and week-grid chips have
- *  bridged since r75/r76. Pure — pinned in tests. */
+ *  bridged since r75/r76. r84: also returns drainPct — the same depleting
+ *  amber math as the timetable's justEndedDrainPct (r81), computed inline
+ *  over the SAME pinned constant (today-card cannot import timetable-card
+ *  without cycling; the test suite pins the two against each other), so
+ *  the chip's bridge visibly burns down while the sync is pending. Pure —
+ *  pinned in tests. */
 export function justEndedChip(
   todayClasses: TodayClassBrief[] | null | undefined,
   now: number
-): { cls: TodayClassBrief; sinceMin: number } | null {
+): { cls: TodayClassBrief; sinceMin: number; drainPct: number } | null {
   if (!todayClasses || todayClasses.length === 0) return null;
   /* Precedence: an ongoing/upcoming state is the day's voice — the chip
      must not say "just ended" while a later class still speaks. */
@@ -239,7 +244,9 @@ export function justEndedChip(
   const sinceMin = nowMin - lastEnd;
   if (sinceMin < 0 || sinceMin > JUST_ENDED_WINDOW_MIN) return null;
   const cls = todayClasses.find((c) => c.endMin === lastEnd) as TodayClassBrief;
-  return { cls, sinceMin };
+  /* 100 at the end minute → 0 at the window boundary (inclusive). */
+  const drainPct = ((JUST_ENDED_WINDOW_MIN - sinceMin) / JUST_ENDED_WINDOW_MIN) * 100;
+  return { cls, sinceMin, drainPct };
 }
 
 /** Build the exact SMS text shown in the bubble (and used for copy/share). */
@@ -675,7 +682,7 @@ export function TodayCard(props: TodaySmsInput & { className?: string }) {
             <button
               type="button"
               onClick={focusTimetable}
-              className="inline-flex cursor-pointer items-center gap-1.5 rounded-full border border-amber-500/40 bg-amber-500/10 px-2.5 py-1 text-[11px] font-medium tabular-nums text-amber-700 transition-all hover:brightness-105 hover:shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-violet-500/40 active:scale-[0.98] print:hidden dark:text-amber-300"
+              className="relative inline-flex cursor-pointer items-center gap-1.5 overflow-hidden rounded-full border border-amber-500/40 bg-amber-500/10 px-2.5 py-1 text-[11px] font-medium tabular-nums text-amber-700 transition-all hover:brightness-105 hover:shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-violet-500/40 active:scale-[0.98] print:hidden dark:text-amber-300"
               aria-label="Class just ended — jump to today's schedule in the timetable"
               title="The class finished — the next auto-sync (within 15 minutes) records it. Click to jump to the schedule."
             >
@@ -687,6 +694,18 @@ export function TodayCard(props: TodaySmsInput & { className?: string }) {
                 <span className="relative inline-flex size-1.5 rounded-full bg-amber-500" />
               </span>
               Just ended {justEnded.cls.subjectCode} · {humanizeMins(justEnded.sinceMin)} ago
+              {/* r84: the bridge drains visibly — the r81 depleting amber
+                  bar, chip edition (aria-hidden decorative; the honest
+                  anchor stays the tooltip's worst-case window). */}
+              <span
+                aria-hidden="true"
+                className="absolute inset-x-1.5 bottom-0 h-0.5 overflow-hidden rounded-full bg-amber-500/15"
+              >
+                <span
+                  className="block h-full rounded-full bg-gradient-to-r from-amber-500/50 to-amber-500 transition-[width] duration-1000 ease-linear"
+                  style={{ width: `${justEnded.drainPct}%` }}
+                />
+              </span>
             </button>
           )}
           <span
