@@ -217,6 +217,31 @@ export function chipUrgency(st: TodayLiveClass | null): ChipUrgency | null {
   return st.mins <= IMMINENT_MIN ? "imminent" : "soon";
 }
 
+/** The post-class bridge, chip edition (r83): when todayLiveClass has run
+ *  dry — no ongoing, nothing upcoming — but the LAST class ended within
+ *  JUST_ENDED_WINDOW_MIN, the day isn't "done" yet: the auto-sync hasn't
+ *  recorded the class. Returns the just-ended class + minutes since its
+ *  end, or null (a live state still speaks / bridge closed / no data).
+ *  The today-card chip thereby keeps speaking the five-state language
+ *  until the sync takes over, instead of vanishing the instant the class
+ *  ends — the same honest gap the timetable rows and week-grid chips have
+ *  bridged since r75/r76. Pure — pinned in tests. */
+export function justEndedChip(
+  todayClasses: TodayClassBrief[] | null | undefined,
+  now: number
+): { cls: TodayClassBrief; sinceMin: number } | null {
+  if (!todayClasses || todayClasses.length === 0) return null;
+  /* Precedence: an ongoing/upcoming state is the day's voice — the chip
+     must not say "just ended" while a later class still speaks. */
+  if (todayLiveClass(todayClasses, now)) return null;
+  const nowMin = istNow(now).min;
+  const lastEnd = Math.max(...todayClasses.map((c) => c.endMin));
+  const sinceMin = nowMin - lastEnd;
+  if (sinceMin < 0 || sinceMin > JUST_ENDED_WINDOW_MIN) return null;
+  const cls = todayClasses.find((c) => c.endMin === lastEnd) as TodayClassBrief;
+  return { cls, sinceMin };
+}
+
 /** Build the exact SMS text shown in the bubble (and used for copy/share). */
 export function buildTodaySms(input: TodaySmsInput): string {
   const p = istParts(input.now);
@@ -464,6 +489,10 @@ export function TodayCard(props: TodaySmsInput & { className?: string }) {
      ≤10-min IMMINENT escalation (amber + fast pulse — get moving). */
   const liveClass = useMemo(() => todayChipClass(todayClasses, now), [todayClasses, now]);
   const urgency = chipUrgency(liveClass);
+  /* r83: the post-class bridge — while the auto-sync hasn't recorded the
+     last class, the chip keeps speaking (amber, elapsed clock) instead of
+     vanishing; the deep-link lands on the timetable row's drain bar. */
+  const justEnded = useMemo(() => justEndedChip(todayClasses, now), [todayClasses, now]);
 
   /* Chip click → deep-link to the timetable card. Event-based (same pattern
      as the palette's erp:copy-summary commands): TodayCard stays prop-light
@@ -640,6 +669,24 @@ export function TodayCard(props: TodaySmsInput & { className?: string }) {
                   : urgency === "imminent"
                     ? `${liveClass.cls.subjectCode} starts in ${humanizeMins(liveClass.mins)}`
                     : `Next ${liveClass.cls.subjectCode} ${hhmmFromMin(liveClass.cls.startMin)} · in ${humanizeMins(liveClass.mins)}`}
+            </button>
+          )}
+          {!liveClass && justEnded && (
+            <button
+              type="button"
+              onClick={focusTimetable}
+              className="inline-flex cursor-pointer items-center gap-1.5 rounded-full border border-amber-500/40 bg-amber-500/10 px-2.5 py-1 text-[11px] font-medium tabular-nums text-amber-700 transition-all hover:brightness-105 hover:shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-violet-500/40 active:scale-[0.98] print:hidden dark:text-amber-300"
+              aria-label="Class just ended — jump to today's schedule in the timetable"
+              title="The class finished — the next auto-sync (within 15 minutes) records it. Click to jump to the schedule."
+            >
+              <span className="relative flex size-1.5" aria-hidden="true">
+                <span
+                  className="absolute inline-flex h-full w-full animate-ping rounded-full bg-amber-500 opacity-60"
+                  style={{ animationDuration: "2.2s" }}
+                />
+                <span className="relative inline-flex size-1.5 rounded-full bg-amber-500" />
+              </span>
+              Just ended {justEnded.cls.subjectCode} · {humanizeMins(justEnded.sinceMin)} ago
             </button>
           )}
           <span

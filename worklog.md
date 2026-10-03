@@ -2880,3 +2880,24 @@ Unresolved issues / risks & next-phase priorities:
 3. Feature residuals: dashboard strip >60 humanize case live-unverified (format pinned); SMS bubble raw ASCII deliberate; drawer retry-story namespace split unchanged; TimetableCard does NOT receive nextScheduledSyncAt (a future "next sync ~13:07" upgrade could replace the worst-case drain with the real instant — multi-file).
 4. QA notes carried: aria-labels state-dependent (the today-card chip aria is STILL "Ongoing class" during wrapping — only the visible text/class flips; don't hunt "wrapping" by aria until 15:15 confirms); header chip is a span; progressbar filter by "Class progress" (exactly 2); [class*=] for `/` tokens; old-format tests → exit code; tsc scoped to src/; frozen-test contract updates need an explicit comment (r73 precedent).
 5. Keeper cron 430680 alive; worklog protocol unchanged.
+
+---
+Task ID: 83
+Agent: Super Z (dev cron 430711)
+Task: Round 83 — the today-card chip survives class end: new justEndedChip bridge (amber "Just ended RWM · N min ago") keeps the chip speaking until the sync records the class.
+
+Work Log:
+1. STATUS: no parallel entries above 82. RSS AT START: 1996MB (2 under the line — strict lean: 2 loads, single file). Clock 12:15–12:25 IST, 45→36 min left in RWM.
+2. COHERENCE GAP: when the last class ends, todayLiveClass returns null and the today-card chip VANISHED instantly — while the record was still pending for up to 15 min (the same honest gap the timetable rows/chips have bridged since r75/r76). The day arc had a silent hole: class ends → chip disappears → (15 min later) sync records.
+3. FEATURE — justEndedChip(todayClasses, now) (today-card.tsx, exported PURE): when no live state speaks (todayLiveClass null — ongoing/upcoming take precedence) and the LAST class's endMin is within [0, JUST_ENDED_WINDOW_MIN], returns {cls, sinceMin}; null otherwise. The chip render gains a sibling branch (!liveClass && justEnded): amber chip, same geometry as the live chip (rounded-full, px-2.5, text-[11px]), slow amber ping, text "Just ended RWM · 7 min ago" (humanizeMins — unified language), aria "Class just ended — jump to today's schedule in the timetable", tooltip keeps the r75 honesty anchor ("next auto-sync within 15 minutes"), click → focusTimetable (lands on the row with the r81 drain bar — surfaces agree).
+4. TESTS: scripts/test-today-r83.ts — 12 checks: sinceMin 0/7/15 inclusive; 16/60 null; ongoing-precedence; upcoming-precedence (two-class day: bridge after the EARLY class does NOT fire while a later class speaks); last-end-governs on multi-class days; empty/undefined data null. Suite now 23 test files ALL GREEN by EXIT CODE. tsc src/ ZERO errors.
+5. LIVE QA (2 loads, ~12:24 IST): exactly 1 chip — emerald "In class RWM · ends 13:00" (aria "Ongoing class —"); justEndedPresent: false (honest null while ongoing — the bridge chip goes live 13:00 IST = 15:30 +08); classBars 64/64 (76.8/120 min ✓ consistent). Console+errors cleared → reload → ZERO fresh errors. Screenshot /tmp/qa-r83-midclass.png.
+6. End state PRISTINE: notify path untouched, no sync clicks, display-only. ZERO sends ever.
+7. RSS AFTER ROUND: 1990MB MEASURED (−6 in-round from 1996; handover-to-handover 1977 → 1990 = +13 — hovering a few MB under the 2.0GB line).
+
+Unresolved issues / risks & next-phase priorities:
+1. ⚠️⚠️ MEMORY: 1990MB — too close to the line. **15:00 round MUST open with an RSS measure; if ≥2.0GB, run the strict net-negative pattern (single file, ≤2 page loads, same-page evals)**. Keeper-side restart proposal STILL UNAPPROVED — not added silently.
+2. TIME WINDOW (all +08, final): **15:15 round (12:45 IST) → THE BIG FLIP: all FIVE surfaces amber (header chip + today-card chip "Wrapping up RWM · ends 13:00" + banner badge "15m left" + row badge "wrapping up" + week-grid chip) — the definitive five-state screenshot**; **15:30–15:45 (13:00–13:15 IST) → just-ended live on FOUR surfaces now: timetable rows (r75 badge + r81 drain bar), week-grid chips (r76 + r81 bar), AND the new today-card bridge chip (r83, "Just ended RWM · N min ago") — screenshot all**; **15:45+ → post-sync honest QA: the bridge chip must VANISH once the sync records the class (verify the disappearance, don't assume attendance changed)**.
+3. Feature residuals: dashboard strip >60 humanize case live-unverified (format pinned); SMS bubble raw ASCII deliberate (justEndedChip deliberately does NOT feed the SMS — CLASSES line already says "done (1 class)" honestly); drawer retry-story namespace split unchanged; TimetableCard does NOT receive nextScheduledSyncAt (future "next sync ~13:07" upgrade).
+4. QA notes carried: aria-labels state-dependent; header chip is a span; progressbar filter by "Class progress" (exactly 2); [class*=] for `/` tokens; old-format tests → exit code (frozen-contract updates need a comment — r73 precedent); tsc scoped to src/.
+5. Keeper cron 430680 alive; worklog protocol unchanged.
