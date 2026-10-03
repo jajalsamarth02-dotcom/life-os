@@ -48,6 +48,35 @@ export function useNow(intervalMs = 30_000): number {
   return now;
 }
 
+const IST_DAY_INDEX: Record<string, number> = {
+  Sun: 0, Mon: 1, Tue: 2, Wed: 3, Thu: 4, Fri: 5, Sat: 6,
+};
+
+/** The student's clock is IST (Asia/Kolkata) no matter what timezone the
+ *  DEVICE runs in — a parent checking from abroad or a UTC-server browser
+ *  must still see the same "ongoing / next / done" states as the student
+ *  in India. Returns the IST weekday index (0=Sun) and minutes-since-IST-
+ *  midnight for one instant. Pure — tests pin UTC instants against it.
+ *  Used by every surface that renders schedule states (timetable card,
+ *  week plan); the today-card's istParts is the display cousin of this. */
+export function istNow(now: number): { day: number; min: number } {
+  const p = new Intl.DateTimeFormat("en-GB", {
+    timeZone: "Asia/Kolkata",
+    weekday: "short",
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: false,
+  }).formatToParts(new Date(now));
+  const get = (t: string) => p.find((x) => x.type === t)?.value ?? "";
+  // Some ICU builds render midnight as "24" — fold it back to 00:00.
+  const h = Number(get("hour")) % 24;
+  const day = IST_DAY_INDEX[get("weekday")];
+  return {
+    day: Number.isFinite(day) ? day : new Date(now).getDay(),
+    min: h * 60 + Number(get("minute")),
+  };
+}
+
 /* ------------------------------------------------------------------ */
 /* Timetable conflict helper (client-side preview)                     */
 /* ------------------------------------------------------------------ */

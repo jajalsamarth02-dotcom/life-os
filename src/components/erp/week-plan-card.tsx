@@ -41,7 +41,7 @@ import { classesToReachTarget } from "@/lib/attendance";
 import { applyBatchPicks } from "@/lib/batch-picks";
 import { fetchTimetable, qk } from "./api";
 import { AnimatedNumber } from "./trend-chart";
-import { hueColors, SkipPips } from "./shared";
+import { hueColors, istNow, SkipPips } from "./shared";
 import type { SubjectView, TimetableSlotRow } from "./types";
 
 const DAY_LETTERS = ["M", "T", "W", "T", "F", "S", "S"] as const;
@@ -93,8 +93,9 @@ export function WeekPlanCard({
   const slots = tt?.slots;
   const picks = tt?.picks ?? {};
   const now = Date.now();
-  const nowDay = new Date(now).getDay();
-  const nowMin = new Date(now).getHours() * 60 + new Date(now).getMinutes();
+  /* IST, not the device clock — same shared helper as the timetable card,
+     so every schedule surface agrees on "today" on ANY device timezone. */
+  const { day: nowDay, min: nowMin } = istNow(now);
   const nowOff = weekOffset(nowDay);
 
   const plan = useMemo(() => {

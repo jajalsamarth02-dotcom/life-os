@@ -2485,3 +2485,28 @@ Unresolved issues / risks & next-phase priorities:
 5. Dead/thin seeds unchanged: /student/exam-routine ERP-500 (no probe before Nov 2026); /student/assessment redirect (covered).
 6. QA notes carried + NEW: shadcn CardTitle renders a div — match cards via [data-slot=card-title], NOT h3 (h3 only exists on hand-rolled headers like TimetableCard's; a `.find()` on the wrong selector silently skips cards and yields misleading "not found").
 7. Keeper cron 430680 alive; worklog protocol unchanged.
+
+---
+Task ID: 66
+Agent: Z.ai Code (main orchestrator)
+Task: ONE IST clock for every schedule surface (timetable card + week plan off the device clock) + full-week today column in the emerald live language (bug-fix round, RSS-frugal)
+
+Work Log (Round 66 — 3 Oct, 10:30–10:42 +08):
+- No parallel-loop entries after Task 65 → clean round. Server 200 (pid 29666). RSS at round start: 1,935,736KB ≈ 1890MB (between-round churn +44MB from Round 65's 1846) — above the 1.8GB line → single-concern frugal round chosen.
+
+Completed modifications / verified:
+1. BUG FIX — device-clock leak on schedule surfaces: timetable-card.tsx AND week-plan-card.tsx computed nowDay/nowMin with new Date().getDay()/getHours() (device timezone) while today-card used IST — on ANY non-IST device (parent abroad, UTC browser) the two families of surfaces DISAGREED and "ongoing/next/done" states lied (documented in QA notes since Round 63 as "pre-existing floating-IST pattern"). New shared pure istNow(now) in shared.tsx ({day, min} on Asia/Kolkata, ICU "24:00" midnight fold, weekday fallback) — both cards now derive from it, so every schedule surface agrees on "today" on every device. LIVE PROOF in the UTC headless browser: the RWM badge that read "starts in 532 min" (UTC mix) now reads "starts in 178 min" — the honest 11:00 − 08:02 IST distance.
+2. STYLE — full-week today column adopts the emerald live language (consistent with Round 64's Saturday badge): emerald border/bg tint + pulse dot + "Today — this column follows the IST clock" tooltip (was violet/primary, which stays reserved for the deep-link spotlight language). Week-plan's existing today ring untouched (already its own language).
+3. TESTS: scripts/test-today-r66.ts — 10/10 PASS (real 08:00 IST Saturday state; +5:30 day rollovers 23:59 Sat → 00:00 Sun → Mon; ICU midnight fold 00:07 IST → min 7 never 1447; hhmm reconstruction agreement with today-card's clock; consequence cases: 180 min to class at 08:00 IST — first draft said 210, MY arithmetic error again, helper was right, expectation fixed per the Task-61 calculator-reflex lesson; 12:30 UTC = 18:00 IST → class honestly done where old device-clock code said "ongoing" — a LIE). Regressions: r65 41, r64 20, r62 37, results-r60 18, r59 17, r58 27, results-features 24, parse-results 70, batch-picks 39, milestones-r61 24 → 327 green total.
+4. tsc ONCE: src/ ZERO errors.
+5. BROWSER QA ALL GREEN: clock label "starts in 178 min" + istCorrect=true asserted; FULL WEEK expanded → 7 columns, SAT column emerald + pulse dot + tooltip asserted; stakes line + Saturday badge intact (no regression from the clock change); dark /tmp/qa-r66-week-dark.png + light /tmp/qa-r66-week.png — SAT column emerald in both; mobile-390 docW=390 hScroll=false; console 0 errors after clear+reload.
+6. End state PRISTINE: changeEvents(1h)=0, notifications(1h)=0, scheduled syncs success/0-changes (02:21Z, 02:05Z, 01:49Z); zero WhatsApp sends (display-only; the clock fix changes label arithmetic only; no notify path touched).
+7. RSS AFTER ROUND: 1863MB (started 1890, −27MB net despite 3 file recompiles — shared.tsx is imported everywhere so its HMR touches many modules, yet still net-negative this round).
+
+Unresolved issues / risks & next-phase priorities:
+1. ⚠️ MEMORY STILL #1: 1863MB vs OOM ~2.2GB (~360MB headroom); hovers around the 1.8GB line, drifts down on frugal rounds and up between them. STANDING USER PROPOSAL (keeper-side restart at RSS > 1.8GB, double-fork subshell form) still needs explicit go-ahead — NOT added silently.
+2. Milestone watch: RWM 11:00–13:00 IST is the crossing class (2/3 → 3/4 = 75%); chip goes live ~09:30 IST; MilestoneCelebration fires once if attended. After 13:00 IST: honest QA of the moment if attended (no faking). All stakes surfaces now IST-correct on every device.
+3. Feature residuals (non-urgent): progress-bar visual QA at the next real ongoing class (now IST-correct too); timetable row → subject drawer deep-link; today-card istParts could now delegate to istNow (cosmetic dedup — istParts returns display strings, left as is).
+4. Dead/thin seeds unchanged: /student/exam-routine ERP-500 (no probe before Nov 2026); /student/assessment redirect (covered).
+5. QA notes carried + NEW: the UTC headless browser is now a FEATURE for clock QA — any IST-dependent label can be asserted against the known offset (IST = UTC+5:30); test-arithmetic reflex re-verified (1 more expectation slip caught before shipping: 11:00−08:00=180, not 210).
+6. Keeper cron 430680 alive; worklog protocol unchanged.

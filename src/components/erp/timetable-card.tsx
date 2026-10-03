@@ -45,7 +45,7 @@ import { cn } from "@/lib/utils";
 import { downloadTimetableIcs } from "@/lib/ics";
 import { applyBatchPicks, parallelCells } from "@/lib/batch-picks";
 import { createSlot, deleteSlot, fetchTimetable, setBatchPick, qk, ApiError, type SlotConflict } from "./api";
-import { useNow } from "./shared";
+import { istNow, useNow } from "./shared";
 import type { AppMode, AttendanceView, SubjectView, TimetableSlotRow } from "./types";
 
 const DAY_NAMES = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
@@ -630,8 +630,9 @@ export function TimetableCard({
   target?: number;
 }) {
   const now = useNow(30_000);
-  const nowDay = new Date(now).getDay();
-  const nowMin = new Date(now).getHours() * 60 + new Date(now).getMinutes();
+  /* IST, not the device clock — see istNow. A UTC browser must not turn
+     the student's 11:00 class into "starts in 532 min". */
+  const { day: nowDay, min: nowMin } = istNow(now);
   const [weekOpen, setWeekOpen] = useState(false);
 
   /* Spotlight state: armed by focusSignal increments, self-disarming after
@@ -925,15 +926,37 @@ export function TimetableCard({
                   <div className="mt-2 grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-6">
                     {WEEK_ORDER.map((d) => {
                       const daySlots = slots.filter((s) => s.dayOfWeek === d);
+                      const isToday = d === nowDay;
                       return (
                         <div
                           key={d}
                           className={cn(
-                            "rounded-xl border p-2",
-                            d === nowDay ? "border-primary/40 bg-primary/[0.04]" : "border-border/50"
+                            "rounded-xl border p-2 transition-colors",
+                            isToday
+                              ? "border-emerald-500/40 bg-emerald-500/[0.05]"
+                              : "border-border/50"
                           )}
                         >
-                          <p className={cn("mb-1.5 text-[11px] font-semibold uppercase tracking-wide", d === nowDay ? "text-primary" : "text-muted-foreground")}>
+                          <p
+                            className={cn(
+                              "mb-1.5 flex items-center gap-1 text-[11px] font-semibold uppercase tracking-wide",
+                              isToday ? "text-emerald-700 dark:text-emerald-400" : "text-muted-foreground"
+                            )}
+                            title={
+                              isToday
+                                ? "Today — this column follows the IST clock"
+                                : undefined
+                            }
+                          >
+                            {isToday && (
+                              <span className="relative flex size-1.5" aria-hidden="true">
+                                <span
+                                  className="absolute inline-flex h-full w-full animate-ping rounded-full bg-emerald-500 opacity-60"
+                                  style={{ animationDuration: "2.2s" }}
+                                />
+                                <span className="relative inline-flex size-1.5 rounded-full bg-emerald-500" />
+                              </span>
+                            )}
                             {DAY_NAMES[d].slice(0, 3)}
                           </p>
                           <div className="space-y-1.5">
