@@ -2563,3 +2563,28 @@ Unresolved issues / risks & next-phase priorities:
 4. Dead/thin seeds unchanged: /student/exam-routine ERP-500 (no probe before Nov 2026); /student/assessment redirect (covered).
 5. QA notes: console inspection MUST use `console --clear` + `errors --clear` then fresh reload — bare buffer carries stale entries across rounds and misleads (nearly cost a false bug report this round). Card-scoped assertions + IIFE-wrapped evals unchanged.
 6. Keeper cron 430680 alive; worklog protocol unchanged.
+
+---
+Task ID: 69
+Agent: Z.ai Code (main orchestrator)
+Task: milestone "classes-to-target" line deep-links to the timetable spotlight (the decision → the class, one click) — RSS-frugal round
+
+Work Log (Round 69 — 3 Oct, 11:15–11:27 +08):
+- Parallel protocol: only my Task 68 present → clean round. Server 200. RSS at round start: 1994MB (−15 between-round; still ~150MB above the line) → frugal round (1 source file, 0 new test files, ~9 page loads).
+
+Completed modifications / verified:
+1. FEATURE — the MilestonesStrip "classes-to-target" status line (data-testid=classes-to-target) is now a BUTTON deep-linking to the timetable card via the SAME erp:focus-timetable event the Today chip + NextUpStrip chip use. The line that says "1 attended class reaches your 75% target" now hands you the class: click → scrollIntoView + violet spotlight on the card + the exact row. aria-label adapts: not-at-target → "Show today's schedule — the class that moves you toward your attendance target"; at-target keeps the fact and still jumps (maintenance view). Tooltip gains "— click to open today's schedule".
+2. STYLE — the amber (or emerald at-target) fact styling is KEPT as the resting language; hover adds the violet jump family (hover:bg-violet-500/[0.06] + hover:text-violet-700 dark:hover:text-violet-400 + focus-visible ring + cursor-pointer). Discoverability detail: an ArrowRight icon rests at opacity-0 and fades to 60% on hover/focus (group + group-hover/group-focus-visible, transition 150ms) — the resting line is byte-identical to the pre-deep-link fact, the affordance only exists when the pointer asks for it.
+3. No new pure function this round → no new test file (344 remains the bar; interaction covered by live click QA). Regressions after the edit: milestones-r61 24/24, r68 8/8, full suite previously 344 green.
+4. tsc TWICE (honesty: first pass caught my own JSX structure break — the button opening tag lost its closing `>` when replacing the <p>; fixed, then clean): src/ ZERO errors.
+5. BROWSER QA ALL GREEN: line is a button (tagName BUTTON) with correct aria-label + arrow svg present; text intact "1 attended class reaches your 75% target (66.67% now, assuming every class is attended)"; real click → spotlit=true inView=true /tmp/qa-r69-milestone-link.png (violet ring + row marker + stakes line + honest "starts in 134 min"); dark /tmp/qa-r69-dark.png (amber full-width button inside the milestones strip, chips intact); mobile-390 docW=390 hScroll=false button present /tmp/qa-r69-mobile.png. Console: fresh-clear protocol (`console --clear` + `errors --clear` + reload) → ZERO page errors, ZERO console errors.
+6. End state PRISTINE: newest notification still 22:37 UTC (06:07 IST, pre-round) — zero sends, zero notify-path touches (the deep-link is a local event + scroll).
+7. RSS AFTER ROUND: 1989MB (−5 from 1994 start — net-negative round, smallest touch count yet: ONE source file).
+
+Unresolved issues / risks & next-phase priorities:
+1. ⚠️⚠️ MEMORY CRITICAL — 1989MB, ~190MB to the ~2.2GB OOM line, four rounds hovering 1900–2010. The STANDING USER PROPOSAL (keeper-side restart when RSS > 1.8GB, double-fork subshell) is URGENT and still needs explicit go-ahead — NOT added silently. This round proved one-file rounds can be net-negative, but the baseline keeps ratcheting between rounds.
+2. Milestone watch: RWM 11:00–13:00 IST TODAY — at QA time "starts in 134 min"; the NEW milestone line and the timetable stakes line now both name the same decision AND both jump to the class. If a round fires 11:00–13:00: FIRST live visual QA of the ongoing progress bar. After 13:00: milestone celebration honest QA if attended.
+3. Feature residuals: "Open retry history" → specific story chip spotlight (the generic open+scroll already works; per-subject highlight would need the event to carry a code — small, unstarted); today-card istParts → istNow dedup (cosmetic).
+4. Dead/thin seeds unchanged: /student/exam-routine ERP-500 (no probe before Nov 2026); /student/assessment redirect (covered).
+5. QA notes carried + one more: replacing a <p> with a <button> in JSX — the opening tag's `>` is easy to lose when the last attribute is a multiline {cn(...)}} — tsc catches it immediately (JSX2657), fix before QA.
+6. Keeper cron 430680 alive; worklog protocol unchanged.

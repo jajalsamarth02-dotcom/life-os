@@ -3,7 +3,7 @@
 import * as React from "react";
 import { AnimatePresence, motion } from "framer-motion";
 import { format } from "date-fns";
-import { CalendarCheck, Flame, Target as TargetIcon, Trophy, X, Zap } from "lucide-react";
+import { ArrowRight, CalendarCheck, Flame, Target as TargetIcon, Trophy, X, Zap } from "lucide-react";
 import { toast } from "sonner";
 import { Card, CardContent } from "@/components/ui/card";
 import { cn } from "@/lib/utils";
@@ -224,21 +224,32 @@ export function MilestonesStrip({
           </div>
         </div>
 
-        {/* Distance-to-target status line — honest, assumes every future class attended */}
+        {/* Distance-to-target status line — honest, assumes every future class attended.
+            Clickable: dispatches the SAME erp:focus-timetable deep-link the Today chip
+            uses, so the line that says "attend 1 more class" scrolls to and spotlights
+            the exact class on today's schedule (violet hover = the jump family). */}
         {toTarget != null && (
-          <p
-            className={cn(
-              "flex items-center gap-1.5 rounded-lg border px-3 py-1.5 text-[11px] font-medium",
-              atTarget
-                ? "border-emerald-500/30 bg-emerald-500/[0.07] text-emerald-700 dark:text-emerald-300"
-                : "border-amber-500/30 bg-amber-500/[0.07] text-amber-700 dark:text-amber-300"
-            )}
+          <button
+            type="button"
+            onClick={() => window.dispatchEvent(new CustomEvent("erp:focus-timetable"))}
             data-testid="classes-to-target"
+            aria-label={
+              atTarget
+                ? `Show today's schedule — attendance ${overallPct.toFixed(2)}% is at or above your ${target}% target`
+                : "Show today's schedule — the class that moves you toward your attendance target"
+            }
             title={
               atTarget
-                ? `Overall attendance ${overallPct.toFixed(2)}% is at or above your ${target}% target`
-                : `Overall ${overallPct.toFixed(2)}% now — attending ${toTarget === 1 ? "one class" : `${toTarget} classes in a row`} lifts the overall to ${target}% or above`
+                ? `Overall attendance ${overallPct.toFixed(2)}% is at or above your ${target}% target — click to open today's schedule`
+                : `Overall ${overallPct.toFixed(2)}% now — attending ${toTarget === 1 ? "one class" : `${toTarget} classes in a row`} lifts the overall to ${target}% or above — click to open today's schedule`
             }
+            className={cn(
+              "group flex w-full cursor-pointer items-center gap-1.5 rounded-lg border px-3 py-1.5 text-left text-[11px] font-medium transition-colors",
+              "hover:bg-violet-500/[0.06] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+              atTarget
+                ? "border-emerald-500/30 bg-emerald-500/[0.07] text-emerald-700 hover:text-violet-700 dark:text-emerald-300 dark:hover:text-violet-400"
+                : "border-amber-500/30 bg-amber-500/[0.07] text-amber-700 hover:text-violet-700 dark:text-amber-300 dark:hover:text-violet-400"
+            )}
           >
             {atTarget ? (
               <Trophy className="size-3.5 shrink-0" aria-hidden="true" />
@@ -257,7 +268,13 @@ export function MilestonesStrip({
                 </span>
               </span>
             )}
-          </p>
+            {/* Jump affordance: the arrow only exists visually on hover/focus —
+               keeps the resting line identical to the pre-deep-link fact. */}
+            <ArrowRight
+              className="ml-auto size-3.5 shrink-0 opacity-0 transition-opacity duration-150 group-hover:opacity-60 group-focus-visible:opacity-60"
+              aria-hidden="true"
+            />
+          </button>
         )}
         </div>
       </CardContent>
