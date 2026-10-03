@@ -587,6 +587,20 @@ export function todayStakes(
   return { pctAfter, targetPct };
 }
 
+/** Elapsed fraction (0–100) of an ongoing class — null when the class
+ *  hasn't started, has already ended, or the span is degenerate. Pure so
+ *  tests can pin it without a real class on the clock; the UI renders a
+ *  thin fill bar from it in the "Happening now" banner and the row. */
+export function classProgress(
+  startMin: number,
+  endMin: number,
+  nowMin: number
+): number | null {
+  if (!(endMin > startMin)) return null;
+  if (nowMin <= startMin || nowMin >= endMin) return null;
+  return ((nowMin - startMin) / (endMin - startMin)) * 100;
+}
+
 export function TimetableCard({
   subjects,
   mode = "demo",
@@ -775,6 +789,24 @@ export function TimetableCard({
                   <p className="truncate text-sm font-semibold">
                     {ongoing.subjectCode} · {hhmm(ongoing.startMin)}–{hhmm(ongoing.endMin)}
                   </p>
+                  {(() => {
+                    const prog = classProgress(ongoing.startMin, ongoing.endMin, nowMin);
+                    return prog !== null ? (
+                      <div
+                        className="mt-1.5 h-1 w-full overflow-hidden rounded-full bg-emerald-500/15"
+                        role="progressbar"
+                        aria-valuemin={0}
+                        aria-valuemax={100}
+                        aria-valuenow={Math.round(prog)}
+                        aria-label={`Class progress — ${Math.round(prog)}% through`}
+                      >
+                        <div
+                          className="h-full rounded-full bg-emerald-500/60 transition-[width] duration-1000 ease-linear"
+                          style={{ width: `${prog}%` }}
+                        />
+                      </div>
+                    ) : null;
+                  })()}
                 </div>
                 <Badge className="shrink-0 border-emerald-500/40 bg-emerald-500/15 text-emerald-700 dark:text-emerald-400" variant="outline">
                   {ongoing.endMin - nowMin} min left
@@ -785,6 +817,7 @@ export function TimetableCard({
               {todaySlots.map((s, i) => {
                 const st = slotStatus(s, nowDay, nowMin);
                 const isNext = next?.id === s.id;
+                const prog = st.key === "ongoing" ? classProgress(s.startMin, s.endMin, nowMin) : null;
                 return (
                   <motion.div
                     key={s.id}
@@ -818,6 +851,21 @@ export function TimetableCard({
                           {s.source === "demo" && " · demo"}
                           {s.source === "erp" && " · synced from ERP"}
                         </p>
+                        {prog !== null && (
+                          <div
+                            className="mt-1.5 h-1 w-full overflow-hidden rounded-full bg-emerald-500/15"
+                            role="progressbar"
+                            aria-valuemin={0}
+                            aria-valuemax={100}
+                            aria-valuenow={Math.round(prog)}
+                            aria-label={`Class progress — ${Math.round(prog)}% through`}
+                          >
+                            <div
+                              className="h-full rounded-full bg-emerald-500/60 transition-[width] duration-1000 ease-linear"
+                              style={{ width: `${prog}%` }}
+                            />
+                          </div>
+                        )}
                         {stakes && (isNext || st.key === "ongoing") && (
                           <p
                             className="mt-0.5 flex items-center gap-1 text-[11px] font-medium text-amber-700 tabular-nums dark:text-amber-400"

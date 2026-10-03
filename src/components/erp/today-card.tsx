@@ -272,6 +272,39 @@ export function buildTodaySms(input: TodaySmsInput): string {
 }
 
 /* ------------------------------------------------------------------ */
+/* Bubble render helpers (styled render of the SAME text)              */
+/* ------------------------------------------------------------------ */
+
+/** Keywords that open the brief's lines — highlighted in the bubble's
+ *  RENDER only. The clipboard/print text stays byte-identical: these are
+ *  spans around the exact same characters, nothing added, nothing moved. */
+const SMS_KEYWORDS = [
+  "CLASSES TODAY", // longest first — before any shorter prefix could match
+  "OVERALL",
+  "NEED",
+  "CAN SKIP",
+  "ON TARGET",
+  "BUDGET",
+  "WORST",
+  "ALAS",
+  "NEXT",
+  "NOTES",
+  "SYNCED",
+];
+
+/** Split one brief line into { keyword, rest } for the bubble's styled
+ *  render — null when the line opens with no known keyword (the header,
+ *  "ERP SYNC - ...", stays plain). Exact character content is preserved
+ *  either way; rest always begins with the original whitespace. */
+export function smsLineParts(line: string): { keyword: string; rest: string } | null {
+  for (const k of SMS_KEYWORDS) {
+    if (line === k) return { keyword: k, rest: "" };
+    if (line.startsWith(k + " ")) return { keyword: k, rest: line.slice(k.length) };
+  }
+  return null;
+}
+
+/* ------------------------------------------------------------------ */
 /* Component                                                           */
 /* ------------------------------------------------------------------ */
 
@@ -314,6 +347,9 @@ export function TodayCard(props: TodaySmsInput & { className?: string }) {
   );
   const seg = useMemo(() => smsSegments(smsText), [smsText]);
   const header = istParts(now);
+  /* Line-split once for the styled bubble render (same characters — the
+     clipboard keeps the plain string; only the paint is highlighted). */
+  const smsLines = useMemo(() => smsText.split("\n"), [smsText]);
 
   /* Live class chip — same pure core as the CLASSES SMS line, plus the
      90-min calm window (an 18:00 class at 07:00 must not shout). */
@@ -494,7 +530,24 @@ export function TodayCard(props: TodaySmsInput & { className?: string }) {
           aria-label="Today's summary written as a plain-text message"
         >
           <pre className="whitespace-pre-wrap break-words font-mono text-[12px] leading-relaxed text-foreground/90 sm:text-[12.5px]">
-            {smsText}
+            {smsLines.map((ln, i) => {
+              const parts = smsLineParts(ln);
+              return (
+                <span key={i}>
+                  {parts ? (
+                    <>
+                      <span className="font-semibold text-emerald-700 dark:text-emerald-400">
+                        {parts.keyword}
+                      </span>
+                      {parts.rest}
+                    </>
+                  ) : (
+                    ln
+                  )}
+                  {i < smsLines.length - 1 ? "\n" : ""}
+                </span>
+              );
+            })}
           </pre>
         </div>
 

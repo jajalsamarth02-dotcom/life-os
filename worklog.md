@@ -2459,3 +2459,29 @@ Unresolved issues / risks & next-phase priorities:
 5. Dead/thin seeds unchanged: /student/exam-routine ERP-500 (no probe before Nov 2026); /student/assessment redirect (covered).
 6. QA notes carried + NEW: agent-browser eval shares a session scope — `const` redeclaration across evals throws "already declared"; wrap every eval in an IIFE. MultiEdit precedence lesson: `a ?? b + c` parses as `a ?? (b + c)` — parenthesize nullish coalescing operands.
 7. Keeper cron 430680 alive (3× OK during this round's keep-alives); worklog protocol unchanged.
+
+---
+Task ID: 65
+Agent: Z.ai Code (main orchestrator)
+Task: SMS-bubble keyword highlighting (styled render of the same text) + ongoing-class progress bar (display-only, RSS-frugal round)
+
+Work Log (Round 65 — 3 Oct, 10:15–10:27 +08):
+- No parallel-loop entries after Task 64 (rg count = 1 = mine) → clean round. Server 200 (pid 29666, up 1h57m). RSS AT ROUND START: 1,913,068KB ≈ 1868MB — above the 1.8GB line → round designed RSS-frugal (2 source files, 1 test file, 9 page loads, no data walks).
+
+Completed modifications / verified:
+1. STYLE — SMS-bubble keyword highlighting: new pure smsLineParts(line) in today-card.tsx splits each brief line into {keyword, rest} for a KNOWN keyword set (CLASSES TODAY, OVERALL, NEED, CAN SKIP, ON TARGET, BUDGET, WORST, ALAS, NEXT, NOTES, SYNCED). The bubble <pre> now renders keyword prefixes in semibold emerald (light text-emerald-700 / dark text-emerald-400) — the WYSIWYG contract is preserved BYTE-IDENTICALLY: spans wrap the exact same characters (verified live: pre.textContent reassembles line-for-line; clipboard/copy untouched; print clone deliberately stays plain black mono). Header "ERP SYNC - ..." and unknown lines stay plain; near-misses ("NEEDY", "SYNCEDX") correctly unmatched via the keyword+" " prefix rule.
+2. FEATURE — Ongoing-class progress bar: new pure classProgress(startMin, endMin, nowMin) in timetable-card.tsx (elapsed 0–100, null before start/at start/at end/after end/degenerate span). The "Happening now" banner AND the ongoing row gain a thin h-1 rounded fill bar (bg-emerald-500/60 on /15 track, transition-[width] 1000ms ease-linear so the 30s tick glides), with role=progressbar + aria-valuenow + aria-label. Honest visual absence right now (no class at QA time — 07:4x IST, RWM at 11:00): progressBars=0 asserted; stakes line (Round 64) intact on the same row; banner absent (bannerHonest=false). Visual QA honest-deferred to the next real ongoing class (weekday 18:00 or Sat 11:00 window) — pinned by 10 unit cases instead.
+3. TESTS: scripts/test-today-r65.ts — 41/41 PASS (17 splitter cases incl. every builder-emitted keyword + near-miss rejections; 4 WYSIWYG character-preservation cases; 10 classProgress boundary cases incl. exclusive start/end; 10-case live cross-check that builds a real brief and asserts EVERY known line splits losslessly + keyword order [OVERALL, NEED, BUDGET, CLASSES TODAY, ALAS, NOTES, SYNCED]). Regressions: r64 20, r62 37, results-r60 18, r59 17, r58 27, results-features 24, parse-results 70, batch-picks 39, milestones-r61 24 → 317 green total.
+4. tsc ONCE: src/ ZERO errors.
+5. BROWSER QA ALL GREEN: bubble highlighted exactly on known keywords (7 live: OVERALL NEED BUDGET CLASSES TODAY WORST ALAS SYNCED — NEXT/NOTES honestly absent, data has no nextDue/noted lines this hour); timetable card progressBars=0 (honest), stakes intact, 1 row. Light /tmp/qa-r65-light-bubble.png + /tmp/qa-r65-dark-bubble.png + /tmp/qa-r65-dark-tt.png + mobile-390 /tmp/qa-r65-mobile-bubble.png (docW=390, hScroll=false, wraps cleanly). Console 0 errors after clear+reload.
+6. End state PRISTINE: changeEvents(1h)=0, notifications(1h)=0, scheduled syncs success/0-changes (02:05Z, 01:49Z, 01:33Z); zero WhatsApp sends (display-only; the highlight is paint-only, the progress bar is local UI; no notify path touched).
+7. RSS AFTER ROUND: 1,846MB — DOWN ~22MB from round start (1868) despite 2 component recompiles + 9 page loads. Frugal-round design (Task 63 lesson) reconfirmed: minimal file touches + no results-family walks = net RSS drop.
+
+Unresolved issues / risks & next-phase priorities:
+1. ⚠️ MEMORY STILL THE #1 RISK: 1846MB, ~3MB above the 1.8GB (1843MB) attention line; OOM ~2.2GB (~360MB headroom). Trend can go DOWN on frugal rounds but any feature round with recompiles hovers at the line. STANDING USER PROPOSAL needs an explicit go-ahead: keeper-side restart when RSS > 1.8GB, double-fork subshell form. NOT added silently per protocol. Until then: keep rounds frugal, avoid multi-file recompiles where possible.
+2. Milestone watch: Saturday's only class RWM 11:00–13:00 IST remains the crossing class (2/3 → 3/4 = 75% → MilestoneCelebration once). Live data note: overall status now reads DANGER ("At risk" chip on the ring) — the stakes line "attend → 75.00%" is therefore even more consequential today. After 13:00 IST: honest QA of the milestone moment if attended (no faking).
+3. Feature residuals (non-urgent): progress-bar visual QA at the next real ongoing class; timetable row → subject drawer deep-link; "Open retry history" palette command → specific story chip deep-link.
+4. Clock semantics NOTE unchanged (pre-existing): timetable-card uses browser-local nowMin — QA browser shows UTC-mixed labels; the real IST student sees correct values. Fix whole-card clock in one move if ever addressed.
+5. Dead/thin seeds unchanged: /student/exam-routine ERP-500 (no probe before Nov 2026); /student/assessment redirect (covered).
+6. QA notes carried + NEW: shadcn CardTitle renders a div — match cards via [data-slot=card-title], NOT h3 (h3 only exists on hand-rolled headers like TimetableCard's; a `.find()` on the wrong selector silently skips cards and yields misleading "not found").
+7. Keeper cron 430680 alive; worklog protocol unchanged.
