@@ -313,7 +313,48 @@ function NextClassChip({ subjects }: { subjects: { code: string; name: string }[
      window. justEndedChip already owns the precedence (null while any live
      state speaks), so the two chips can never disagree about who talks. */
   const justEnded = !shown ? justEndedChip(todaySlots, now) : null;
-  if ((!shown && !justEnded) || timetable.isPending) return null;
+  /* r87: once the bridge closes (today fully done), the chip stays useful
+     in the afternoon/evening gap — the next class LATER THIS WEEK, muted.
+     Week-wrap-safe: days-ahead = (day − today + 7) % 7, ≥1 = strictly
+     future; earliest day wins, then earliest start. Muted by the ladder's
+     own rule — "in 4h is information, not an alarm" — so a chip that used
+     to vanish now quietly answers "when IS the next one?". */
+  const upcoming =
+    !shown && !justEnded
+      ? (slots
+          .map((s) => ({ s, d: (s.dayOfWeek - today + 7) % 7 }))
+          .filter((x) => x.d >= 1)
+          .sort((a, b) => a.d - b.d || a.s.startMin - b.s.startMin)[0]?.s ?? null)
+      : null;
+  if ((!shown && !justEnded && !upcoming) || timetable.isPending) return null;
+
+  if (!shown && upcoming) {
+    const DAYS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+    const uName =
+      subjects?.find((x) => x.code === upcoming.subjectCode)?.name ??
+      upcoming.subjectCode;
+    return (
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <span
+            className="hidden shrink-0 cursor-default items-center gap-1.5 whitespace-nowrap rounded-full border border-border/70 bg-muted/50 px-2.5 py-1 text-xs font-medium tabular-nums text-muted-foreground lg:inline-flex"
+            aria-label={`Next class this week — ${upcoming.subjectCode} ${DAYS[upcoming.dayOfWeek]} ${hhmm(upcoming.startMin)}`}
+            title="Today's classes are done — the next one later this week."
+          >
+            <span className="size-1.5 rounded-full bg-muted-foreground/50" aria-hidden="true" />
+            <CalendarClock className="size-3.5 shrink-0" aria-hidden="true" />
+            <span className="font-mono text-[11px] font-semibold">{upcoming.subjectCode}</span>
+            <span className="tabular-nums">
+              {DAYS[upcoming.dayOfWeek]} {hhmm(upcoming.startMin)}
+            </span>
+          </span>
+        </TooltipTrigger>
+        <TooltipContent>
+          Next class this week: {uName} · {DAYS[upcoming.dayOfWeek]} {hhmm(upcoming.startMin)}–{hhmm(upcoming.endMin)}
+        </TooltipContent>
+      </Tooltip>
+    );
+  }
 
   if (!shown && justEnded) {
     const jName =
