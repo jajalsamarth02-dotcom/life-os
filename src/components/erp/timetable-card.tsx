@@ -1158,28 +1158,52 @@ export function TimetableCard({
                     {WEEK_ORDER.map((d) => {
                       const daySlots = slots.filter((s) => s.dayOfWeek === d);
                       const isToday = d === nowDay;
+                      /* r89: the today column inherits the day badge's 3-state
+                         contract (r88). Before this, a done Saturday still pinged
+                         "live" down here while the badge above read "✓ Saturday —
+                         all over" — two surfaces disagreeing about the same clock.
+                         Driven by the column's OWN (raw) slots, not the batch, so
+                         each surface stays honest about what it renders. */
+                      const dayLeft = daySlots.some((s) => s.endMin > nowMin);
+                      const colState = !isToday
+                        ? "other"
+                        : dayLeft
+                          ? "live"
+                          : daySlots.length > 0
+                            ? "done"
+                            : "empty";
                       return (
                         <div
                           key={d}
                           className={cn(
                             "rounded-xl border p-2 transition-colors",
-                            isToday
+                            colState === "live"
                               ? "border-emerald-500/40 bg-emerald-500/[0.05]"
-                              : "border-border/50"
+                              : colState === "done"
+                                ? "border-emerald-500/25 bg-emerald-500/[0.04]"
+                                : "border-border/50"
                           )}
                         >
                           <p
                             className={cn(
                               "mb-1.5 flex items-center gap-1 text-[11px] font-semibold uppercase tracking-wide",
-                              isToday ? "text-emerald-700 dark:text-emerald-400" : "text-muted-foreground"
+                              colState === "live"
+                                ? "text-emerald-700 dark:text-emerald-400"
+                                : colState === "done"
+                                  ? "text-emerald-700/80 dark:text-emerald-400/80"
+                                  : "text-muted-foreground"
                             )}
                             title={
-                              isToday
+                              colState === "live"
                                 ? "Today — this column follows the IST clock"
-                                : undefined
+                                : colState === "done"
+                                  ? "Today — all of today's classes are over"
+                                  : colState === "empty"
+                                    ? "Today — no classes scheduled"
+                                    : undefined
                             }
                           >
-                            {isToday && (
+                            {colState === "live" && (
                               <span className="relative flex size-1.5" aria-hidden="true">
                                 <span
                                   className="absolute inline-flex h-full w-full animate-ping rounded-full bg-emerald-500 opacity-60 motion-reduce:hidden"
@@ -1187,6 +1211,9 @@ export function TimetableCard({
                                 />
                                 <span className="relative inline-flex size-1.5 rounded-full bg-emerald-500" />
                               </span>
+                            )}
+                            {colState === "done" && (
+                              <Check className="size-3 shrink-0" aria-hidden="true" />
                             )}
                             {DAY_NAMES[d].slice(0, 3)}
                           </p>
