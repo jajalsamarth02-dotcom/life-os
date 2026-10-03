@@ -534,7 +534,7 @@ function NotificationPrefsCard() {
             ))}
           </div>
         ) : (
-          <div className="grid gap-2 sm:grid-cols-2">
+          <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
             {NOTIFY_META.map((m) => {
               const on = prefs[m.key] !== false;
               const Icon = on ? m.icon : BellOff;
@@ -2737,7 +2737,7 @@ export function SettingsTab({
 
   return (
     <div className="space-y-4">
-      <div className="grid gap-4 lg:grid-cols-2">
+      <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
         <ErpConnectionCard />
         <SyncSettingsCard />
       </div>
@@ -2748,12 +2748,12 @@ export function SettingsTab({
         ref={notifyRef}
         className={spotClass(spotlight === "notify")}
       >
-        <div className="grid gap-4 lg:grid-cols-2">
+        <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
           <WhatsAppCard />
           <NtfyCard />
         </div>
       </div>
-      <div className="grid gap-4 lg:grid-cols-2">
+      <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
         <BrowserRemindersCard />
         <InstallAppCard />
       </div>

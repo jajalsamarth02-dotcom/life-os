@@ -1334,14 +1334,14 @@ export function DashboardTab({
   if (isPending) {
     return (
       <div className="space-y-4">
-        <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-5">
+        <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-5">
           <CardSkeletonLight className="md:col-span-2 xl:col-span-2" />
           <CardSkeletonLight />
           <CardSkeletonLight />
           <CardSkeletonLight />
         </div>
         <CardSkeletonLight />
-        <div className="grid gap-4 lg:grid-cols-2">
+        <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
           <CardSkeletonLight />
           <CardSkeletonLight />
         </div>
@@ -1469,7 +1469,7 @@ export function DashboardTab({
 
       {/* Row 1 — overall + stats */}
       <motion.div
-        className="grid gap-4 md:grid-cols-2 xl:grid-cols-5"
+        className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-5"
         variants={{ hidden: { opacity: 0, y: 10 }, show: { opacity: 1, y: 0, transition: { duration: 0.25, ease: "easeOut" } } }}
       >
         <Card className="erp-card-accent rounded-xl border-border/60 transition-shadow hover:shadow-md md:col-span-2 xl:col-span-2">
@@ -1831,8 +1831,10 @@ export function DashboardTab({
         />
       )}
 
-      {/* Row 3 — reminders preview + ERP status */}
-      <div className="grid gap-4 lg:grid-cols-2">
+      {/* Row 3 — reminders preview + ERP status. r100: base grid-cols-1 —
+         the implicit auto track at <lg lets nowrap titles (truncate never
+         engages) blow the card out to its min-content; minmax(0,1fr) clamps. */}
+      <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
         <RemindersPreview
           items={data.reminders.items}
           todayCount={data.reminders.todayCount}
@@ -1852,7 +1854,7 @@ export function DashboardTab({
       </div>
 
       {/* Row 4 — changes feed + notifications */}
-      <div className="grid gap-4 lg:grid-cols-2">
+      <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
         <Card className="rounded-xl border-border/60">
           <CardHeader className="pb-3">
             <CardTitle className="text-base tracking-tight">Recent ERP changes</CardTitle>

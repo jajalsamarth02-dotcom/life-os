@@ -405,7 +405,7 @@ export function AttendanceTab({ onOpenSettings }: { onOpenSettings: () => void }
     return (
       <div className="space-y-4">
         <div className="h-24 animate-pulse rounded-xl bg-muted" />
-        <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+        <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3">
           {Array.from({ length: 6 }).map((_, i) => (
             <div key={i} className="h-64 animate-pulse rounded-xl bg-muted" />
           ))}
@@ -549,7 +549,7 @@ export function AttendanceTab({ onOpenSettings }: { onOpenSettings: () => void }
       )}
 
       {/* Subject grid */}
-      <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+      <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3">
         {subjects.map((s, i) => (
           <SubjectCard
             key={s.id}

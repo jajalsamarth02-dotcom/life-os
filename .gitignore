@@ -52,3 +52,5 @@ prompt
 server.log
 # Skills directory
 /skills/
+# r100: encryption key file — never commit
+db/encryption.key

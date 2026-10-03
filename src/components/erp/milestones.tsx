@@ -134,7 +134,7 @@ export function MilestonesStrip({
           Milestones
         </p>
         <div className="flex min-w-0 flex-1 flex-col gap-2">
-        <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-4">
+        <div className="grid grid-cols-1 gap-2 sm:grid-cols-2 lg:grid-cols-4">
           <div
             className="flex items-center gap-2.5 rounded-lg border border-amber-500/25 bg-amber-500/[0.06] px-3 py-2 transition-colors hover:border-amber-500/45 hover:bg-amber-500/[0.1]"
             title="Your highest overall attendance ever recorded by the tracker"
