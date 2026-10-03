@@ -137,6 +137,10 @@ export interface TodaySmsInput {
   /** Today's attending slots — null/undefined when no timetable data has
    *  synced yet (the CLASSES line is then honestly omitted, never faked). */
   todayClasses?: TodayClassBrief[] | null;
+  /** r97: the full-week attending list — the bubble's week-ahead voice.
+   *  null/undefined keeps the NEXT CLASS line honestly absent (the same
+   *  honesty gate as the CLASSES line and the week-ahead pill). */
+  weekSlots?: TimetableSlotRow[] | null;
 }
 
 /** Minutes-since-midnight → "HH:MM" (24h, zero-padded — GSM-7 friendly). */
@@ -304,6 +308,25 @@ export function daysAheadQualifierClass(d: number): string {
   return d === 1 ? "text-muted-foreground" : "text-muted-foreground/70";
 }
 
+/** r97: the bubble's week-ahead voice — the EIGHTH render site of the "next
+ *  up this week" family (header chip, strip done line, grid marker, today
+ *  pill, pill tooltip, tail row, empty-card line — and now the SMS itself).
+ *  When today has nothing left to say, the brief should still answer "when
+ *  IS the next one?" — the SAME selection + distance pures the chips use,
+ *  so the copyable text can never disagree with the UI. Format mirrors the
+ *  CLASSES line's dialect: "NEXT CLASS Mon 11:00 CODE (in 2d)" — ASCII-only
+ *  (GSM-7 safe), the qualifier in daysAheadLabel's "tomorrow"/"in Nd" voice.
+ *  Pure — pinned in tests (r97). */
+export function smsNextClassLine(
+  weekSlots: TimetableSlotRow[] | null | undefined,
+  now: number
+): string | null {
+  const w = nextUpcomingThisWeek(weekSlots ?? null, now);
+  if (!w) return null;
+  const d = daysAheadThisWeek(w.dayOfWeek, now);
+  return `NEXT CLASS ${DAY_NAMES_SHORT[w.dayOfWeek]} ${hhmmFromMin(w.startMin)} ${w.subjectCode} (${daysAheadLabel(d)})`;
+}
+
 /** Build the exact SMS text shown in the bubble (and used for copy/share). */
 export function buildTodaySms(input: TodaySmsInput): string {
   const p = istParts(input.now);
@@ -340,23 +363,30 @@ export function buildTodaySms(input: TodaySmsInput): string {
      when no timetable has synced; "none scheduled" for a genuinely free day. */
   if (input.todayClasses) {
     const tc = input.todayClasses;
+    const live = todayLiveClass(tc, input.now);
     if (tc.length === 0) {
       lines.push("CLASSES TODAY none scheduled");
+    } else if (!live) {
+      lines.push(
+        tc.length === 1 ? "CLASSES TODAY done (1 class)" : `CLASSES TODAY all ${tc.length} done`
+      );
+    } else if (live.kind === "ongoing") {
+      lines.push(
+        `CLASSES TODAY ${live.leftCount} left - in class ${live.cls.subjectCode} until ${hhmmFromMin(live.cls.endMin)}`
+      );
     } else {
-      const live = todayLiveClass(tc, input.now);
-      if (!live) {
-        lines.push(
-          tc.length === 1 ? "CLASSES TODAY done (1 class)" : `CLASSES TODAY all ${tc.length} done`
-        );
-      } else if (live.kind === "ongoing") {
-        lines.push(
-          `CLASSES TODAY ${live.leftCount} left - in class ${live.cls.subjectCode} until ${hhmmFromMin(live.cls.endMin)}`
-        );
-      } else {
-        lines.push(
-          `CLASSES TODAY ${live.leftCount} left - next ${hhmmFromMin(live.cls.startMin)} ${live.cls.subjectCode}`
-        );
-      }
+      lines.push(
+        `CLASSES TODAY ${live.leftCount} left - next ${hhmmFromMin(live.cls.startMin)} ${live.cls.subjectCode}`
+      );
+    }
+    /* r97: the week-ahead voice — only while the day itself has nothing
+       left to say (all done or genuinely free). A live state keeps the
+       brief about TODAY; a NEXT CLASS line would only dilute it. Same
+       honesty gates as everywhere else in the family: no synced week,
+       no line. */
+    if (!live) {
+      const nxt = smsNextClassLine(input.weekSlots, input.now);
+      if (nxt) lines.push(nxt);
     }
   }
 
@@ -417,6 +447,7 @@ export const SMS_KEYWORDS = [
   "BUDGET",
   "WORST",
   "ALAS",
+  "NEXT CLASS", // r97 — listed before NEXT (longest prefix first)
   "NEXT",
   "NOTES",
   "SYNCED",
@@ -443,8 +474,9 @@ export function smsLineParts(line: string): { keyword: string; rest: string } | 
  *  classes on the exact same characters):
  *   - "WORST" → amber: the app's warning/danger language (status chips, ALA
  *     overdue) — the weakest subjects must read as a caution, not a win;
- *   - "NEXT" → violet: the app's focus language (retry-story spotlight,
- *     subject drawer) — the one actionable deadline deserves the eye;
+ *   - "NEXT"/"NEXT CLASS" → violet: the app's focus language (retry-story
+ *     spotlight, subject drawer, the week-ahead family) — the one
+ *     actionable next thing deserves the eye;
  *   - everything else → emerald: the card's own identity color.
  *  Unknown keywords (future lines added without a tone decision) fall back
  *  to emerald — a new line must never render unpainted or crash. */
@@ -452,7 +484,7 @@ export type SmsKeywordTone = "emerald" | "amber" | "violet";
 
 export function smsKeywordTone(keyword: string): SmsKeywordTone {
   if (keyword === "WORST") return "amber";
-  if (keyword === "NEXT") return "violet";
+  if (keyword === "NEXT CLASS" || keyword === "NEXT") return "violet";
   return "emerald";
 }
 
@@ -538,8 +570,9 @@ export function TodayCard(props: TodaySmsInput & { className?: string; /** r93: 
         notedCount,
         lastSyncAt,
         todayClasses,
+        weekSlots,
       }),
-    [now, overall, target, subjects, warningSubjects, alaPending, alaTotal, alaOverdue, alaDueWeek, nextDue, notedCount, lastSyncAt, todayClasses]
+    [now, overall, target, subjects, warningSubjects, alaPending, alaTotal, alaOverdue, alaDueWeek, nextDue, notedCount, lastSyncAt, todayClasses, weekSlots]
   );
   const seg = useMemo(() => smsSegments(smsText), [smsText]);
   const header = istParts(now);
@@ -556,6 +589,13 @@ export function TodayCard(props: TodaySmsInput & { className?: string; /** r93: 
      last class, the chip keeps speaking (amber, elapsed clock) instead of
      vanishing; the deep-link lands on the timetable row's drain bar. */
   const justEnded = useMemo(() => justEndedChip(todayClasses, now), [todayClasses, now]);
+  /* r97: the RAW live state (no 90-min calm window) — "is today's class day
+     over?" drives the delivered caption's read-receipt tone: solid emerald
+     once nothing is left today, /80 while the day still has classes. */
+  const dayDone = useMemo(
+    () => todayClasses != null && todayLiveClass(todayClasses, now) === null,
+    [todayClasses, now]
+  );
   /* r93: after the bridge closes, the today-card's chip no longer goes dark
      while the header chip, strip and grid all speak — the FIFTH surface of
      the week-ahead family, the SAME pinned pures (selection + distance),
@@ -816,20 +856,39 @@ export function TodayCard(props: TodaySmsInput & { className?: string; /** r93: 
               </Tooltip>
             </TooltipProvider>
           )}
-          <span
-            className={cn(
-              "ml-auto hidden text-[10px] tabular-nums sm:inline",
-              seg.segments > 1 ? "text-amber-600/80 dark:text-amber-400/80" : "text-muted-foreground/70"
-            )}
-            aria-hidden="true"
-            title={
-              seg.encoding === "GSM-7"
-                ? "GSM-7 plain text: 1 segment carries up to 160 chars; longer texts travel as 153-char concatenated segments"
-                : "Contains non-Latin characters — encoded UCS-2, so 1 segment carries only 70 chars"
-            }
-          >
-            {seg.encoding === "GSM-7" ? "SMS-ready" : "unicode"} · {seg.segments} segment{seg.segments === 1 ? "" : "s"} · {seg.chars} chars
-          </span>
+          <TooltipProvider delayDuration={150}>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <span
+                  className={cn(
+                    "ml-auto hidden cursor-help text-[10px] tabular-nums sm:inline",
+                    seg.segments > 1 ? "text-amber-600/80 dark:text-amber-400/80" : "text-muted-foreground/70"
+                  )}
+                  aria-hidden="true"
+                >
+                  {seg.encoding === "GSM-7" ? "SMS-ready" : "unicode"} · {seg.segments} segment{seg.segments === 1 ? "" : "s"} · {seg.chars} chars
+                </span>
+              </TooltipTrigger>
+              {/* r97: the counter's native title retires in favor of a rich
+                  tooltip — information parity with the r95 pill (the same
+                  pattern: the REAL numbers instead of a static rule). */}
+              <TooltipContent className="max-w-xs">
+                <p className="text-xs tabular-nums">
+                  {seg.encoding === "GSM-7" ? "GSM-7 plain text" : "UCS-2 (non-Latin characters)"} — {seg.chars} chars
+                  in {seg.segments} segment{seg.segments === 1 ? "" : "s"}
+                </p>
+                <p className="text-[11px] text-muted-foreground">
+                  {seg.encoding === "GSM-7"
+                    ? seg.segments > 1
+                      ? "Concatenated SMS: each segment carries 153 chars (7 slots go to the stitch header)."
+                      : "One segment carries up to 160 plain-ASCII chars."
+                    : seg.segments > 1
+                      ? "Concatenated UCS-2: each segment carries only 67 chars."
+                      : "Non-Latin text halves capacity: 70 chars per segment."}
+                </p>
+              </TooltipContent>
+            </Tooltip>
+          </TooltipProvider>
         </div>
 
         {/* the message bubble — WYSIWYG with the clipboard text */}
@@ -868,7 +927,7 @@ export function TodayCard(props: TodaySmsInput & { className?: string; /** r93: 
 
         {/* delivered caption */}
         <div className="flex items-center gap-1.5 text-[10px] text-muted-foreground/80" aria-hidden="true">
-          <CheckCheck className="size-3 text-emerald-500/80" />
+          <CheckCheck className={cn("size-3", dayDone ? "text-emerald-500" : "text-emerald-500/80")} />
           <span>generated {header.hhmm} IST · updates every minute · never sent anywhere automatically</span>
         </div>
       </CardContent>

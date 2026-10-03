@@ -1,0 +1,904 @@
+     1→"use client";
+     2→
+     3→/**
+     4→ * Today card — an SMS-style pocket brief of where the student stands right now.
+     5→ *
+     6→ * One compact card on the dashboard that:
+     7→ *  - renders the EXACT plain-text message that "Copy text" puts on the clipboard
+     8→ *    (WYSIWYG: the bubble is the message),
+     9→ *  - folds today's class schedule (batch-pick resolved, IST clock) into the
+    10→ *    brief — how many are left, the next/ongoing class, or an honest
+    11→ *    "none scheduled" / "all done" — from the same shared timetable cache the
+    12→ *    week plan and timetable card use, so every surface agrees on "today",
+    13→ *  - keeps the message GSM-7 friendly (ASCII only) so the segment counter is
+    14→ *    honest — paste it into any chat app and it travels as a normal SMS-sized text,
+    15→ *  - supports printing ONLY this card (portal + body.print-today isolation),
+    16→ *    separate from the dashboard's full attendance report.
+    17→ *
+    18→ * No auto-sending anywhere — the student stays in control of every share.
+    19→ */
+    20→
+    21→import { useEffect, useMemo, useRef, useState } from "react";
+    22→import { createPortal } from "react-dom";
+    23→import { CalendarClock, Check, CheckCheck, Copy, MessageSquareText, Printer, Share2 } from "lucide-react";
+    24→import { Button } from "@/components/ui/button";
+    25→import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+    26→import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
+    27→import { cn } from "@/lib/utils";
+    28→import type { AlaUpcomingRow, AttendanceView, SubjectView, TimetableSlotRow } from "./types";
+    29→import { DAY_NAMES_SHORT, istNow, humanizeMins } from "./shared";
+    30→
+    31→/* ------------------------------------------------------------------ */
+    32→/* SMS segment math (GSM-7 vs UCS-2, concat rules)                     */
+    33→/* ------------------------------------------------------------------ */
+    34→
+    35→/** GSM 03.38 basic character set (single chars). */
+    36→const GSM7_BASIC =
+    37→  "@£$¥èéùìòÇ\nØø\rÅåΔ_ΦΓΛΩΠΨΣΘΞÆæßÉ !\"#¤%&'()*+,-./0123456789:;<=>?¡ABCDEFGHIJKLMNOPQRSTUVWXYZÄÖÑÜ§¿abcdefghijklmnopqrstuvwxyzäöñüà";
+    38→/** GSM 03.38 extension table (each costs 2 chars). */
+    39→const GSM7_EXT = "^{}\\[~]|€";
+    40→
+    41→export function smsSegments(text: string): {
+    42→  segments: number;
+    43→  chars: number;
+    44→  encoding: "GSM-7" | "UCS-2";
+    45→} {
+    46→  let effective = 0;
+    47→  let nonGsm = 0;
+    48→  const chars = [...text].length;
+    49→  for (const ch of text) {
+    50→    if (GSM7_BASIC.includes(ch)) effective += 1;
+    51→    else if (GSM7_EXT.includes(ch)) effective += 2;
+    52→    else nonGsm += 1;
+    53→  }
+    54→  if (nonGsm === 0) {
+    55→    return { segments: effective <= 160 ? 1 : Math.ceil(effective / 153), chars, encoding: "GSM-7" };
+    56→  }
+    57→  return { segments: chars <= 70 ? 1 : Math.ceil(chars / 67), chars, encoding: "UCS-2" };
+    58→}
+    59→
+    60→/* ------------------------------------------------------------------ */
+    61→/* Message builder — ASCII-only output                                 */
+    62→/* ------------------------------------------------------------------ */
+    63→
+    64→const IST_TZ = "Asia/Kolkata";
+    65→
+    66→/** Calendar parts of an instant, rendered in IST. Some ICU builds render
+    67→ *  midnight as "24" — folded back to "00" here too (shared.tsx's istNow
+    68→ *  already does this for the schedule math; the DISPLAY side must agree,
+    69→ *  or the bubble header would print "generated 24:00 IST"). */
+    70→function istParts(now: number) {
+    71→  const p = new Intl.DateTimeFormat("en-GB", {
+    72→    timeZone: IST_TZ,
+    73→    weekday: "short",
+    74→    day: "2-digit",
+    75→    month: "short",
+    76→    year: "numeric",
+    77→    hour: "2-digit",
+    78→    minute: "2-digit",
+    79→    hour12: false,
+    80→  }).formatToParts(new Date(now));
+    81→  const get = (t: string) => p.find((x) => x.type === t)?.value ?? "";
+    82→  const h = Number(get("hour")) % 24;
+    83→  return {
+    84→    weekday: get("weekday").toUpperCase(),
+    85→    day: get("day"),
+    86→    month: get("month").toUpperCase(),
+    87→    year: get("year"),
+    88→    hhmm: `${String(h).padStart(2, "0")}:${get("minute")}`,
+    89→  };
+    90→}
+    91→
+    92→/** Force dynamic strings into the SMS-safe ASCII plane (typographic chars out). */
+    93→function ascii(s: string): string {
+    94→  return s
+    95→    .replace(/[\u2018\u2019\u201B]/g, "'")
+    96→    .replace(/[\u201C\u201D]/g, '"')
+    97→    .replace(/[\u2013\u2014]/g, "-")
+    98→    .replace(/\u2026/g, "...")
+    99→    .replace(/\u00b7/g, "|")
+   100→    .replace(/[^\x20-\x7e\n]/g, "");
+   101→}
+   102→
+   103→/** One of TODAY's class slots — batch-pick resolved and already filtered to
+   104→ *  the current weekday by the caller (the exact same math as the week plan
+   105→ *  and the timetable card, so the surfaces can never disagree). */
+   106→export interface TodayClassBrief {
+   107→  startMin: number;
+   108→  endMin: number;
+   109→  subjectCode: string;
+   110→}
+   111→
+   112→/** Live snapshot of today's first remaining class; minutes run on the IST
+   113→ *  clock — the same clock the bubble header prints. Shared by the CLASSES
+   114→ *  SMS line and the card's live chip via one pure code path. */
+   115→export interface TodayLiveClass {
+   116→  kind: "ongoing" | "upcoming";
+   117→  cls: TodayClassBrief;
+   118→  /** ongoing: minutes until it ends · upcoming: minutes until it starts. */
+   119→  mins: number;
+   120→  /** Classes not over yet (the ongoing one included). */
+   121→  leftCount: number;
+   122→}
+   123→
+   124→export interface TodaySmsInput {
+   125→  now: number;
+   126→  overall: AttendanceView;
+   127→  target: number;
+   128→  subjects: SubjectView[];
+   129→  warningSubjects: number;
+   130→  alaPending: number;
+   131→  alaTotal: number;
+   132→  alaOverdue: number;
+   133→  alaDueWeek: number;
+   134→  nextDue: AlaUpcomingRow | null;
+   135→  notedCount: number;
+   136→  lastSyncAt: string | null;
+   137→  /** Today's attending slots — null/undefined when no timetable data has
+   138→   *  synced yet (the CLASSES line is then honestly omitted, never faked). */
+   139→  todayClasses?: TodayClassBrief[] | null;
+   140→}
+   141→
+   142→/** Minutes-since-midnight → "HH:MM" (24h, zero-padded — GSM-7 friendly). */
+   143→function hhmmFromMin(min: number): string {
+   144→  return `${String(Math.floor(min / 60)).padStart(2, "0")}:${String(min % 60).padStart(2, "0")}`;
+   145→}
+   146→
+   147→/** The today-card's live class state — ONE pure path for both the CLASSES
+   148→ *  SMS line and the card's live chip, so the two can never disagree.
+   149→ *  HONEST AT ANY DISTANCE: a class 8 hours out is still "next", never "done"
+   150→ *  (the live smoke caught exactly that leak in Round 62 — the 90-min calm
+   151→ *  window is the CHIP's business, see todayChipClass). Ongoing wins over
+   152→ *  upcoming; null only when nothing is left today (or no data). */
+   153→export function todayLiveClass(
+   154→  todayClasses: TodayClassBrief[] | null | undefined,
+   155→  now: number
+   156→): TodayLiveClass | null {
+   157→  if (!todayClasses || todayClasses.length === 0) return null;
+   158→  /* Round 72: the local hh:mm parse is GONE — this is shared.tsx's istNow,
+   159→   * the ONE IST clock every schedule surface already uses. Beyond the dedup
+   160→   * it also folds the ICU "24:00" midnight quirk (the old parse read
+   161→   * nowMin=1440 at IST midnight, silently flipping "upcoming" to "all done"). */
+   162→  const nowMin = istNow(now).min;
+   163→  const left = todayClasses
+   164→    .filter((c) => c.endMin > nowMin)
+   165→    .sort((a, b) => a.startMin - b.startMin);
+   166→  const first = left[0];
+   167→  if (!first) return null;
+   168→  if (nowMin >= first.startMin) {
+   169→    return { kind: "ongoing", cls: first, mins: first.endMin - nowMin, leftCount: left.length };
+   170→  }
+   171→  return { kind: "upcoming", cls: first, mins: first.startMin - nowMin, leftCount: left.length };
+   172→}
+   173→
+   174→/** Chip variant of the state: an upcoming class more than 90 minutes out
+   175→ *  keeps the card calm (null). Ongoing classes always show. The SMS line
+   176→ *  deliberately does NOT use this — the bubble must stay honest at any
+   177→ *  distance ("next 18:00" at 07:00 is true; "done" would be a lie). */
+   178→export function todayChipClass(
+   179→  todayClasses: TodayClassBrief[] | null | undefined,
+   180→  now: number
+   181→): TodayLiveClass | null {
+   182→  const st = todayLiveClass(todayClasses, now);
+   183→  if (st && st.kind === "upcoming" && st.mins > 90) return null;
+   184→  return st;
+   185→}
+   186→
+   187→/** How LOUD the chip should be — the urgency ladder both class chips share
+   188→ *  (today-card + header), so the surfaces can never disagree on tone:
+   189→ *   - "ongoing":  class happening NOW → EMERALD, live pulse (r82: was amber
+   190→ *                 — amber now means "a transition is approaching", the same
+   191→ *                 language the banner/rows/week-chips speak since r78);
+   192→ *   - "wrapping": ongoing with ≤ JUST_ENDED_WINDOW_MIN left → amber, slow
+   193→ *                 ping (the end is near — symmetric with imminent);
+   194→ *   - "imminent": starts in ≤ IMMINENT_MIN → amber, FAST ping (get moving);
+   195→ *   - "soon":     inside the 90-min calm window → emerald, calm;
+   196→ *   - null:       nothing to say (no class / too far out). */
+   197→export type ChipUrgency = "ongoing" | "wrapping" | "imminent" | "soon";
+   198→
+   199→export const IMMINENT_MIN = 10;
+   200→
+   201→/** The end-of-class mirror of IMMINENT_MIN (r78 "wrapping up"): the last
+   202→ *  JUST_ENDED_WINDOW_MIN minutes of an ongoing class flip amber across ALL
+   203→ *  schedule surfaces. Home moved here in r82 so the chip-urgency ladder can
+   204→ *  consume it without a today-card → timetable-card import (which would
+   205→ *  cycle — timetable-card imports IMMINENT_MIN from here). One constant,
+   206→ *  re-exported by timetable-card for its row/chip/bar consumers. */
+   207→export const JUST_ENDED_WINDOW_MIN = 15;
+   208→
+   209→export function chipUrgency(st: TodayLiveClass | null): ChipUrgency | null {
+   210→  if (!st) return null;
+   211→  if (st.kind === "ongoing") {
+   212→    /* r82: the last sync-cadence window of the class is a TRANSITION — the
+   213→       chips now flip amber for it exactly like the banner (r78), row (r79)
+   214→       and week-grid chip (r80) already do. One threshold, imported from
+   215→       this module by every surface. */
+   216→    return st.mins <= JUST_ENDED_WINDOW_MIN ? "wrapping" : "ongoing";
+   217→  }
+   218→  return st.mins <= IMMINENT_MIN ? "imminent" : "soon";
+   219→}
+   220→
+   221→/** The post-class bridge, chip edition (r83): when todayLiveClass has run
+   222→ *  dry — no ongoing, nothing upcoming — but the LAST class ended within
+   223→ *  JUST_ENDED_WINDOW_MIN, the day isn't "done" yet: the auto-sync hasn't
+   224→ *  recorded the class. Returns the just-ended class + minutes since its
+   225→ *  end, or null (a live state still speaks / bridge closed / no data).
+   226→ *  The today-card chip thereby keeps speaking the five-state language
+   227→ *  until the sync takes over, instead of vanishing the instant the class
+   228→ *  ends — the same honest gap the timetable rows and week-grid chips have
+   229→ *  bridged since r75/r76. r84: also returns drainPct — the same depleting
+   230→ *  amber math as the timetable's justEndedDrainPct (r81), computed inline
+   231→ *  over the SAME pinned constant (today-card cannot import timetable-card
+   232→ *  without cycling; the test suite pins the two against each other), so
+   233→ *  the chip's bridge visibly burns down while the sync is pending. Pure —
+   234→ *  pinned in tests. */
+   235→export function justEndedChip(
+   236→  todayClasses: TodayClassBrief[] | null | undefined,
+   237→  now: number
+   238→): { cls: TodayClassBrief; sinceMin: number; drainPct: number } | null {
+   239→  if (!todayClasses || todayClasses.length === 0) return null;
+   240→  /* Precedence: an ongoing/upcoming state is the day's voice — the chip
+   241→     must not say "just ended" while a later class still speaks. */
+   242→  if (todayLiveClass(todayClasses, now)) return null;
+   243→  const nowMin = istNow(now).min;
+   244→  const lastEnd = Math.max(...todayClasses.map((c) => c.endMin));
+   245→  const sinceMin = nowMin - lastEnd;
+   246→  if (sinceMin < 0 || sinceMin > JUST_ENDED_WINDOW_MIN) return null;
+   247→  const cls = todayClasses.find((c) => c.endMin === lastEnd) as TodayClassBrief;
+   248→  /* 100 at the end minute → 0 at the window boundary (inclusive). */
+   249→  const drainPct = ((JUST_ENDED_WINDOW_MIN - sinceMin) / JUST_ENDED_WINDOW_MIN) * 100;
+   250→  return { cls, sinceMin, drainPct };
+   251→}
+   252→
+   253→/** The week-ahead "next up" pure (r87 → r90): once today is fully done
+   254→ *  — every caller guards this first (header chip: !shown && !justEnded;
+   255→ *  deadline strip: allDone) — the day arc should still answer "when IS the
+   256→ *  next one?". Strictly LATER THIS WEEK: days-ahead = (day − today + 7)
+   257→ *  % 7 ≥ 1; the +7 wrap is what keeps a Saturday honest about Monday (a
+   258→ *  naive day > today comparison breaks at the week boundary). Earliest day
+   259→ *  wins, then earliest start. Today is deliberately excluded (d ≥ 1): the
+   260→ *  muted family's promise is "later this week", and the callers' guards
+   261→ *  already mean today has nothing left to say. r90: promoted from the
+   262→ *  header's inline 3-liner (live-verified r87) so the header chip and the
+   263→ *  strip's done state share ONE math and can never drift. Pure — pinned
+   264→ *  in tests (r90). */
+   265→export function nextUpcomingThisWeek(
+   266→  slots: TimetableSlotRow[] | null | undefined,
+   267→  now: number
+   268→): TimetableSlotRow | null {
+   269→  if (!slots || slots.length === 0) return null;
+   270→  const { day: today } = istNow(now);
+   271→  return (
+   272→    slots
+   273→      .map((s) => ({ s, d: (s.dayOfWeek - today + 7) % 7 }))
+   274→      .filter((x) => x.d >= 1)
+   275→      .sort((a, b) => a.d - b.d || a.s.startMin - b.s.startMin)[0]?.s ?? null
+   276→  );
+   277→}
+   278→
+   279→/** Cyclic days-ahead for one weekday vs the IST clock (r91): 0 = today,
+   280→ *  1 = tomorrow … 6 = the day before today next week. The SAME +7 wrap the
+   281→ *  week-ahead selection uses — exported so the header chip and the strip's
+   282→ *  done line qualify their "Mon 11:00" with ONE distance math instead of
+   283→ *  two drifting re-derivations. Pure — pinned in tests (r91). */
+   284→export function daysAheadThisWeek(dayOfWeek: number, now: number): number {
+   285→  return (dayOfWeek - istNow(now).day + 7) % 7;
+   286→}
+   287→
+   288→/** Display twin of daysAheadThisWeek (r91): 0 reads "today", 1 reads
+   289→ *  "tomorrow" (the friendly, still-honest case), every other gap reads
+   290→ *  "in Nd" — the humanizeMins dialect ("in 4h") one unit up. Pure —
+   291→ *  pinned in tests (r91). */
+   292→export function daysAheadLabel(d: number): string {
+   293→  return d === 0 ? "today" : d === 1 ? "tomorrow" : `in ${d}d`;
+   294→}
+   295→
+   296→/** r94: the qualifier's TONE is family math too — "tomorrow" (d=1) lifts one
+   297→ *  rung of the r87 muted ladder (prep tonight is actionable tonight, so the
+   298→ *  wait deserves full muted presence instead of /70), while "in Nd" stays at
+   299→ *  the ladder's quietest rung. d=0 never reaches these surfaces (today is
+   300→ *  excluded upstream) but stays quiet defensively. ONE source — the header
+   301→ *  chip, the strip's done line and the today-card pill all consume it, so
+   302→ *  the whole family shifts tone together. Pinned in tests (r94). */
+   303→export function daysAheadQualifierClass(d: number): string {
+   304→  return d === 1 ? "text-muted-foreground" : "text-muted-foreground/70";
+   305→}
+   306→
+   307→/** Build the exact SMS text shown in the bubble (and used for copy/share). */
+   308→export function buildTodaySms(input: TodaySmsInput): string {
+   309→  const p = istParts(input.now);
+   310→  const lines: string[] = [];
+   311→
+   312→  lines.push(`ERP SYNC - ${p.weekday} ${p.day} ${p.month} ${p.year}`);
+   313→
+   314→  const o = input.overall;
+   315→  if (o.total === 0) {
+   316→    lines.push("OVERALL no classes recorded yet");
+   317→  } else {
+   318→    lines.push(
+   319→      `OVERALL ${o.present}/${o.total} (${o.percentage.toFixed(2)}%) vs ${input.target}% target - ${o.status.toUpperCase()}`
+   320→    );
+   321→    if (o.classesToTarget > 0) {
+   322→      lines.push(
+   323→        `NEED ${o.classesToTarget} more attended class${o.classesToTarget === 1 ? "" : "es"} to reach ${input.target}%`
+   324→      );
+   325→    } else if (o.canSkip > 0) {
+   326→      lines.push(`CAN SKIP ${o.canSkip} class${o.canSkip === 1 ? "" : "es"} and stay above ${input.target}%`);
+   327→    } else {
+   328→      lines.push("ON TARGET - keep it up");
+   329→    }
+   330→    const budget = input.subjects.reduce((n, s) => n + (s.total > 0 ? s.canSkip : 0), 0);
+   331→    lines.push(
+   332→      budget > 0
+   333→        ? `BUDGET ${budget} safe skip${budget === 1 ? "" : "s"} across subjects`
+   334→        : "BUDGET 0 - attend everything"
+   335→    );
+   336→  }
+   337→
+   338→  /* Today's schedule — a time-sensitive fact, so it sits right after the
+   339→     attendance block and before the worst-subjects roll-up. Honest absence
+   340→     when no timetable has synced; "none scheduled" for a genuinely free day. */
+   341→  if (input.todayClasses) {
+   342→    const tc = input.todayClasses;
+   343→    if (tc.length === 0) {
+   344→      lines.push("CLASSES TODAY none scheduled");
+   345→    } else {
+   346→      const live = todayLiveClass(tc, input.now);
+   347→      if (!live) {
+   348→        lines.push(
+   349→          tc.length === 1 ? "CLASSES TODAY done (1 class)" : `CLASSES TODAY all ${tc.length} done`
+   350→        );
+   351→      } else if (live.kind === "ongoing") {
+   352→        lines.push(
+   353→          `CLASSES TODAY ${live.leftCount} left - in class ${live.cls.subjectCode} until ${hhmmFromMin(live.cls.endMin)}`
+   354→        );
+   355→      } else {
+   356→        lines.push(
+   357→          `CLASSES TODAY ${live.leftCount} left - next ${hhmmFromMin(live.cls.startMin)} ${live.cls.subjectCode}`
+   358→        );
+   359→      }
+   360→    }
+   361→  }
+   362→
+   363→  const worst = input.subjects
+   364→    .filter((s) => s.total > 0 && (s.status === "danger" || s.status === "warning"))
+   365→    .sort((a, b) => a.percentage - b.percentage)
+   366→    .slice(0, 2);
+   367→  if (worst.length > 0) {
+   368→    lines.push(
+   369→      `WORST ${worst
+   370→        .map((s) => `${s.code} ${s.percentage.toFixed(1)}% (${s.present}/${s.total})`)
+   371→        .join(", ")}`
+   372→    );
+   373→  }
+   374→
+   375→  if (input.alaTotal > 0) {
+   376→    let ala = `ALAS ${input.alaPending} pending / ${input.alaTotal} tracked`;
+   377→    const bits: string[] = [];
+   378→    if (input.alaOverdue > 0) bits.push(`${input.alaOverdue} overdue`);
+   379→    if (input.alaDueWeek > 0) bits.push(`${input.alaDueWeek} due in 7 days`);
+   380→    if (bits.length > 0) ala += ` (${bits.join(", ")})`;
+   381→    lines.push(ala);
+   382→  }
+   383→
+   384→  if (input.nextDue) {
+   385→    const d = istParts(new Date(input.nextDue.dueAt).getTime());
+   386→    const title = ascii(input.nextDue.title);
+   387→    const clipped = title.length > 28 ? `${title.slice(0, 27)}...` : title;
+   388→    lines.push(
+   389→      `NEXT ${clipped} (${input.nextDue.subjectCode ?? "?"}) due ${d.weekday} ${d.day} ${d.month}`
+   390→    );
+   391→  }
+   392→
+   393→  if (input.notedCount > 0) {
+   394→    lines.push(`NOTES ${input.notedCount} private note${input.notedCount === 1 ? "" : "s"} on this device`);
+   395→  }
+   396→
+   397→  const synced = input.lastSyncAt ? istParts(new Date(input.lastSyncAt).getTime()).hhmm : null;
+   398→  lines.push(`SYNCED ${synced ?? "not yet"} IST - erp.gmiu.edu.in`);
+   399→
+   400→  return ascii(lines.join("\n"));
+   401→}
+   402→
+   403→/* ------------------------------------------------------------------ */
+   404→/* Bubble render helpers (styled render of the SAME text)              */
+   405→/* ------------------------------------------------------------------ */
+   406→
+   407→/** Keywords that open the brief's lines — highlighted in the bubble's
+   408→ *  RENDER only. The clipboard/print text stays byte-identical: these are
+   409→ *  spans around the exact same characters, nothing added, nothing moved.
+   410→ *  Exported so the tone picker's test can walk the FULL table. */
+   411→export const SMS_KEYWORDS = [
+   412→  "CLASSES TODAY", // longest first — before any shorter prefix could match
+   413→  "OVERALL",
+   414→  "NEED",
+   415→  "CAN SKIP",
+   416→  "ON TARGET",
+   417→  "BUDGET",
+   418→  "WORST",
+   419→  "ALAS",
+   420→  "NEXT",
+   421→  "NOTES",
+   422→  "SYNCED",
+   423→];
+   424→
+   425→/** Split one brief line into { keyword, rest } for the bubble's styled
+   426→ *  render — null when the line opens with no known keyword (the header,
+   427→ *  "ERP SYNC - ...", stays plain). Exact character content is preserved
+   428→ *  either way; rest always begins with the original whitespace. */
+   429→export function smsLineParts(line: string): { keyword: string; rest: string } | null {
+   430→  for (const k of SMS_KEYWORDS) {
+   431→    if (line === k) return { keyword: k, rest: "" };
+   432→    if (line.startsWith(k + " ")) return { keyword: k, rest: line.slice(k.length) };
+   433→  }
+   434→  return null;
+   435→}
+   436→
+   437→/* ------------------------------------------------------------------ */
+   438→/* Component                                                           */
+   439→/* ------------------------------------------------------------------ */
+   440→
+   441→/** Bubble keyword tones — the styled render color-codes line-openers by
+   442→ *  their ROLE in the brief (clipboard text is untouched; these are paint
+   443→ *  classes on the exact same characters):
+   444→ *   - "WORST" → amber: the app's warning/danger language (status chips, ALA
+   445→ *     overdue) — the weakest subjects must read as a caution, not a win;
+   446→ *   - "NEXT" → violet: the app's focus language (retry-story spotlight,
+   447→ *     subject drawer) — the one actionable deadline deserves the eye;
+   448→ *   - everything else → emerald: the card's own identity color.
+   449→ *  Unknown keywords (future lines added without a tone decision) fall back
+   450→ *  to emerald — a new line must never render unpainted or crash. */
+   451→export type SmsKeywordTone = "emerald" | "amber" | "violet";
+   452→
+   453→export function smsKeywordTone(keyword: string): SmsKeywordTone {
+   454→  if (keyword === "WORST") return "amber";
+   455→  if (keyword === "NEXT") return "violet";
+   456→  return "emerald";
+   457→}
+   458→
+   459→/** Classes for each tone — kept beside the picker so the bubble render
+   460→ *  stays a lookup, never an inline ternary chain that can drift. */
+   461→export const SMS_TONE_CLASS: Record<SmsKeywordTone, string> = {
+   462→  emerald: "text-emerald-700 dark:text-emerald-400",
+   463→  amber: "text-amber-700 dark:text-amber-400",
+   464→  violet: "text-violet-700 dark:text-violet-400",
+   465→};
+   466→
+   467→/** Legacy clipboard fallback for insecure contexts (plain-HTTP views, older
+   468→ *  WebViews where navigator.clipboard is undefined or rejects): an off-screen
+   469→ *  textarea + execCommand("copy"). execCommand is deprecated but STILL the
+   470→ *  only clipboard write path those contexts have — the honest ladder is
+   471→ *  async-clipboard first, this second, a visible failure state last.
+   472→ *  Selection is restored so an accidental user selection is never clobbered.
+   473→ *  Guarded for non-DOM environments (bun tests import this module). */
+   474→export function legacyCopy(text: string): boolean {
+   475→  if (typeof document === "undefined") return false;
+   476→  try {
+   477→    const ta = document.createElement("textarea");
+   478→    ta.value = text;
+   479→    ta.setAttribute("readonly", "");
+   480→    ta.style.position = "fixed";
+   481→    ta.style.top = "-9999px";
+   482→    ta.style.left = "-9999px";
+   483→    ta.style.opacity = "0";
+   484→    document.body.appendChild(ta);
+   485→    const sel = document.getSelection();
+   486→    const prev = sel && sel.rangeCount > 0 ? sel.getRangeAt(0) : null;
+   487→    ta.select();
+   488→    ta.setSelectionRange(0, text.length);
+   489→    let ok = false;
+   490→    try {
+   491→      ok = document.execCommand("copy");
+   492→    } catch {
+   493→      ok = false;
+   494→    }
+   495→    document.body.removeChild(ta);
+   496→    if (prev && sel) {
+   497→      sel.removeAllRanges();
+   498→      sel.addRange(prev);
+   499→    }
+   500→    return ok;
+   501→  } catch {
+   502→    return false;
+   503→  }
+   504→}
+   505→
+   506→export function TodayCard(props: TodaySmsInput & { className?: string; /** r93: the full-week attending list — feeds the week-ahead pill (FIFTH surface of the "next up this week" family); null/undefined = no timetable synced → the pill stays honestly absent. */ weekSlots?: TimetableSlotRow[] | null }) {
+   507→  const {
+   508→    now,
+   509→    overall,
+   510→    target,
+   511→    subjects,
+   512→    warningSubjects,
+   513→    alaPending,
+   514→    alaTotal,
+   515→    alaOverdue,
+   516→    alaDueWeek,
+   517→    nextDue,
+   518→    notedCount,
+   519→    lastSyncAt,
+   520→    todayClasses,
+   521→    weekSlots,
+   522→    className,
+   523→  } = props;
+   524→
+   525→  const smsText = useMemo(
+   526→    () =>
+   527→      buildTodaySms({
+   528→        now,
+   529→        overall,
+   530→        target,
+   531→        subjects,
+   532→        warningSubjects,
+   533→        alaPending,
+   534→        alaTotal,
+   535→        alaOverdue,
+   536→        alaDueWeek,
+   537→        nextDue,
+   538→        notedCount,
+   539→        lastSyncAt,
+   540→        todayClasses,
+   541→      }),
+   542→    [now, overall, target, subjects, warningSubjects, alaPending, alaTotal, alaOverdue, alaDueWeek, nextDue, notedCount, lastSyncAt, todayClasses]
+   543→  );
+   544→  const seg = useMemo(() => smsSegments(smsText), [smsText]);
+   545→  const header = istParts(now);
+   546→  /* Line-split once for the styled bubble render (same characters — the
+   547→     clipboard keeps the plain string; only the paint is highlighted). */
+   548→  const smsLines = useMemo(() => smsText.split("\n"), [smsText]);
+   549→
+   550→  /* Live class chip — same pure core as the CLASSES SMS line, plus the
+   551→     90-min calm window (an 18:00 class at 07:00 must not shout) and the
+   552→     ≤10-min IMMINENT escalation (amber + fast pulse — get moving). */
+   553→  const liveClass = useMemo(() => todayChipClass(todayClasses, now), [todayClasses, now]);
+   554→  const urgency = chipUrgency(liveClass);
+   555→  /* r83: the post-class bridge — while the auto-sync hasn't recorded the
+   556→     last class, the chip keeps speaking (amber, elapsed clock) instead of
+   557→     vanishing; the deep-link lands on the timetable row's drain bar. */
+   558→  const justEnded = useMemo(() => justEndedChip(todayClasses, now), [todayClasses, now]);
+   559→  /* r93: after the bridge closes, the today-card's chip no longer goes dark
+   560→     while the header chip, strip and grid all speak — the FIFTH surface of
+   561→     the week-ahead family, the SAME pinned pures (selection + distance),
+   562→     muted by the r87 ladder (information, not an alarm). Precedence: the
+   563→     live state first, the bridge second, the week ahead last — one voice
+   564→     at a time. */
+   565→  const weekNextInfo = useMemo(() => {
+   566→    const w = nextUpcomingThisWeek(weekSlots ?? null, now);
+   567→    if (!w) return null;
+   568→    const d = daysAheadThisWeek(w.dayOfWeek, now);
+   569→    return { slot: w, d, label: daysAheadLabel(d) };
+   570→  }, [weekSlots, now]);
+   571→
+   572→  /* Chip click → deep-link to the timetable card. Event-based (same pattern
+   573→     as the palette's erp:copy-summary commands): TodayCard stays prop-light
+   574→     and headless QA can drive the jump without clicking the chip. */
+   575→  const focusTimetable = () => {
+   576→    try {
+   577→      window.dispatchEvent(new CustomEvent("erp:focus-timetable"));
+   578→    } catch {
+   579→      /* exotic env without CustomEvent — the chip stays a calm status pill */
+   580→    }
+   581→  };
+   582→
+   583→  /* --- copy ---------------------------------------------------------- */
+   584→  const [copied, setCopied] = useState(false);
+   585→  const [copyFailed, setCopyFailed] = useState(false);
+   586→  const copyTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+   587→  const copyText = async () => {
+   588→    let ok = false;
+   589→    try {
+   590→      await navigator.clipboard.writeText(smsText);
+   591→      ok = true;
+   592→    } catch {
+   593→      /* Round 72: insecure context (plain HTTP / older WebView) or permission
+   594→       * denied — instead of staying INERT, try the legacy path once before
+   595→       * admitting defeat. The student taps "Copy text" on a phone; a silent
+   596→       * no-op reads as a broken app. */
+   597→      ok = legacyCopy(smsText);
+   598→    }
+   599→    setCopied(ok);
+   600→    setCopyFailed(!ok);
+   601→    if (copyTimer.current) clearTimeout(copyTimer.current);
+   602→    copyTimer.current = setTimeout(() => {
+   603→      setCopied(false);
+   604→      setCopyFailed(false);
+   605→    }, 2000);
+   606→  };
+   607→
+   608→  /* --- native share (mobile) ----------------------------------------- */
+   609→  const [canShare, setCanShare] = useState(false);
+   610→  const [shared, setShared] = useState(false);
+   611→  const shareTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+   612→  useEffect(() => {
+   613→    setCanShare(typeof navigator !== "undefined" && typeof navigator.share === "function");
+   614→  }, []);
+   615→  const shareText = async () => {
+   616→    try {
+   617→      await navigator.share({ title: "ERP Sync - today card", text: smsText });
+   618→      setShared(true);
+   619→      if (shareTimer.current) clearTimeout(shareTimer.current);
+   620→      shareTimer.current = setTimeout(() => setShared(false), 2000);
+   621→    } catch {
+   622→      /* user dismissed the sheet / share unavailable — stay inert */
+   623→    }
+   624→  };
+   625→
+   626→  /* --- print ONLY this card ------------------------------------------ */
+   627→  /* Arming mounts the portal clone and tags <body> with .print-today;
+   628→     the print stylesheet then hides every other direct body child.
+   629→     'afterprint' (or a safety timeout) always disarms. */
+   630→  const [printArmed, setPrintArmed] = useState(false);
+   631→  useEffect(() => {
+   632→    if (!printArmed) return;
+   633→    const done = () => setPrintArmed(false);
+   634→    const raf = requestAnimationFrame(() => window.print());
+   635→    window.addEventListener("afterprint", done);
+   636→    const safety = setTimeout(done, 60_000);
+   637→    return () => {
+   638→      cancelAnimationFrame(raf);
+   639→      window.removeEventListener("afterprint", done);
+   640→      clearTimeout(safety);
+   641→    };
+   642→  }, [printArmed]);
+   643→  useEffect(() => {
+   644→    if (!printArmed) return;
+   645→    document.body.classList.add("print-today");
+   646→    return () => document.body.classList.remove("print-today");
+   647→  }, [printArmed]);
+   648→
+   649→  const chipBtn =
+   650→    "h-7 gap-1 rounded-full border border-border/40 bg-background/40 px-2.5 text-xs text-muted-foreground hover:bg-accent hover:text-foreground";
+   651→
+   652→  return (
+   653→    <Card className={className}>
+   654→      <CardHeader className="pb-3">
+   655→        <div className="flex items-start gap-3">
+   656→          <span
+   657→            className="flex size-8 shrink-0 items-center justify-center rounded-md bg-emerald-500/10 text-emerald-600 dark:text-emerald-400"
+   658→            aria-hidden="true"
+   659→          >
+   660→            <MessageSquareText className="size-4" />
+   661→          </span>
+   662→          <div className="min-w-0 flex-1">
+   663→            <CardTitle className="text-base tracking-tight">Today card</CardTitle>
+   664→            <CardDescription className="text-xs">
+   665→              A pocket brief of where you stand — like a text message. Copy it into any chat, or print just this card.
+   666→            </CardDescription>
+   667→          </div>
+   668→        </div>
+   669→      </CardHeader>
+   670→      <CardContent className="space-y-3">
+   671→        {/* actions */}
+   672→        <div className="flex flex-wrap items-center gap-1.5 print:hidden">
+   673→          <Button variant="ghost" size="sm" className={chipBtn} onClick={copyText} disabled={!smsText}
+   674→            aria-label="Copy today's summary as plain text" title="Copy the exact text shown below">
+   675→            {copied ? (
+   676→              <Check className="size-3.5 text-emerald-500" aria-hidden="true" />
+   677→            ) : copyFailed ? (
+   678→              <Copy className="size-3.5 text-amber-500" aria-hidden="true" />
+   679→            ) : (
+   680→              <Copy className="size-3.5" aria-hidden="true" />
+   681→            )}
+   682→            {copied ? "Copied" : copyFailed ? "Copy failed — select the bubble text instead" : "Copy text"}
+   683→          </Button>
+   684→          {canShare && (
+   685→            <Button variant="ghost" size="sm" className={chipBtn} onClick={shareText} disabled={!smsText}
+   686→              aria-label="Share today's summary via your device" title="Open your device's share sheet with this text">
+   687→              <Share2 className="size-3.5" aria-hidden="true" />
+   688→              {shared ? "Shared" : "Share"}
+   689→            </Button>
+   690→          )}
+   691→          <Button variant="ghost" size="sm" className={chipBtn} onClick={() => setPrintArmed(true)} disabled={!smsText}
+   692→            aria-label="Print only the today card" title="Print or save just this card as PDF — the rest of the app is hidden on paper">
+   693→            <Printer className="size-3.5" aria-hidden="true" />
+   694→            Print card
+   695→          </Button>
+   696→          {liveClass && urgency && (
+   697→            <button
+   698→              type="button"
+   699→              onClick={focusTimetable}
+   700→              className={cn(
+   701→                "inline-flex cursor-pointer items-center gap-1.5 rounded-full border px-2.5 py-1 text-[11px] font-medium tabular-nums transition-all hover:brightness-105 hover:shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-violet-500/40 active:scale-[0.98] print:hidden",
+   702→                urgency === "soon" || urgency === "ongoing"
+   703→                  ? "border-emerald-500/40 bg-emerald-500/10 text-emerald-700 dark:text-emerald-300"
+   704→                  : "border-amber-500/40 bg-amber-500/10 text-amber-700 dark:text-amber-300"
+   705→              )}
+   706→              aria-label={
+   707→                urgency === "ongoing"
+   708→                  ? "Ongoing class — jump to today's schedule in the timetable"
+   709→                  : urgency === "wrapping"
+   710→                    ? "Class wrapping up — jump to today's schedule in the timetable"
+   711→                    : urgency === "imminent"
+   712→                      ? "Class starting imminently — jump to today's schedule in the timetable"
+   713→                      : "Next class — jump to today's schedule in the timetable"
+   714→              }
+   715→              title={
+   716→                urgency === "ongoing"
+   717→                  ? "One of today's classes is happening right now — click to jump to the schedule"
+   718→                  : urgency === "wrapping"
+   719→                    ? "This class ends within minutes — click to jump to the schedule"
+   720→                    : urgency === "imminent"
+   721→                      ? "This class starts within minutes — click to jump to the schedule"
+   722→                      : "Today's next class starts within 90 minutes — click to jump to the schedule"
+   723→              }
+   724→            >
+   725→              <span className="relative flex size-1.5" aria-hidden="true">
+   726→                <span
+   727→                  className={cn(
+   728→                    "absolute inline-flex h-full w-full animate-ping rounded-full opacity-60 motion-reduce:hidden",
+   729→                    urgency === "soon" || urgency === "ongoing" ? "bg-emerald-500" : "bg-amber-500"
+   730→                  )}
+   731→                  style={{ animationDuration: urgency === "imminent" ? "1.1s" : "2.2s" }}
+   732→                />
+   733→                <span
+   734→                  className={cn(
+   735→                    "relative inline-flex size-1.5 rounded-full",
+   736→                    urgency === "soon" || urgency === "ongoing" ? "bg-emerald-500" : "bg-amber-500"
+   737→                  )}
+   738→                />
+   739→              </span>
+   740→              {urgency === "ongoing"
+   741→                ? `In class ${liveClass.cls.subjectCode} · ends ${hhmmFromMin(liveClass.cls.endMin)}`
+   742→                : urgency === "wrapping"
+   743→                  ? `Wrapping up ${liveClass.cls.subjectCode} · ends ${hhmmFromMin(liveClass.cls.endMin)}`
+   744→                  : urgency === "imminent"
+   745→                    ? `${liveClass.cls.subjectCode} starts in ${humanizeMins(liveClass.mins)}`
+   746→                    : `Next ${liveClass.cls.subjectCode} ${hhmmFromMin(liveClass.cls.startMin)} · in ${humanizeMins(liveClass.mins)}`}
+   747→            </button>
+   748→          )}
+   749→          {!liveClass && justEnded && (
+   750→            <button
+   751→              type="button"
+   752→              onClick={focusTimetable}
+   753→              className="relative inline-flex cursor-pointer items-center gap-1.5 overflow-hidden rounded-full border border-amber-500/40 bg-amber-500/10 px-2.5 py-1 text-[11px] font-medium tabular-nums text-amber-700 transition-all hover:brightness-105 hover:shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-violet-500/40 active:scale-[0.98] print:hidden dark:text-amber-300"
+   754→              aria-label="Class just ended — jump to today's schedule in the timetable"
+   755→              title="The class finished — the next auto-sync (within 15 minutes) records it. Click to jump to the schedule."
+   756→            >
+   757→              <span className="relative flex size-1.5" aria-hidden="true">
+   758→                <span
+   759→                  className="absolute inline-flex h-full w-full animate-ping rounded-full bg-amber-500 opacity-60 motion-reduce:hidden"
+   760→                  style={{ animationDuration: "2.2s" }}
+   761→                />
+   762→                <span className="relative inline-flex size-1.5 rounded-full bg-amber-500" />
+   763→              </span>
+   764→              Just ended {justEnded.cls.subjectCode} · {humanizeMins(justEnded.sinceMin)} ago
+   765→              {/* r84: the bridge drains visibly — the r81 depleting amber
+   766→                  bar, chip edition (aria-hidden decorative; the honest
+   767→                  anchor stays the tooltip's worst-case window). */}
+   768→              <span
+   769→                aria-hidden="true"
+   770→                className="absolute inset-x-1.5 bottom-0 h-0.5 overflow-hidden rounded-full bg-amber-500/15"
+   771→              >
+   772→                <span
+   773→                  className="block h-full rounded-full bg-gradient-to-r from-amber-500/50 to-amber-500 transition-[width] duration-1000 ease-linear"
+   774→                  style={{ width: `${justEnded.drainPct}%` }}
+   775→                />
+   776→              </span>
+   777→            </button>
+   778→          )}
+   779→          {!liveClass && !justEnded && weekNextInfo && (
+   780→            /* r93: the week-ahead pill — the today-card's chip keeps answering
+   781→               "when IS the next one?" after the bridge closes, in the muted
+   782→               r87 ladder tone. Same deep-link (erp:focus-timetable) as the
+   783→               live/bridge chips; visually the QUIETEST member of the family.
+   784→               r95: the native title retires in favor of a RICH tooltip with
+   785→               information parity with the header chip's tooltip — the full
+   786→               subject name + the start–end range — plus the click hint the
+   787→               header chip can't offer (it isn't clickable). The aria-label is
+   788→               UNCHANGED: the header/pill twin stays byte-identical. */
+   789→            <TooltipProvider delayDuration={150}>
+   790→              <Tooltip>
+   791→                <TooltipTrigger asChild>
+   792→                  <button
+   793→                    type="button"
+   794→                    onClick={focusTimetable}
+   795→                    className="inline-flex cursor-pointer items-center gap-1.5 whitespace-nowrap rounded-full border border-border/70 bg-muted/50 px-2.5 py-1 text-[11px] font-medium tabular-nums text-muted-foreground transition-all hover:brightness-105 hover:shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-violet-500/40 active:scale-[0.98] print:hidden"
+   796→                    aria-label={`Next class this week — ${weekNextInfo.slot.subjectCode} ${DAY_NAMES_SHORT[weekNextInfo.slot.dayOfWeek]} ${hhmmFromMin(weekNextInfo.slot.startMin)} (${weekNextInfo.label})`}
+   797→                  >
+   798→                    <CalendarClock className="size-3 shrink-0" aria-hidden="true" />
+   799→                    <span className="font-mono text-[10px] font-semibold">{weekNextInfo.slot.subjectCode}</span>
+   800→                    <span className="tabular-nums">
+   801→                      {DAY_NAMES_SHORT[weekNextInfo.slot.dayOfWeek]} {hhmmFromMin(weekNextInfo.slot.startMin)}
+   802→                    </span>
+   803→                    <span className={`tabular-nums ${daysAheadQualifierClass(weekNextInfo.d)}`} aria-hidden="true">
+   804→                      · {weekNextInfo.label}
+   805→                    </span>
+   806→                  </button>
+   807→                </TooltipTrigger>
+   808→                <TooltipContent className="max-w-xs">
+   809→                  <p className="text-xs">
+   810→                    Next class this week:{" "}
+   811→                    {subjects?.find((x) => x.code === weekNextInfo.slot.subjectCode)?.name ?? weekNextInfo.slot.subjectCode}
+   812→                    {" "}· {DAY_NAMES_SHORT[weekNextInfo.slot.dayOfWeek]} {hhmmFromMin(weekNextInfo.slot.startMin)}–{hhmmFromMin(weekNextInfo.slot.endMin)} · {weekNextInfo.label}
+   813→                  </p>
+   814→                  <p className="text-[11px] text-muted-foreground">Click to jump to the schedule</p>
+   815→                </TooltipContent>
+   816→              </Tooltip>
+   817→            </TooltipProvider>
+   818→          )}
+   819→          <span
+   820→            className={cn(
+   821→              "ml-auto hidden text-[10px] tabular-nums sm:inline",
+   822→              seg.segments > 1 ? "text-amber-600/80 dark:text-amber-400/80" : "text-muted-foreground/70"
+   823→            )}
+   824→            aria-hidden="true"
+   825→            title={
+   826→              seg.encoding === "GSM-7"
+   827→                ? "GSM-7 plain text: 1 segment carries up to 160 chars; longer texts travel as 153-char concatenated segments"
+   828→                : "Contains non-Latin characters — encoded UCS-2, so 1 segment carries only 70 chars"
+   829→            }
+   830→          >
+   831→            {seg.encoding === "GSM-7" ? "SMS-ready" : "unicode"} · {seg.segments} segment{seg.segments === 1 ? "" : "s"} · {seg.chars} chars
+   832→          </span>
+   833→        </div>
+   834→
+   835→        {/* the message bubble — WYSIWYG with the clipboard text */}
+   836→        <div
+   837→          className="relative rounded-2xl rounded-br-md border border-emerald-500/20 bg-gradient-to-br from-emerald-500/10 via-teal-500/5 to-transparent px-4 py-3.5 shadow-sm"
+   838→          role="figure"
+   839→          aria-label="Today's summary written as a plain-text message"
+   840→        >
+   841→          {/* SMS bubble tail — the chat-app cue that this box IS the message
+   842→              (pure paint: rotated square sharing the bubble's border/bg). */}
+   843→          <span
+   844→            aria-hidden="true"
+   845→            className="absolute -bottom-[9px] right-6 size-4 rotate-45 rounded-br-[3px] border-b border-r border-emerald-500/20 bg-emerald-500/10"
+   846→          />
+   847→          <pre className="whitespace-pre-wrap break-words font-mono text-[12px] leading-relaxed text-foreground/90 sm:text-[12.5px]">
+   848→            {smsLines.map((ln, i) => {
+   849→              const parts = smsLineParts(ln);
+   850→              return (
+   851→                <span key={i}>
+   852→                  {parts ? (
+   853→                    <>
+   854→                      <span className={cn("font-semibold", SMS_TONE_CLASS[smsKeywordTone(parts.keyword)])}>
+   855→                        {parts.keyword}
+   856→                      </span>
+   857→                      {parts.rest}
+   858→                    </>
+   859→                  ) : (
+   860→                    ln
+   861→                  )}
+   862→                  {i < smsLines.length - 1 ? "\n" : ""}
+   863→                </span>
+   864→              );
+   865→            })}
+   866→          </pre>
+   867→        </div>
+   868→
+   869→        {/* delivered caption */}
+   870→        <div className="flex items-center gap-1.5 text-[10px] text-muted-foreground/80" aria-hidden="true">
+   871→          <CheckCheck className="size-3 text-emerald-500/80" />
+   872→          <span>generated {header.hhmm} IST · updates every minute · never sent anywhere automatically</span>
+   873→        </div>
+   874→      </CardContent>
+   875→
+   876→      {/* print-only clone: mounted via portal while printing is armed */}
+   877→      {printArmed &&
+   878→        typeof document !== "undefined" &&
+   879→        createPortal(
+   880→          <div id="today-card-print" className="hidden" aria-hidden="true">
+   881→            <div className="mx-auto max-w-[620px] bg-white p-8 text-black">
+   882→              <div className="mb-3 flex items-end justify-between border-b-2 border-black/80 pb-2">
+   883→                <div>
+   884→                  <p className="text-base font-bold tracking-tight">Today card</p>
+   885→                  <p className="text-xs text-black/70">Gyanmanjari Innovative University · erp.gmiu.edu.in</p>
+   886→                </div>
+   887→                <p className="text-xs tabular-nums text-black/70">
+   888→                  {header.weekday} {header.day} {header.month} {header.year} · {header.hhmm} IST
+   889→                </p>
+   890→              </div>
+   891→              <pre className="whitespace-pre-wrap break-words font-mono text-[12px] leading-relaxed text-black">
+   892→                {smsText}
+   893→              </pre>
+   894→              <p className="mt-3 text-[10px] text-black/60">
+   895→                Pocket brief generated by ERP Sync — the same text is available via &quot;Copy text&quot; on the dashboard.
+   896→              </p>
+   897→            </div>
+   898→          </div>,
+   899→          document.body
+   900→        )}
+   901→    </Card>
+   902→  );
+   903→}
+   904→
