@@ -4,6 +4,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { motion, AnimatePresence } from "framer-motion";
 import {
+  CalendarClock,
   CalendarDays,
   CalendarPlus,
   Check,
@@ -46,7 +47,18 @@ import { downloadTimetableIcs } from "@/lib/ics";
 import { applyBatchPicks, parallelCells } from "@/lib/batch-picks";
 import { createSlot, deleteSlot, fetchTimetable, setBatchPick, qk, ApiError, type SlotConflict } from "./api";
 import { humanizeMins, istNow, useNow } from "./shared";
-import { IMMINENT_MIN, JUST_ENDED_WINDOW_MIN } from "./today-card";
+/* r92: the week-grid joins the "next up this week" family as its FOURTH
+   surface — consuming the pinned pures (r90/r91) instead of re-deriving
+   the wrap math. Import direction is safe: today-card never imports this
+   file (the r84 cross-file pin exists precisely because the reverse edge
+   would cycle). */
+import {
+  daysAheadLabel,
+  daysAheadThisWeek,
+  IMMINENT_MIN,
+  JUST_ENDED_WINDOW_MIN,
+  nextUpcomingThisWeek,
+} from "./today-card";
 import type { AppMode, AttendanceView, SubjectView, TimetableSlotRow } from "./types";
 
 const DAY_NAMES = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
@@ -101,6 +113,7 @@ function SlotChip({
   nowMin,
   compact = false,
   state = "attending",
+  nextUpLabel,
 }: {
   slot: TimetableSlotRow;
   color: string;
@@ -110,6 +123,11 @@ function SlotChip({
   /** Pick awareness in the full-week grid: alternatives the student didn't
    *  pick and same-batch duplicates are dimmed (counted once either way). */
   state?: "attending" | "alternative" | "duplicate";
+  /** r92: when this chip IS the week's next unattended class, the distance
+   *  label ("tomorrow" / "in 2d") from the shared daysAhead pures — renders
+   *  a muted tag line even in compact mode (the whole point is marking the
+   *  next one on non-today columns). Undefined for every other chip. */
+  nextUpLabel?: string;
 }) {
   const st = slotStatus(slot, nowDay, nowMin);
   const ongoing = st.key === "ongoing";
@@ -193,6 +211,14 @@ function SlotChip({
       <p className="mt-0.5 text-[11px] tabular-nums text-muted-foreground">
         {hhmm(slot.startMin)}–{hhmm(slot.endMin)}
       </p>
+      {nextUpLabel && (
+        <p
+          className="mt-0.5 flex items-center gap-1 text-[10px] font-medium text-muted-foreground/80"
+          title={`Next class this week · ${nextUpLabel}`}
+        >
+          <CalendarClock className="size-2.5 shrink-0" aria-hidden="true" /> next up · {nextUpLabel}
+        </p>
+      )}
       {!compact && st.label && (
         <p
           className={cn(
@@ -821,6 +847,19 @@ export function TimetableCard({
   // student didn't pick (excluded) and same-batch duplicates are dimmed.
   const attendingIds = useMemo(() => new Set(batch.attending.map((s) => s.id)), [batch]);
   const excludedIds = useMemo(() => new Set(batch.excluded.map((s) => s.id)), [batch]);
+  /* r92: the "next up this week" marker reaches the grid — the SAME pinned
+     pure the header chip (r87) and the deadline strip (r90) speak, run over
+     the ATTENDING list so the tag can only land on a chip the student
+     actually attends (dimmed alternatives/duplicates are never "next up").
+     Matched by slot id → exactly ONE chip in the whole grid carries it. */
+  const weekNext = useMemo(
+    () => nextUpcomingThisWeek(batch.attending, now),
+    [batch, now]
+  );
+  const weekNextId = weekNext?.id ?? null;
+  const weekNextLabel = weekNext
+    ? daysAheadLabel(daysAheadThisWeek(weekNext.dayOfWeek, now))
+    : null;
   const ongoing = todaySlots.find((s) => nowMin >= s.startMin && nowMin < s.endMin);
   const next = todaySlots.find((s) => s.startMin > nowMin);
   /* Milestone stakes: rendered on the next/ongoing row only when attending
@@ -1229,6 +1268,7 @@ export function TimetableCard({
                                   nowDay={nowDay}
                                   nowMin={nowMin}
                                   compact={d !== nowDay}
+                                  nextUpLabel={s.id === weekNextId ? (weekNextLabel ?? undefined) : undefined}
                                   state={
                                     attendingIds.has(s.id)
                                       ? "attending"

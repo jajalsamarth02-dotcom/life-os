@@ -510,7 +510,7 @@ function NextUpStrip({
           <span className="relative flex size-1.5 shrink-0" aria-hidden="true">
             <span
               className={cn(
-                "absolute inline-flex h-full w-full animate-ping rounded-full opacity-60",
+                "absolute inline-flex h-full w-full animate-ping rounded-full opacity-60 motion-reduce:hidden",
                 isOverdue ? "bg-red-500" : "bg-emerald-500"
               )}
               style={{ animationDuration: "2.2s" }}
