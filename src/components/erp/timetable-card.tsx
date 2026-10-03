@@ -892,7 +892,21 @@ export function TimetableCard({
                     ) : null;
                   })()}
                 </div>
-                <Badge className="shrink-0 border-emerald-500/40 bg-emerald-500/15 text-emerald-700 dark:text-emerald-400" variant="outline">
+                {/* r78: symmetric urgency — the badge flips emerald → amber for
+                    the LAST JUST_ENDED_WINDOW_MIN (one sync cadence) of the
+                    class, mirroring the pre-class imminent flip. Amber = a
+                    transition is approaching (the end), the same "get ready"
+                    language the start countdown speaks. One constant, both
+                    ends of the class lifecycle — no new threshold to drift. */}
+                <Badge
+                  className={cn(
+                    "shrink-0",
+                    ongoing.endMin - nowMin <= JUST_ENDED_WINDOW_MIN
+                      ? "border-amber-500/40 bg-amber-500/10 text-amber-700 dark:text-amber-400"
+                      : "border-emerald-500/40 bg-emerald-500/15 text-emerald-700 dark:text-emerald-400"
+                  )}
+                  variant="outline"
+                >
                   {humanizeMins(ongoing.endMin - nowMin)} left
                 </Badge>
               </div>

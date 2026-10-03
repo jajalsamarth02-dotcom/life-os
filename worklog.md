@@ -2774,3 +2774,24 @@ Unresolved issues / risks & next-phase priorities:
 3. Feature residuals: dashboard strip humanize >60-min case live-unverified until a longer gap exists (format unit-pinned); SMS bubble raw ASCII deliberate; drawer retry-story namespace split unchanged.
 4. QA notes carried: Radix tabs snapshot+click-by-ref; MultiEdit partial-apply → re-READ; enabled:false generic; old-format tests → exit code; tsc scoped to src/ via project tsconfig; aria-labels are STATE-DEPENDENT — selector hunts must not pin fixed strings.
 5. Keeper cron 430680 alive; worklog protocol unchanged.
+
+---
+Task ID: 78
+Agent: Super Z (dev cron 430711)
+Task: Round 78 — CLASS START round: in-class state verified live (banner + ongoing chips + first real progress reading) + "wrapping up" badge flip (symmetric urgency).
+
+Work Log:
+1. STATUS: no parallel entries above 77. RSS AT START: 1971MB (lean, strict 2 loads). Clock 11:00 IST — class start minute.
+2. LIVE QA (load 1, 11:00:42 IST): today-card chip aria "Ongoing class — jump to today's schedule" + text "In class RESPONSIVE-WEB-MOBILE · ends 13:00" (ongoing-amber ✅); header chip "ends in 2h" (first live >60 humanize case — exact-hour format drops minutes, r73-pinned ✅); banner LIVE: "Happening now / RESPONSIVE-WEB-MOBILE · 11:00–13:00 / 2h left" (humanized badge ✅, aria-live=polite). Screenshot /tmp/qa-r78-inclass.png.
+3. HONEST NULL verified: at 11:00:42 classProgress = null (nowMin <= startMin at minute resolution) → banner progress section correctly absent; first valuenow reading T2 at 11:02:25 = **2%** (2.4 min into 120 min = 2.0% — the ~0.83%/min rate from r76 is ACCURATE). Note for QA selectors: the page has OTHER progressbars (attendance/ALA) — filter by aria-label starting "Class progress".
+4. FEATURE — "wrapping up" badge flip (timetable-card banner): the ongoing badge flips emerald → amber for the LAST JUST_ENDED_WINDOW_MIN (15 = one sync cadence) of the class — symmetric urgency: starts-in ≤10 amber (imminent) / ends-in ≤15 amber (wrapping up). One constant, both ends of the lifecycle, no new threshold to drift. Reuses the pinned JUST_ENDED_WINDOW_MIN (r75 boundary tests).
+5. TESTS: no new pure function (renderer ternary over an already-pinned constant). ALL 20 test files pass by EXIT CODE. tsc src/ ZERO errors.
+6. BROWSER QA (load 2, 11:02:25 IST): banner badge "1h 58m left" EMERALD (wrapping-up correctly OFF at 58 min > 15); classProgress bar present at 2%; console+errors cleared → reload → ZERO fresh errors. End state PRISTINE: notify path untouched, no sync clicks, ZERO sends ever.
+7. RSS AFTER ROUND: 2011MB MEASURED AT HANDOVER (first written as 1998 — estimate, corrected on measure; +40 from 1971 start; 2-load lean discipline held). ⚠️ OVER 2.0GB → NEXT ROUND MUST RUN THE NET-NEGATIVE PATTERN (r72/r74: single file, ≤2 loads, same-page evals).
+
+Unresolved issues / risks & next-phase priorities:
+1. ⚠️⚠️ MEMORY: 2011MB — OVER THE 2.0GB LINE (r74 1920 → r75 1957 → r76 1937 → r77 1937 → r78 2011). Next round: net-negative pattern MANDATORY (single file, ≤2 loads, r72/r74 pattern). Keeper-side restart proposal STILL UNAPPROVED — not added silently.
+2. TIME WINDOW — next rounds: 13:45 +08 (11:15 IST) → second classProgress reading (expect ~12-13%; verify +4-ish vs T2=2 per ~5 min — completes the climb verification); banner % caption + gradient bar screenshot in-class; 14:15 +08 (11:45 IST) → the NEW wrapping-up badge flip live (first observation, amber "15m left"); 14:30 +08 (12:00 IST) → class ends → just-ended badge live on rows AND week-grid chips (r75/r76); 14:45 → sync should record the class → honest post-sync QA (attendance counts may change — display-only, no clicks); 15:30 +08 class window ends; milestone celebration honest QA after 13:00 IST if attended.
+3. Feature residuals: dashboard strip >60 humanize case live-unverified (format pinned); SMS bubble raw ASCII deliberate; aria-live=polite on the banner announces per-minute badge text changes during class — deliberate (live region), revisit only if noisy.
+4. QA notes carried: aria-labels are STATE-DEPENDENT; header chip is a span not a button; dashboard violet jump button intentionally tone-neutral; progressbar needs label filtering; old-format tests → exit code; tsc scoped to src/.
+5. Keeper cron 430680 alive; worklog protocol unchanged.
