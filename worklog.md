@@ -2752,3 +2752,25 @@ Unresolved issues / risks & next-phase priorities:
 3. Feature residuals: SMS bubble raw ASCII deliberate (do not humanize); week-grid compact chips (non-today columns) never show just-ended (isJustEnded is today-only by construction — correct); drawer retry-story namespace split unchanged.
 4. QA notes carried: Radix tabs snapshot+click-by-ref; MultiEdit partial-apply → re-READ; enabled:false useQuery explicit generic; old-format tests → exit code; tsc scoped to src/ via project tsconfig only.
 5. Keeper cron 430680 alive; worklog protocol unchanged.
+
+---
+Task ID: 77
+Agent: Super Z (dev cron 430711)
+Task: Round 77 — urgency ladder reaches the week-grid chips + unified countdown language closes its last gap; IMMINENT-AMBER FLIP verified live on all alarm surfaces.
+
+Work Log:
+1. STATUS: no parallel entries above 76. RSS AT START: 1951MB (lean round). Clock 10:45 IST — 5 min before the 10:50 flip, so the round was sequenced code-first → QA-after-flip.
+2. FEATURE — r73's urgency ladder reaches the THIRD schedule surface: week-grid SlotChips. An upcoming chip inside IMMINENT_MIN tints amber (border-amber-500/40 + bg-amber-500/[0.04] + label text-amber-600/400 + title "Starting imminently"). IMMINENT_MIN is IMPORTED from today-card (verified cycle-free: today-card imports nothing from timetable-card) — one threshold, never duplicated, so header + today-card + chips escalate together. Alternatives/duplicates keep their state tooltips (precedence over the imminent title).
+3. FIX (language gap found by live scan) — dashboard-tab's "Jump to today's schedule" strip spoke RAW "starts in N min"/"ends in N min" (lines ~543-544 aria + ~575-576 text), violating the r73 unified-countdown contract; now humanizeMins (import from shared). Tone deliberately NOT escalated: it's the violet deep-link affordance, amber belongs to the alarm chips.
+4. TESTS: no new pure function (threshold reused via import; humanizeMins already pinned r73). ALL 20 test files pass by EXIT CODE. tsc src/ ZERO errors.
+5. LIVE QA — THE FLIP, all surfaces (2 loads + pre-flip baseline): 10:47 IST baseline: Sat chips "muted:starts in 13 min" (escalation correctly OFF >10 min). 10:51-10:55 IST post-flip: header span chip AMBER "RESPONSIVE-WEB-MOBILE in 5 min" ✅; today-card chip aria flipped to "Class starting imminently — …" ✅ (amber border/bg + 1.1s fast-pulse dot per r73 code); week-grid chips render (no >10 case left to see live — unit-pinned); dashboard strip humanized "starts in 5 min" ✅. Console+errors cleared → reload → ZERO fresh errors. Screenshots: /tmp/qa-r77-preflip.png, /tmp/qa-r77-imminent.png.
+6. QA METHOD NOTE (cost me 3 evals — encode it): the header chip is a <span lg:inline-flex> NOT a button; the today-card chip's aria-label CHANGES with urgency ("Class starting imminently —" replaces "Next class —"); selector hunts by fixed aria text miss state-changed surfaces. Scan by className tones (amber/emerald substring incl. getAttribute('class') for SVG) or enumerate buttons+spans broadly. Also: dashboard's violet jump button is intentionally tone-neutral — do not mistake it for a broken alarm chip.
+7. End state PRISTINE: notify path untouched, no sync clicks, display-only. ZERO sends ever.
+8. RSS AFTER ROUND: 1937MB (−14 from 1951 — net-negative again; ratchet r74 1920 → r75 1957 → r76 1937 → r77 1937 flat-to-down).
+
+Unresolved issues / risks & next-phase priorities:
+1. ⚠️⚠️ MEMORY: 1937MB, ratchet holding. Keeper-side restart proposal STILL UNAPPROVED — not added silently. Discipline unchanged.
+2. TIME WINDOW — IN-CLASS from 11:00 IST (13:30 +08): NEXT ROUND IS THE CLASS-START ROUND: (a) "Happening now" banner WITH gradient bar + % caption + humanized badge ("2h left" — first >60 humanize case observable live); (b) chips flip ongoing-amber (today-card "In class … ends 13:00", header "ends in 1h 55m"); (c) classProgress aria-valuenow climbing ~0.83%/min (120-min class — verify movement between two evals ~5 min apart ≈ +4); (d) 12:00 IST (14:30 +08) → just-ended badge live on rows AND week-grid chips (r75+r76 work, first live observation); 15:30 +08 class ends, milestone window continues to 13:00 IST.
+3. Feature residuals: dashboard strip humanize >60-min case live-unverified until a longer gap exists (format unit-pinned); SMS bubble raw ASCII deliberate; drawer retry-story namespace split unchanged.
+4. QA notes carried: Radix tabs snapshot+click-by-ref; MultiEdit partial-apply → re-READ; enabled:false generic; old-format tests → exit code; tsc scoped to src/ via project tsconfig; aria-labels are STATE-DEPENDENT — selector hunts must not pin fixed strings.
+5. Keeper cron 430680 alive; worklog protocol unchanged.

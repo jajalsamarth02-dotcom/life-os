@@ -46,6 +46,7 @@ import { downloadTimetableIcs } from "@/lib/ics";
 import { applyBatchPicks, parallelCells } from "@/lib/batch-picks";
 import { createSlot, deleteSlot, fetchTimetable, setBatchPick, qk, ApiError, type SlotConflict } from "./api";
 import { humanizeMins, istNow, useNow } from "./shared";
+import { IMMINENT_MIN } from "./today-card";
 import type { AppMode, AttendanceView, SubjectView, TimetableSlotRow } from "./types";
 
 const DAY_NAMES = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
@@ -112,6 +113,12 @@ function SlotChip({
 }) {
   const st = slotStatus(slot, nowDay, nowMin);
   const ongoing = st.key === "ongoing";
+  /* r77: the urgency ladder (r73) now reaches the week-grid chips — an
+     upcoming chip inside IMMINENT_MIN tints amber (border + label + title),
+     the same "get moving" tone the header and today-card chips flip at
+     10 min. IMMINENT_MIN stays the ONE threshold (imported, never
+     duplicated), so all three surfaces escalate together. */
+  const imminent = st.key === "upcoming" && slot.startMin - nowMin <= IMMINENT_MIN;
   /* r76: the "just ended" bridge (r75, today rows) now reaches the week-grid
      chips — an attending chip within 15 min after its class reads amber, not
      flat-dim, because the record isn't confirmed until the next auto-sync.
@@ -126,7 +133,9 @@ function SlotChip({
           ? "You picked a different class for this window — not counted in your plan"
           : state === "duplicate"
             ? "Another batch of the same class — counted once"
-            : undefined
+            : imminent
+              ? "Starting imminently"
+              : undefined
       }
       className={cn(
         "group rounded-lg border px-2 py-1.5 text-left transition-colors",
@@ -136,7 +145,9 @@ function SlotChip({
             ? "border-amber-500/30 bg-amber-500/[0.06] opacity-70"
             : st.key === "done"
               ? "border-border/40 bg-muted/30 opacity-55"
-              : "border-border/60 bg-card hover:bg-muted/40",
+              : imminent
+                ? "border-amber-500/40 bg-amber-500/[0.04]"
+                : "border-border/60 bg-card hover:bg-muted/40",
         state === "alternative" && "border-dashed opacity-50",
         state === "duplicate" && "opacity-45"
       )}
@@ -150,7 +161,16 @@ function SlotChip({
         {hhmm(slot.startMin)}–{hhmm(slot.endMin)}
       </p>
       {!compact && st.label && (
-        <p className={cn("mt-0.5 text-[10px] font-medium", ongoing ? "text-emerald-600 dark:text-emerald-400" : "text-muted-foreground")}>
+        <p
+          className={cn(
+            "mt-0.5 text-[10px] font-medium",
+            ongoing
+              ? "text-emerald-600 dark:text-emerald-400"
+              : imminent
+                ? "text-amber-600 dark:text-amber-400"
+                : "text-muted-foreground"
+          )}
+        >
           {st.label}
         </p>
       )}

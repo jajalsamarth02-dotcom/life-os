@@ -68,6 +68,7 @@ import {
   TypeIcon,
   useNow,
   istNow,
+  humanizeMins,
   AlaStatChip,
   collectAlaStats,
   SkipPips,
@@ -540,8 +541,8 @@ function NextUpStrip({
           aria-label={`Jump to today's schedule${
             classInfo.next
               ? classInfo.ongoing
-                ? ` — ${classInfo.next.subjectCode} ends in ${classInfo.next.endMin - nowMin} min`
-                : ` — ${classInfo.next.subjectCode} starts in ${classInfo.next.startMin - nowMin} min`
+                ? ` — ${classInfo.next.subjectCode} ends in ${humanizeMins(classInfo.next.endMin - nowMin)}`
+                : ` — ${classInfo.next.subjectCode} starts in ${humanizeMins(classInfo.next.startMin - nowMin)}`
               : " — all classes done"
           }`}
           className="hidden shrink-0 cursor-pointer items-center gap-3 rounded-lg px-1.5 py-1 text-right transition-colors hover:bg-violet-500/[0.06] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring sm:flex"
@@ -572,8 +573,8 @@ function NextUpStrip({
                 </p>
                 <p className="text-[10px] tabular-nums text-muted-foreground">
                   {classInfo.ongoing
-                    ? `ends in ${classInfo.next.endMin - nowMin} min`
-                    : `starts in ${classInfo.next.startMin - nowMin} min`}
+                    ? `ends in ${humanizeMins(classInfo.next.endMin - nowMin)}`
+                    : `starts in ${humanizeMins(classInfo.next.startMin - nowMin)}`}
                 </p>
               </>
             ) : (
