@@ -25,6 +25,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { cn } from "@/lib/utils";
 import type { AlaUpcomingRow, AttendanceView, SubjectView } from "./types";
+import { istNow } from "./shared";
 
 /* ------------------------------------------------------------------ */
 /* SMS segment math (GSM-7 vs UCS-2, concat rules)                     */
@@ -61,7 +62,10 @@ export function smsSegments(text: string): {
 
 const IST_TZ = "Asia/Kolkata";
 
-/** Calendar parts of an instant, rendered in IST. */
+/** Calendar parts of an instant, rendered in IST. Some ICU builds render
+ *  midnight as "24" — folded back to "00" here too (shared.tsx's istNow
+ *  already does this for the schedule math; the DISPLAY side must agree,
+ *  or the bubble header would print "generated 24:00 IST"). */
 function istParts(now: number) {
   const p = new Intl.DateTimeFormat("en-GB", {
     timeZone: IST_TZ,
@@ -74,12 +78,13 @@ function istParts(now: number) {
     hour12: false,
   }).formatToParts(new Date(now));
   const get = (t: string) => p.find((x) => x.type === t)?.value ?? "";
+  const h = Number(get("hour")) % 24;
   return {
     weekday: get("weekday").toUpperCase(),
     day: get("day"),
     month: get("month").toUpperCase(),
     year: get("year"),
-    hhmm: `${get("hour")}:${get("minute")}`,
+    hhmm: `${String(h).padStart(2, "0")}:${get("minute")}`,
   };
 }
 
@@ -149,8 +154,11 @@ export function todayLiveClass(
   now: number
 ): TodayLiveClass | null {
   if (!todayClasses || todayClasses.length === 0) return null;
-  const [h, m] = istParts(now).hhmm.split(":").map(Number);
-  const nowMin = h * 60 + m;
+  /* Round 72: the local hh:mm parse is GONE — this is shared.tsx's istNow,
+   * the ONE IST clock every schedule surface already uses. Beyond the dedup
+   * it also folds the ICU "24:00" midnight quirk (the old parse read
+   * nowMin=1440 at IST midnight, silently flipping "upcoming" to "all done"). */
+  const nowMin = istNow(now).min;
   const left = todayClasses
     .filter((c) => c.endMin > nowMin)
     .sort((a, b) => a.startMin - b.startMin);
@@ -277,8 +285,9 @@ export function buildTodaySms(input: TodaySmsInput): string {
 
 /** Keywords that open the brief's lines — highlighted in the bubble's
  *  RENDER only. The clipboard/print text stays byte-identical: these are
- *  spans around the exact same characters, nothing added, nothing moved. */
-const SMS_KEYWORDS = [
+ *  spans around the exact same characters, nothing added, nothing moved.
+ *  Exported so the tone picker's test can walk the FULL table. */
+export const SMS_KEYWORDS = [
   "CLASSES TODAY", // longest first — before any shorter prefix could match
   "OVERALL",
   "NEED",
@@ -307,6 +316,71 @@ export function smsLineParts(line: string): { keyword: string; rest: string } | 
 /* ------------------------------------------------------------------ */
 /* Component                                                           */
 /* ------------------------------------------------------------------ */
+
+/** Bubble keyword tones — the styled render color-codes line-openers by
+ *  their ROLE in the brief (clipboard text is untouched; these are paint
+ *  classes on the exact same characters):
+ *   - "WORST" → amber: the app's warning/danger language (status chips, ALA
+ *     overdue) — the weakest subjects must read as a caution, not a win;
+ *   - "NEXT" → violet: the app's focus language (retry-story spotlight,
+ *     subject drawer) — the one actionable deadline deserves the eye;
+ *   - everything else → emerald: the card's own identity color.
+ *  Unknown keywords (future lines added without a tone decision) fall back
+ *  to emerald — a new line must never render unpainted or crash. */
+export type SmsKeywordTone = "emerald" | "amber" | "violet";
+
+export function smsKeywordTone(keyword: string): SmsKeywordTone {
+  if (keyword === "WORST") return "amber";
+  if (keyword === "NEXT") return "violet";
+  return "emerald";
+}
+
+/** Classes for each tone — kept beside the picker so the bubble render
+ *  stays a lookup, never an inline ternary chain that can drift. */
+export const SMS_TONE_CLASS: Record<SmsKeywordTone, string> = {
+  emerald: "text-emerald-700 dark:text-emerald-400",
+  amber: "text-amber-700 dark:text-amber-400",
+  violet: "text-violet-700 dark:text-violet-400",
+};
+
+/** Legacy clipboard fallback for insecure contexts (plain-HTTP views, older
+ *  WebViews where navigator.clipboard is undefined or rejects): an off-screen
+ *  textarea + execCommand("copy"). execCommand is deprecated but STILL the
+ *  only clipboard write path those contexts have — the honest ladder is
+ *  async-clipboard first, this second, a visible failure state last.
+ *  Selection is restored so an accidental user selection is never clobbered.
+ *  Guarded for non-DOM environments (bun tests import this module). */
+export function legacyCopy(text: string): boolean {
+  if (typeof document === "undefined") return false;
+  try {
+    const ta = document.createElement("textarea");
+    ta.value = text;
+    ta.setAttribute("readonly", "");
+    ta.style.position = "fixed";
+    ta.style.top = "-9999px";
+    ta.style.left = "-9999px";
+    ta.style.opacity = "0";
+    document.body.appendChild(ta);
+    const sel = document.getSelection();
+    const prev = sel && sel.rangeCount > 0 ? sel.getRangeAt(0) : null;
+    ta.select();
+    ta.setSelectionRange(0, text.length);
+    let ok = false;
+    try {
+      ok = document.execCommand("copy");
+    } catch {
+      ok = false;
+    }
+    document.body.removeChild(ta);
+    if (prev && sel) {
+      sel.removeAllRanges();
+      sel.addRange(prev);
+    }
+    return ok;
+  } catch {
+    return false;
+  }
+}
 
 export function TodayCard(props: TodaySmsInput & { className?: string }) {
   const {
@@ -368,16 +442,27 @@ export function TodayCard(props: TodaySmsInput & { className?: string }) {
 
   /* --- copy ---------------------------------------------------------- */
   const [copied, setCopied] = useState(false);
+  const [copyFailed, setCopyFailed] = useState(false);
   const copyTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const copyText = async () => {
+    let ok = false;
     try {
       await navigator.clipboard.writeText(smsText);
-      setCopied(true);
-      if (copyTimer.current) clearTimeout(copyTimer.current);
-      copyTimer.current = setTimeout(() => setCopied(false), 2000);
+      ok = true;
     } catch {
-      /* clipboard unavailable (insecure context / permission denied) — stay inert */
+      /* Round 72: insecure context (plain HTTP / older WebView) or permission
+       * denied — instead of staying INERT, try the legacy path once before
+       * admitting defeat. The student taps "Copy text" on a phone; a silent
+       * no-op reads as a broken app. */
+      ok = legacyCopy(smsText);
     }
+    setCopied(ok);
+    setCopyFailed(!ok);
+    if (copyTimer.current) clearTimeout(copyTimer.current);
+    copyTimer.current = setTimeout(() => {
+      setCopied(false);
+      setCopyFailed(false);
+    }, 2000);
   };
 
   /* --- native share (mobile) ----------------------------------------- */
@@ -449,10 +534,12 @@ export function TodayCard(props: TodaySmsInput & { className?: string }) {
             aria-label="Copy today's summary as plain text" title="Copy the exact text shown below">
             {copied ? (
               <Check className="size-3.5 text-emerald-500" aria-hidden="true" />
+            ) : copyFailed ? (
+              <Copy className="size-3.5 text-amber-500" aria-hidden="true" />
             ) : (
               <Copy className="size-3.5" aria-hidden="true" />
             )}
-            {copied ? "Copied" : "Copy text"}
+            {copied ? "Copied" : copyFailed ? "Copy failed — select the bubble text instead" : "Copy text"}
           </Button>
           {canShare && (
             <Button variant="ghost" size="sm" className={chipBtn} onClick={shareText} disabled={!smsText}
@@ -529,6 +616,12 @@ export function TodayCard(props: TodaySmsInput & { className?: string }) {
           role="figure"
           aria-label="Today's summary written as a plain-text message"
         >
+          {/* SMS bubble tail — the chat-app cue that this box IS the message
+              (pure paint: rotated square sharing the bubble's border/bg). */}
+          <span
+            aria-hidden="true"
+            className="absolute -bottom-[9px] right-6 size-4 rotate-45 rounded-br-[3px] border-b border-r border-emerald-500/20 bg-emerald-500/10"
+          />
           <pre className="whitespace-pre-wrap break-words font-mono text-[12px] leading-relaxed text-foreground/90 sm:text-[12.5px]">
             {smsLines.map((ln, i) => {
               const parts = smsLineParts(ln);
@@ -536,7 +629,7 @@ export function TodayCard(props: TodaySmsInput & { className?: string }) {
                 <span key={i}>
                   {parts ? (
                     <>
-                      <span className="font-semibold text-emerald-700 dark:text-emerald-400">
+                      <span className={cn("font-semibold", SMS_TONE_CLASS[smsKeywordTone(parts.keyword)])}>
                         {parts.keyword}
                       </span>
                       {parts.rest}
