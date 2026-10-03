@@ -24,7 +24,7 @@ import { Check, CheckCheck, Copy, MessageSquareText, Printer, Share2 } from "luc
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { cn } from "@/lib/utils";
-import type { AlaUpcomingRow, AttendanceView, SubjectView } from "./types";
+import type { AlaUpcomingRow, AttendanceView, SubjectView, TimetableSlotRow } from "./types";
 import { istNow, humanizeMins } from "./shared";
 
 /* ------------------------------------------------------------------ */
@@ -247,6 +247,32 @@ export function justEndedChip(
   /* 100 at the end minute → 0 at the window boundary (inclusive). */
   const drainPct = ((JUST_ENDED_WINDOW_MIN - sinceMin) / JUST_ENDED_WINDOW_MIN) * 100;
   return { cls, sinceMin, drainPct };
+}
+
+/** The week-ahead "next up" pure (r87 → r90): once today is fully done
+ *  — every caller guards this first (header chip: !shown && !justEnded;
+ *  deadline strip: allDone) — the day arc should still answer "when IS the
+ *  next one?". Strictly LATER THIS WEEK: days-ahead = (day − today + 7)
+ *  % 7 ≥ 1; the +7 wrap is what keeps a Saturday honest about Monday (a
+ *  naive day > today comparison breaks at the week boundary). Earliest day
+ *  wins, then earliest start. Today is deliberately excluded (d ≥ 1): the
+ *  muted family's promise is "later this week", and the callers' guards
+ *  already mean today has nothing left to say. r90: promoted from the
+ *  header's inline 3-liner (live-verified r87) so the header chip and the
+ *  strip's done state share ONE math and can never drift. Pure — pinned
+ *  in tests (r90). */
+export function nextUpcomingThisWeek(
+  slots: TimetableSlotRow[] | null | undefined,
+  now: number
+): TimetableSlotRow | null {
+  if (!slots || slots.length === 0) return null;
+  const { day: today } = istNow(now);
+  return (
+    slots
+      .map((s) => ({ s, d: (s.dayOfWeek - today + 7) % 7 }))
+      .filter((x) => x.d >= 1)
+      .sort((a, b) => a.d - b.d || a.s.startMin - b.s.startMin)[0]?.s ?? null
+  );
 }
 
 /** Build the exact SMS text shown in the bubble (and used for copy/share). */

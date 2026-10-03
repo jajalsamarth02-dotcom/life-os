@@ -41,7 +41,7 @@ import { applyBatchPicks } from "@/lib/batch-picks";
 import { compactErrorText } from "@/lib/compact-error";
 import { fetchAssignments, fetchDashboard, fetchHistory, fetchSyncLogs, fetchAlaNotes, fetchTimetable, qk } from "./api";
 import { WeeklyDigestDialog } from "./digest-dialog";
-import { TodayCard, type TodayClassBrief } from "./today-card";
+import { TodayCard, nextUpcomingThisWeek, type TodayClassBrief } from "./today-card";
 import { SkipBudgetCard } from "./skip-budget-card";
 import { WeekPlanCard } from "./week-plan-card";
 import { SetupChecklist } from "./setup-checklist";
@@ -135,6 +135,10 @@ function sortSubjects(list: SubjectView[], sort: SubjectSort): SubjectView[] {
 function hhmmFromMin(min: number): string {
   return `${String(Math.floor(min / 60)).padStart(2, "0")}:${String(min % 60).padStart(2, "0")}`;
 }
+
+/* Weekday names for compact schedule references (Sun=0 … Sat=6) — the same
+   labels the header's muted week-ahead chip uses (r90 shares the family). */
+const DAY_NAMES = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"] as const;
 
 function countdownLabel(dueAt: string, now: number): string {
   const diff = new Date(dueAt).getTime() - now;
@@ -463,12 +467,19 @@ function NextUpStrip({
       .filter((s) => s.endMin > nowMin)
       .sort((a, b) => a.startMin - b.startMin);
     const next = left[0] ?? null;
+    /* r90: in the done state the strip no longer dead-ends — the next
+       class LATER THIS WEEK via the same week-wrap-safe pure the header
+       chip uses (r87 math, promoted r90), so both surfaces answer
+       "when IS the next one?" with ONE math. null → the honest
+       "nothing left today" fallback stays. */
+    const weekNext = next === null ? nextUpcomingThisWeek(attending, now) : null;
     return {
       next,
       ongoing: next !== null && next.startMin <= nowMin,
       allDone: next === null && today.length > 0,
+      weekNext,
     };
-  }, [ttRows, nowDay, nowMin]);
+  }, [ttRows, nowDay, nowMin, now]);
   const upcoming = items
     .filter((r) => r.status === "ACTIVE" && r.type !== "ATTENDANCE_WARNING")
     .sort((a, b) => new Date(a.dueAt).getTime() - new Date(b.dueAt).getTime());
@@ -543,7 +554,9 @@ function NextUpStrip({
               ? classInfo.ongoing
                 ? ` — ${classInfo.next.subjectCode} ends in ${humanizeMins(classInfo.next.endMin - nowMin)}`
                 : ` — ${classInfo.next.subjectCode} starts in ${humanizeMins(classInfo.next.startMin - nowMin)}`
-              : " — all classes done"
+              : classInfo.weekNext
+                ? ` — all classes done · next ${classInfo.weekNext.subjectCode} ${DAY_NAMES[classInfo.weekNext.dayOfWeek]} ${hhmmFromMin(classInfo.weekNext.startMin)}`
+                : " — all classes done"
           }`}
           className="hidden shrink-0 cursor-pointer items-center gap-3 rounded-lg px-1.5 py-1 text-right transition-colors hover:bg-violet-500/[0.06] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring sm:flex"
         >
@@ -577,6 +590,33 @@ function NextUpStrip({
                     : `starts in ${humanizeMins(classInfo.next.startMin - nowMin)}`}
                 </p>
               </>
+            ) : classInfo.weekNext ? (
+              /* r90: the done state answers "when IS the next one?" — the
+                 week-ahead twin of the next-class line above (same hue chip
+                 + time language, muted CalendarClock prefix marking it as
+                 later-this-week, not today). Header chip and strip now
+                 share one math (nextUpcomingThisWeek). */
+              (() => {
+                const w = classInfo.weekNext;
+                const hue = hueColors(w.subjectCode);
+                return (
+                  <p className="flex items-center justify-end gap-1.5 text-xs font-semibold">
+                    <CalendarClock
+                      className="size-3 shrink-0 text-muted-foreground"
+                      aria-hidden="true"
+                    />
+                    <span
+                      className="rounded-md px-1 py-px font-mono text-[10px]"
+                      style={{ backgroundColor: hue.bg, color: hue.fg }}
+                    >
+                      {w.subjectCode}
+                    </span>
+                    <span className="tabular-nums text-muted-foreground">
+                      {DAY_NAMES[w.dayOfWeek]} {hhmmFromMin(w.startMin)}
+                    </span>
+                  </p>
+                );
+              })()
             ) : (
               <p className="text-[10px] text-muted-foreground">nothing left today</p>
             )}
