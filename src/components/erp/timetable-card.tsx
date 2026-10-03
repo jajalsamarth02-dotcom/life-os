@@ -44,6 +44,7 @@ import {
 } from "@/components/ui/select";
 import { cn } from "@/lib/utils";
 import { downloadTimetableIcs } from "@/lib/ics";
+import { buildSingleClassIcs } from "./ics";
 import { applyBatchPicks, parallelCells } from "@/lib/batch-picks";
 import { createSlot, deleteSlot, fetchTimetable, setBatchPick, qk, ApiError, type SlotConflict } from "./api";
 import { DAY_NAMES_FULL, DAY_NAMES_SHORT, humanizeMins, istNow, useNow } from "./shared";
@@ -162,6 +163,7 @@ function SlotChip({
   compact = false,
   state = "attending",
   nextUpLabel,
+  icsName,
 }: {
   slot: TimetableSlotRow;
   color: string;
@@ -176,8 +178,48 @@ function SlotChip({
    *  a muted tag line even in compact mode (the whole point is marking the
    *  next one on non-today columns). Undefined for every other chip. */
   nextUpLabel?: string;
+  /** r101: the subject's display name (or null) — feeds the per-class
+   *  "Add to calendar" download so the event carries a readable title.
+   *  Resolved by the caller (the grid owns the subjects list); the chip
+   *  stays dumb. */
+  icsName?: string | null;
 }) {
   const st = slotStatus(slot, nowDay, nowMin);
+  /* r101: transient "saved" feedback — the chip's calendar button swaps to a
+     check for two seconds after a successful download, so a click has a
+     visible landing even when the browser's download UI is a corner toast. */
+  const [icsSaved, setIcsSaved] = useState(false);
+  useEffect(() => {
+    if (!icsSaved) return;
+    const t = setTimeout(() => setIcsSaved(false), 2000);
+    return () => clearTimeout(t);
+  }, [icsSaved]);
+  /* r101: the download itself — DOM work stays in the component (the ics
+     module stays pure); a rejected/invalid slot toasts honestly instead of
+     writing a broken file. stopPropagation: the chip has hover-intent styles
+     but no click handlers today — this keeps that true tomorrow. */
+  const downloadIcs = () => {
+    const res = buildSingleClassIcs(slot, icsName ?? null);
+    if (!res) {
+      toast.error("Couldn't build the calendar file", {
+        description: "This class slot is missing valid time information.",
+      });
+      return;
+    }
+    const blob = new Blob([res.text], { type: "text/calendar;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = res.filename;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(url);
+    setIcsSaved(true);
+    toast.success(`Saved ${res.filename}`, {
+      description: `${slot.subjectCode} · every ${DAY_NAMES_FULL[slot.dayOfWeek] ?? "week"} — import it into your calendar; importing an updated export updates the same event.`,
+    });
+  };
   const ongoing = st.key === "ongoing";
   /* r77: the urgency ladder (r73) now reaches the week-grid chips — an
      upcoming chip inside IMMINENT_MIN tints amber (border + label + title),
@@ -256,9 +298,35 @@ function SlotChip({
           />
         )}
       </div>
-      <p className="mt-0.5 text-[11px] tabular-nums text-muted-foreground">
-        {hhmm(slot.startMin)}–{hhmm(slot.endMin)}
-      </p>
+      <div className="mt-0.5 flex items-center gap-1">
+        <p className="min-w-0 flex-1 text-[11px] tabular-nums text-muted-foreground">
+          {hhmm(slot.startMin)}–{hhmm(slot.endMin)}
+        </p>
+        {/* r101 — "Add to calendar": a per-class .ics download. Always
+            faintly present (opacity-30) so touch users can reach it without
+            hover; the chip's group-hover lifts it to full strength on
+            pointer devices. Emerald accent = the calendar family color
+            (the .ics export buttons already speak it). */}
+        <button
+          type="button"
+          onClick={downloadIcs}
+          aria-label={`Download the ${slot.subjectCode} ${DAY_NAMES_FULL[slot.dayOfWeek] ?? "weekly"} ${hhmm(slot.startMin)} class as a calendar (.ics) file`}
+          title="Add this class to your calendar (.ics) — it repeats weekly"
+          className={cn(
+            "-mr-0.5 inline-flex size-5 shrink-0 items-center justify-center rounded-md",
+            "text-muted-foreground/50 transition-all hover:bg-emerald-500/10 hover:text-emerald-600 dark:hover:text-emerald-400",
+            "opacity-30 group-hover:opacity-100 focus-visible:opacity-100",
+            "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+            icsSaved && "opacity-100 text-emerald-600 dark:text-emerald-400"
+          )}
+        >
+          {icsSaved ? (
+            <Check className="size-3" aria-hidden="true" />
+          ) : (
+            <CalendarPlus className="size-3" aria-hidden="true" />
+          )}
+        </button>
+      </div>
       {nextUpLabel && (
         <p
           className="mt-0.5 flex items-center gap-1 text-[10px] font-medium text-muted-foreground/80"
@@ -1426,6 +1494,7 @@ export function TimetableCard({
                                   nowDay={nowDay}
                                   nowMin={nowMin}
                                   compact={d !== nowDay}
+                                  icsName={subjects.find((x) => x.code === s.subjectCode)?.name ?? null}
                                   nextUpLabel={s.id === weekNextId ? (weekNextLabel ?? undefined) : undefined}
                                   state={
                                     attendingIds.has(s.id)

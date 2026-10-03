@@ -97,14 +97,21 @@ function fold(line: string): string {
 
 /* ------------------------------------------------------------------ */
 
-export function buildDeadlineIcs(events: IcsEventInput[], now: Date = new Date()): IcsResult {
+export function buildDeadlineIcs(
+  events: IcsEventInput[],
+  now: Date = new Date(),
+  /* r101: optional calendar-name override — the per-class export names the
+     calendar after the class so it reads well if imported as its own calendar.
+     The feed and Settings export keep the shared default. */
+  opts?: { calendarName?: string }
+): IcsResult {
   const lines: string[] = [
     "BEGIN:VCALENDAR",
     "VERSION:2.0",
     "PRODID:-//ERP Sync//Student Deadlines//EN",
     "CALSCALE:GREGORIAN",
     "METHOD:PUBLISH",
-    "X-WR-CALNAME:ERP Sync - classes & deadlines",
+    `X-WR-CALNAME:${esc(opts?.calendarName ?? "ERP Sync - classes & deadlines")}`,
     "X-WR-TIMEZONE:Asia/Kolkata",
   ];
 
@@ -251,4 +258,60 @@ export function buildClassEvents(
     });
   }
   return out;
+}
+
+/* ------------------------------------------------------------------ */
+/* r101 — per-class one-shot export ("Add to calendar" on a chip)       */
+/* ------------------------------------------------------------------ */
+
+/** File name for a single-class download: class-<code-slug>-<day>.ics. */
+export function classIcsFilename(slot: ClassSlotInput): string {
+  const slug =
+    slot.subjectCode
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, "-")
+      .replace(/^-+|-+$/g, "") || "class";
+  const day = DAY_NAMES_ICS[slot.dayOfWeek]?.toLowerCase() ?? "weekly";
+  return `class-${slug}-${day}.ics`;
+}
+
+/**
+ * r101 — ONE weekly class as a standalone .ics for the timetable chip's
+ * "Add to calendar" action.
+ *
+ * Event identity is NOT re-invented here: the event comes from
+ * buildClassEvents (the SAME core the live /api/calendar feed uses), so the
+ * downloaded event carries the feed's stable content-derived UID. A student
+ * who imports this file and later subscribes to the feed UPDATES the same
+ * event instead of duplicating it — the whole reason this builder exists
+ * beside lib/ics.ts's whole-week export (which predates the feed's UID
+ * convention and stays untouched for compatibility).
+ *
+ * Description is tailored for the one-shot context ("importing an updated
+ * export updates this event" instead of the feed's "the subscription keeps
+ * it current"), and the calendar is named after the class.
+ *
+ * Returns null for a slot the shared core rejects (bad day, end<=start) —
+ * the UI toasts honestly instead of writing a broken file.
+ */
+export function buildSingleClassIcs(
+  slot: ClassSlotInput,
+  displayName: string | null,
+  now: Date = new Date()
+): { text: string; filename: string } | null {
+  const wall = (m: number) => `${String(Math.floor(m / 60)).padStart(2, "0")}:${String(m % 60).padStart(2, "0")}`;
+  const [ev] = buildClassEvents([slot], () => displayName, now);
+  if (!ev) return null;
+  const dayName = DAY_NAMES_ICS[slot.dayOfWeek];
+  const tailored: IcsEventInput = {
+    ...ev,
+    description:
+      `Weekly ${dayName} class (${wall(slot.startMin)}–${wall(slot.endMin)} IST)` +
+      `${displayName ? ` — ${displayName}` : ""} from your ERP Sync timetable. Repeats every ${dayName}; ` +
+      "importing an updated export updates this event instead of duplicating it.",
+  };
+  return {
+    text: buildDeadlineIcs([tailored], now, { calendarName: `Class — ${slot.subjectCode}` }).text,
+    filename: classIcsFilename(slot),
+  };
 }
