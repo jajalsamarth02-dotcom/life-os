@@ -6,6 +6,10 @@
  * One compact card on the dashboard that:
  *  - renders the EXACT plain-text message that "Copy text" puts on the clipboard
  *    (WYSIWYG: the bubble is the message),
+ *  - folds today's class schedule (batch-pick resolved, IST clock) into the
+ *    brief — how many are left, the next/ongoing class, or an honest
+ *    "none scheduled" / "all done" — from the same shared timetable cache the
+ *    week plan and timetable card use, so every surface agrees on "today",
  *  - keeps the message GSM-7 friendly (ASCII only) so the segment counter is
  *    honest — paste it into any chat app and it travels as a normal SMS-sized text,
  *  - supports printing ONLY this card (portal + body.print-today isolation),
@@ -19,6 +23,7 @@ import { createPortal } from "react-dom";
 import { Check, CheckCheck, Copy, MessageSquareText, Printer, Share2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { cn } from "@/lib/utils";
 import type { AlaUpcomingRow, AttendanceView, SubjectView } from "./types";
 
 /* ------------------------------------------------------------------ */
@@ -89,6 +94,27 @@ function ascii(s: string): string {
     .replace(/[^\x20-\x7e\n]/g, "");
 }
 
+/** One of TODAY's class slots — batch-pick resolved and already filtered to
+ *  the current weekday by the caller (the exact same math as the week plan
+ *  and the timetable card, so the surfaces can never disagree). */
+export interface TodayClassBrief {
+  startMin: number;
+  endMin: number;
+  subjectCode: string;
+}
+
+/** Live snapshot of today's first remaining class; minutes run on the IST
+ *  clock — the same clock the bubble header prints. Shared by the CLASSES
+ *  SMS line and the card's live chip via one pure code path. */
+export interface TodayLiveClass {
+  kind: "ongoing" | "upcoming";
+  cls: TodayClassBrief;
+  /** ongoing: minutes until it ends · upcoming: minutes until it starts. */
+  mins: number;
+  /** Classes not over yet (the ongoing one included). */
+  leftCount: number;
+}
+
 export interface TodaySmsInput {
   now: number;
   overall: AttendanceView;
@@ -102,6 +128,51 @@ export interface TodaySmsInput {
   nextDue: AlaUpcomingRow | null;
   notedCount: number;
   lastSyncAt: string | null;
+  /** Today's attending slots — null/undefined when no timetable data has
+   *  synced yet (the CLASSES line is then honestly omitted, never faked). */
+  todayClasses?: TodayClassBrief[] | null;
+}
+
+/** Minutes-since-midnight → "HH:MM" (24h, zero-padded — GSM-7 friendly). */
+function hhmmFromMin(min: number): string {
+  return `${String(Math.floor(min / 60)).padStart(2, "0")}:${String(min % 60).padStart(2, "0")}`;
+}
+
+/** The today-card's live class state — ONE pure path for both the CLASSES
+ *  SMS line and the card's live chip, so the two can never disagree.
+ *  HONEST AT ANY DISTANCE: a class 8 hours out is still "next", never "done"
+ *  (the live smoke caught exactly that leak in Round 62 — the 90-min calm
+ *  window is the CHIP's business, see todayChipClass). Ongoing wins over
+ *  upcoming; null only when nothing is left today (or no data). */
+export function todayLiveClass(
+  todayClasses: TodayClassBrief[] | null | undefined,
+  now: number
+): TodayLiveClass | null {
+  if (!todayClasses || todayClasses.length === 0) return null;
+  const [h, m] = istParts(now).hhmm.split(":").map(Number);
+  const nowMin = h * 60 + m;
+  const left = todayClasses
+    .filter((c) => c.endMin > nowMin)
+    .sort((a, b) => a.startMin - b.startMin);
+  const first = left[0];
+  if (!first) return null;
+  if (nowMin >= first.startMin) {
+    return { kind: "ongoing", cls: first, mins: first.endMin - nowMin, leftCount: left.length };
+  }
+  return { kind: "upcoming", cls: first, mins: first.startMin - nowMin, leftCount: left.length };
+}
+
+/** Chip variant of the state: an upcoming class more than 90 minutes out
+ *  keeps the card calm (null). Ongoing classes always show. The SMS line
+ *  deliberately does NOT use this — the bubble must stay honest at any
+ *  distance ("next 18:00" at 07:00 is true; "done" would be a lie). */
+export function todayChipClass(
+  todayClasses: TodayClassBrief[] | null | undefined,
+  now: number
+): TodayLiveClass | null {
+  const st = todayLiveClass(todayClasses, now);
+  if (st && st.kind === "upcoming" && st.mins > 90) return null;
+  return st;
 }
 
 /** Build the exact SMS text shown in the bubble (and used for copy/share). */
@@ -133,6 +204,31 @@ export function buildTodaySms(input: TodaySmsInput): string {
         ? `BUDGET ${budget} safe skip${budget === 1 ? "" : "s"} across subjects`
         : "BUDGET 0 - attend everything"
     );
+  }
+
+  /* Today's schedule — a time-sensitive fact, so it sits right after the
+     attendance block and before the worst-subjects roll-up. Honest absence
+     when no timetable has synced; "none scheduled" for a genuinely free day. */
+  if (input.todayClasses) {
+    const tc = input.todayClasses;
+    if (tc.length === 0) {
+      lines.push("CLASSES TODAY none scheduled");
+    } else {
+      const live = todayLiveClass(tc, input.now);
+      if (!live) {
+        lines.push(
+          tc.length === 1 ? "CLASSES TODAY done (1 class)" : `CLASSES TODAY all ${tc.length} done`
+        );
+      } else if (live.kind === "ongoing") {
+        lines.push(
+          `CLASSES TODAY ${live.leftCount} left - in class ${live.cls.subjectCode} until ${hhmmFromMin(live.cls.endMin)}`
+        );
+      } else {
+        lines.push(
+          `CLASSES TODAY ${live.leftCount} left - next ${hhmmFromMin(live.cls.startMin)} ${live.cls.subjectCode}`
+        );
+      }
+    }
   }
 
   const worst = input.subjects
@@ -193,6 +289,7 @@ export function TodayCard(props: TodaySmsInput & { className?: string }) {
     nextDue,
     notedCount,
     lastSyncAt,
+    todayClasses,
     className,
   } = props;
 
@@ -211,11 +308,16 @@ export function TodayCard(props: TodaySmsInput & { className?: string }) {
         nextDue,
         notedCount,
         lastSyncAt,
+        todayClasses,
       }),
-    [now, overall, target, subjects, warningSubjects, alaPending, alaTotal, alaOverdue, alaDueWeek, nextDue, notedCount, lastSyncAt]
+    [now, overall, target, subjects, warningSubjects, alaPending, alaTotal, alaOverdue, alaDueWeek, nextDue, notedCount, lastSyncAt, todayClasses]
   );
   const seg = useMemo(() => smsSegments(smsText), [smsText]);
   const header = istParts(now);
+
+  /* Live class chip — same pure core as the CLASSES SMS line, plus the
+     90-min calm window (an 18:00 class at 07:00 must not shout). */
+  const liveClass = useMemo(() => todayChipClass(todayClasses, now), [todayClasses, now]);
 
   /* --- copy ---------------------------------------------------------- */
   const [copied, setCopied] = useState(false);
@@ -317,7 +419,47 @@ export function TodayCard(props: TodaySmsInput & { className?: string }) {
             <Printer className="size-3.5" aria-hidden="true" />
             Print card
           </Button>
-          <span className="ml-auto hidden text-[10px] tabular-nums text-muted-foreground/70 sm:inline" aria-hidden="true">
+          {liveClass && (
+            <span
+              className={cn(
+                "inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-[11px] font-medium tabular-nums",
+                liveClass.kind === "ongoing"
+                  ? "border-amber-500/40 bg-amber-500/10 text-amber-700 dark:text-amber-300"
+                  : "border-emerald-500/40 bg-emerald-500/10 text-emerald-700 dark:text-emerald-300"
+              )}
+              title={
+                liveClass.kind === "ongoing"
+                  ? "One of today's classes is happening right now"
+                  : "Today's next class starts within 90 minutes"
+              }
+            >
+              <span className="relative flex size-1.5" aria-hidden="true">
+                <span
+                  className={cn(
+                    "absolute inline-flex h-full w-full animate-ping rounded-full opacity-60",
+                    liveClass.kind === "ongoing" ? "bg-amber-500" : "bg-emerald-500"
+                  )}
+                  style={{ animationDuration: "2.2s" }}
+                />
+                <span
+                  className={cn(
+                    "relative inline-flex size-1.5 rounded-full",
+                    liveClass.kind === "ongoing" ? "bg-amber-500" : "bg-emerald-500"
+                  )}
+                />
+              </span>
+              {liveClass.kind === "ongoing"
+                ? `In class ${liveClass.cls.subjectCode} · ends ${hhmmFromMin(liveClass.cls.endMin)}`
+                : `Next ${liveClass.cls.subjectCode} ${hhmmFromMin(liveClass.cls.startMin)} · in ${liveClass.mins} min`}
+            </span>
+          )}
+          <span
+            className={cn(
+              "ml-auto hidden text-[10px] tabular-nums sm:inline",
+              seg.segments > 1 ? "text-amber-600/80 dark:text-amber-400/80" : "text-muted-foreground/70"
+            )}
+            aria-hidden="true"
+          >
             {seg.encoding === "GSM-7" ? "SMS-ready" : "unicode"} · {seg.segments} segment{seg.segments === 1 ? "" : "s"} · {seg.chars} chars
           </span>
         </div>

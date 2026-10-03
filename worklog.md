@@ -2376,3 +2376,32 @@ Unresolved issues / risks & next-phase priorities:
 4. Dead/thin seeds unchanged: /student/exam-routine ERP-500 (no probe before Nov 2026); /student/assessment redirect (covered).
 5. QA journey notes carried + NEW: test-arithmetic self-checks (verify percentage claims with a calculator reflex — 3 of 4 test bugs were miscomputed percentages); shadcn Card forwards refs (React.ComponentProps<"div">); component-file pure exports are bun-testable (milestones.tsx imports framer-motion etc. but does not render); palette keyboard-open needs the header button (agent-browser keyboard press unsupported — use button click).
 6. Keeper cron 430680 alive; worklog protocol unchanged.
+
+---
+Task ID: 62
+Agent: Z.ai Code (main orchestrator)
+Task: Today-card schedule awareness — CLASSES TODAY SMS line + live next-class chip (display-only round)
+
+Work Log (Round 62 — 3 Oct, 09:30–10:05 +08):
+- Round start discovery: worklog already contained a COMPLETE Task 61 entry (milestone hardening + classes-to-target + palette commands) — a parallel agent loop had processed the 09:15 task. Verified Task 61's artifacts real (test-milestones-r61.ts exists, qa-r61 screenshots exist, classesToTarget + erp:* events in code; suite re-run 24/24) → this round executed as ROUND 62.
+- Server 200 (pid 29666). RSS AT ROUND START: 1,894,736KB ≈ 1850MB — THE 1.8GB (1843MB) ATTENTION LINE WAS ALREADY CROSSED before this round began.
+- Baseline QA: console 0, results TTL cache instant (no walk), all APIs 200.
+
+Completed modifications / verified:
+1. FEATURE — CLASSES TODAY line in the Today-card SMS brief: buildTodaySms gains optional todayClasses (batch-pick-resolved, filtered to today by the caller). Renders "CLASSES TODAY N left - next HH:MM CODE" / "in class CODE until HH:MM" (ongoing wins) / "all N done" / "done (1 class)" / "none scheduled" (free day); omitted entirely (honest absence) when no timetable synced. Line sits between BUDGET and WORST (time-sensitive before roll-up). IST clock (istParts) so the line matches the bubble's own "generated HH:MM IST" caption.
+2. FEATURE — Live next-class chip in the Today card actions row: exported pure todayLiveClass (core state: ongoing wins, honest at ANY distance) + todayChipClass (chip variant: upcoming >90 min out stays calm/null). Emerald "Next CODE HH:MM · in N min" / amber "In class CODE · ends HH:MM" with pulse dot, mirroring NextUpStrip's visual language. LIVE STATE: 11:00 RWM lab 230 min out → chip correctly ABSENT; SMS line honestly shows "next 11:00".
+3. BUG CAUGHT BY LIVE SMOKE (own design, fixed same round): v1 applied the chip's 90-min calm window to the SMS line too — at 07:00 IST the 18:00 class read "CLASSES TODAY done (1 class)" — A LIE. Split todayLiveClass (SMS, honest at any distance) vs todayChipClass (chip, calm window). Tests pin the regression ("18:00 class seen from 08:00 → upcoming 600").
+4. WIRING — dashboard-tab: ttTodayQ useQuery (deduped with NextUpStrip's identical qk.timetable via shared React Query cache — zero extra requests) + todayClasses memo (applyBatchPicks(...).attending filtered to today, same pattern as NextUpStrip so surfaces agree) → TodayCard. Parallel picks respected.
+5. STYLE — segment counter amber when segments > 1 (honest length signal; live message 331 chars / 3 segments → amber active). Chip joins the card's rounded-full action family.
+6. TESTS: scripts/test-today-r62.ts — 37/37 PASS (todayLiveClass 17, todayChipClass 4 incl. exact 90 boundary + ongoing-always, buildTodaySms 12 incl. formats/singular/padding/position/GSM-7, live smoke 1: real /api/timetable → SAT = 1 slot RWM 11:00-13:00 parallel-collapsed → known-shape regex). Regressions: r60 18, r59 17, r58 27, features 24, parse-results 70, batch-picks 39, milestones-r61 24 — 219 + 37 = 256 green.
+7. tsc ONCE: src/ ZERO errors.
+8. BROWSER QA ALL GREEN: console 0 after clear+reload; scoped eval (data-slot=card → card-title "Today card"): bubble has "CLASSES TODAY 1 left - next 11:00 RESPONSIVE-WEB-MOBILE"; chip [] (calm, correct); counter "SMS-ready · 3 segments · 331 chars". Light /tmp/qa-r62-light.png + dark /tmp/qa-r62-dark.png + mobile /tmp/qa-r62-mobile.png (docW=390, hScroll=false).
+9. End state PRISTINE: changeEvents(1h)=0, notifications(1h)=0, scheduled syncs success/0-changes (01:33Z, 01:17Z, 01:01Z); zero WhatsApp sends (display-only; copy/share are local; no notify path touched). Final RSS 1,893,148KB ≈ 1849MB — net ~0 this round.
+
+Unresolved issues / risks & next-phase priorities:
+1. ⚠️⚠️ MEMORY CRITICAL — ATTENTION LINE CROSSED: RSS ~1850MB ≥ 1.8GB (1843MB) line; OOM ~2.2GB (~400MB headroom). STANDING USER PROPOSAL needs an explicit go-ahead: keeper-side periodic restart when RSS > 1.8GB using the double-fork subshell form (setsid restarts do NOT survive the tool call). NOT added silently per protocol. Without a decision: natural OOM kill (keeper re-spawns, sessions/state reset) or manual user restart. NEXT ROUND SHOULD LEAD WITH THIS.
+2. Milestone watch CORRECTED: today's crossing class is NOT 6 PM — Saturday's only class is RWM 11:00-13:00 IST (earlier rounds' "next class Oct 3 6:00 PM" reflected the weekday-evening pattern). If the student attends the 11:00 lab → 3/4 = 75% → MilestoneCelebration fires ONCE (state machine verified Task 61). The new CLASSES line + chip surface these stakes in the pocket brief all morning.
+3. Today-card family covers: attendance brief, schedule line, live chip, copy/share/print. Residuals (non-urgent): chip could deep-link to TimetableCard; "Open retry history" palette command could deep-link a specific story chip.
+4. Dead/thin seeds unchanged: /student/exam-routine ERP-500 (no probe before Nov 2026); /student/assessment redirect (covered).
+5. QA notes carried + NEW: scope DOM assertions to the specific card (data-slot=card + card-title match) — generic text regexes cross-match sibling cards (loose regex produced 4 false chip positives from NextUpStrip dot spans).
+6. Keeper cron 430680 alive; worklog protocol unchanged.

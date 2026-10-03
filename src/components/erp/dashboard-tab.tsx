@@ -41,7 +41,7 @@ import { applyBatchPicks } from "@/lib/batch-picks";
 import { compactErrorText } from "@/lib/compact-error";
 import { fetchAssignments, fetchDashboard, fetchHistory, fetchSyncLogs, fetchAlaNotes, fetchTimetable, qk } from "./api";
 import { WeeklyDigestDialog } from "./digest-dialog";
-import { TodayCard } from "./today-card";
+import { TodayCard, type TodayClassBrief } from "./today-card";
 import { SkipBudgetCard } from "./skip-budget-card";
 import { WeekPlanCard } from "./week-plan-card";
 import { SetupChecklist } from "./setup-checklist";
@@ -1156,6 +1156,20 @@ export function DashboardTab({
       return n + (a.status === "ACTIVE" && t >= now && t < cut ? 1 : 0);
     }, 0);
   }, [alaQ.data, now]);
+  /* Today's schedule for the Today card — deduped with NextUpStrip's identical
+     qk.timetable query through the shared React Query cache (zero extra
+     requests), and run through the same batch-pick math as the week plan +
+     timetable card so every surface agrees on what "today" holds. null = no
+     timetable synced yet → the card omits its CLASSES line honestly. */
+  const ttTodayQ = useQuery({ queryKey: qk.timetable, queryFn: fetchTimetable });
+  const todayClasses = useMemo<TodayClassBrief[] | null>(() => {
+    if (!ttTodayQ.data) return null;
+    const day = new Date(now).getDay();
+    return applyBatchPicks(ttTodayQ.data.slots ?? [], ttTodayQ.data.picks ?? {}).attending
+      .filter((s) => s.dayOfWeek === day)
+      .sort((a, b) => a.startMin - b.startMin)
+      .map((s) => ({ startMin: s.startMin, endMin: s.endMin, subjectCode: s.subjectCode }));
+  }, [ttTodayQ.data, now]);
   /* Soonest ALA deadline that is NOT overdue — the actionable "next". */
   const nextDue = useMemo(
     () =>
@@ -1362,6 +1376,7 @@ export function DashboardTab({
           nextDue={nextDue}
           notedCount={alaNotesQ.data?.length ?? 0}
           lastSyncAt={data.erp?.sync?.lastSuccessAt ?? null}
+          todayClasses={todayClasses}
         />
       </div>
 

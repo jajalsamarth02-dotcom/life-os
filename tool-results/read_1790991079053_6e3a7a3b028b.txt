@@ -1,0 +1,1841 @@
+     1→"use client";
+     2→
+     3→import { useQuery } from "@tanstack/react-query";
+     4→import { useEffect, useMemo, useRef, useState } from "react";
+     5→import { isToday } from "date-fns";
+     6→import {
+     7→  AlertTriangle,
+     8→  ArrowRight,
+     9→  ArrowDownUp,
+    10→  BellRing,
+    11→  CalendarClock,
+    12→  CheckCircle2,
+    13→  ChevronRight,
+    14→  CircleDot,
+    15→  ExternalLink,
+    16→  Flag,
+    17→  FlaskConical,
+    18→  CalendarRange,
+    19→  GraduationCap,
+    20→  Hourglass,
+    21→  Info,
+    22→  ClipboardList,
+    23→  Copy,
+    24→  Layers,
+    25→  Printer,
+    26→  RefreshCw,
+    27→  Share2,
+    28→  StickyNote,
+    29→  WifiOff,
+    30→  XCircle,
+    31→  Footprints,
+    32→} from "lucide-react";
+    33→import { Badge } from "@/components/ui/badge";
+    34→import { Button } from "@/components/ui/button";
+    35→import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+    36→import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+    37→import { Separator } from "@/components/ui/separator";
+    38→import { motion } from "framer-motion";
+    39→import { cn } from "@/lib/utils";
+    40→import { applyBatchPicks } from "@/lib/batch-picks";
+    41→import { compactErrorText } from "@/lib/compact-error";
+    42→import { fetchAssignments, fetchDashboard, fetchHistory, fetchSyncLogs, fetchAlaNotes, fetchTimetable, qk } from "./api";
+    43→import { WeeklyDigestDialog } from "./digest-dialog";
+    44→import { TodayCard } from "./today-card";
+    45→import { SkipBudgetCard } from "./skip-budget-card";
+    46→import { WeekPlanCard } from "./week-plan-card";
+    47→import { SetupChecklist } from "./setup-checklist";
+    48→import { MilestoneCelebration, MilestonesStrip } from "./milestones";
+    49→import { SubjectDrawer } from "./subject-drawer";
+    50→import { TimetableCard } from "./timetable-card";
+    51→import { ResultsCard } from "./results-card";
+    52→import {
+    53→  ago,
+    54→  dueGroup,
+    55→  EmptyHero,
+    56→  ERP_BASE,
+    57→  erpAssignmentUrl,
+    58→  fmtDT,
+    59→  hueColors,
+    60→  CustomTargetChip,
+    61→  KindIcon,
+    62→  MiniBar,
+    63→  ProgressRing,
+    64→  SourceBadge,
+    65→  statusColors,
+    66→  StatCard,
+    67→  StatusChip,
+    68→  TypeIcon,
+    69→  useNow,
+    70→  AlaStatChip,
+    71→  collectAlaStats,
+    72→  SkipPips,
+    73→  type SubjectAlaStat,
+    74→} from "./shared";
+    75→import type { AlaNoteRow, AlaUpcomingRow, ChangeEvent, HistoryPoint, Reminder, SubjectView } from "./types";
+    76→import { ALA_PRIORITY_META, alaPriorityOf } from "./reminders-tab";
+    77→import type { SettingsFocus } from "./settings-tab";
+    78→import { Sparkline } from "./trend-chart";
+    79→
+    80→/* ------------------------------------------------------------------ */
+    81→
+    82→const SUBJECT_SORTS = [
+    83→  { key: "lowest", label: "Lowest attendance first" },
+    84→  { key: "highest", label: "Highest attendance first" },
+    85→  { key: "name", label: "Name A–Z" },
+    86→  { key: "recent", label: "Recently updated" },
+    87→] as const;
+    88→
+    89→type SubjectSort = (typeof SUBJECT_SORTS)[number]["key"];
+    90→
+    91→/** Remembered subject sort order — a view preference, so device-local. */
+    92→const SUBJECT_SORT_KEY = "erp:subjectSort";
+    93→
+    94→function loadSavedSort(): SubjectSort {
+    95→  if (typeof window === "undefined") return "lowest";
+    96→  try {
+    97→    const saved = window.localStorage.getItem(SUBJECT_SORT_KEY);
+    98→    return SUBJECT_SORTS.some((o) => o.key === saved) ? (saved as SubjectSort) : "lowest";
+    99→  } catch {
+   100→    return "lowest";
+   101→  }
+   102→}
+   103→
+   104→/* No-data subjects (total === 0) have no attendance yet — a 0.00% is not a
+   105→   real value, so they never compete with actual percentages: they sink to
+   106→   the end of both directions with a name tie-break. */
+   107→function noDataLast(a: SubjectView, b: SubjectView): number {
+   108→  const an = a.total === 0;
+   109→  const bn = b.total === 0;
+   110→  if (an !== bn) return an ? 1 : -1;
+   111→  return 0;
+   112→}
+   113→
+   114→function sortSubjects(list: SubjectView[], sort: SubjectSort): SubjectView[] {
+   115→  const copy = [...list];
+   116→  switch (sort) {
+   117→    case "lowest":
+   118→      return copy.sort(
+   119→        (a, b) => noDataLast(a, b) || a.percentage - b.percentage || a.name.localeCompare(b.name)
+   120→      );
+   121→    case "highest":
+   122→      return copy.sort(
+   123→        (a, b) => noDataLast(a, b) || b.percentage - a.percentage || a.name.localeCompare(b.name)
+   124→      );
+   125→    case "name":
+   126→      return copy.sort((a, b) => a.name.localeCompare(b.name));
+   127→    case "recent":
+   128→      return copy.sort((a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime());
+   129→  }
+   130→}
+   131→
+   132→/** Live countdown label for the next upcoming deadline. */
+   133→function hhmmFromMin(min: number): string {
+   134→  return `${String(Math.floor(min / 60)).padStart(2, "0")}:${String(min % 60).padStart(2, "0")}`;
+   135→}
+   136→
+   137→function countdownLabel(dueAt: string, now: number): string {
+   138→  const diff = new Date(dueAt).getTime() - now;
+   139→  const abs = Math.abs(diff);
+   140→  const mins = Math.round(abs / 60_000);
+   141→  const hours = Math.round(abs / 3_600_000);
+   142→  const days = Math.round(abs / 86_400_000);
+   143→  let span: string;
+   144→  if (mins < 60) span = `${mins} min`;
+   145→  else if (hours < 36) span = `${hours} hr${hours === 1 ? "" : "s"}`;
+   146→  else span = `${days} day${days === 1 ? "" : "s"}`;
+   147→  return diff >= 0 ? `in ${span}` : `${span} overdue`;
+   148→}
+   149→
+   150→/** Relative urgency pill for an ALA deadline: red overdue/≤48h, amber ≤7d, muted later. */
+   151→function deadlinePill(dueAt: string, now: number): { label: string; className: string } {
+   152→  const due = new Date(dueAt).getTime();
+   153→  const diff = due - now;
+   154→  if (diff < 0)
+   155→    return {
+   156→      label: countdownLabel(dueAt, now),
+   157→      className: "bg-red-500/10 text-red-600 dark:text-red-400",
+   158→    };
+   159→  if (diff <= 2 * 86_400_000)
+   160→    return {
+   161→      label: countdownLabel(dueAt, now),
+   162→      className: "bg-red-500/10 text-red-600 dark:text-red-400",
+   163→    };
+   164→  if (diff <= 7 * 86_400_000)
+   165→    return {
+   166→      label: countdownLabel(dueAt, now),
+   167→      className: "bg-amber-500/10 text-amber-700 dark:text-amber-400",
+   168→    };
+   169→  return { label: countdownLabel(dueAt, now), className: "bg-muted text-muted-foreground" };
+   170→}
+   171→
+   172→/**
+   173→ * Top of the open ALA/assignment deadline queue, mirrored straight from the
+   174→ * ERP sync (Reminder rows with the assignment externalId prefix). Every row
+   175→ * deep-links into the Reminders tab, where the subject-wise list lives.
+   176→ * Rows the student privately flagged carry their priority flag chip so the
+   177→ * triage language follows them across every surface (card, palette, list).
+   178→ */
+   179→function AlaDeadlinePanel({
+   180→  rows,
+   181→  pending,
+   182→  total,
+   183→  onOpenReminders,
+   184→  flagPriorities,
+   185→}: {
+   186→  rows: AlaUpcomingRow[];
+   187→  pending: number;
+   188→  total: number;
+   189→  onOpenReminders: () => void;
+   190→  /** externalId → priority (1–3) from the local AlaNote overlay. */
+   191→  flagPriorities: Map<string, number>;
+   192→}) {
+   193→  const now = useNow();
+   194→  if (rows.length === 0) return null;
+   195→  return (
+   196→    <div className="overflow-hidden rounded-xl border border-border/60 bg-muted/20">
+   197→      <div className="flex items-center justify-between gap-2 border-b border-border/60 px-3 py-2">
+   198→        <p className="flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+   199→          <ClipboardList className="size-3.5" aria-hidden="true" />
+   200→          Next ALA &amp; assignment deadlines
+   201→        </p>
+   202→        <Badge variant={pending > 0 ? "secondary" : "outline"} className="text-[10px] tabular-nums">
+   203→          {pending} of {total} pending
+   204→        </Badge>
+   205→      </div>
+   206→      <ul>
+   207→        {rows.map((row, i) => {
+   208→          const hue = row.subjectCode ? hueColors(row.subjectCode) : null;
+   209→          const pill = deadlinePill(row.dueAt, now);
+   210→          const overdue = new Date(row.dueAt).getTime() < now;
+   211→          const flag = row.externalId ? flagPriorities.get(row.externalId) : undefined;
+   212→          const flagMeta = alaPriorityOf(flag);
+   213→          return (
+   214→            <motion.li
+   215→              key={row.id}
+   216→              initial={{ opacity: 0, y: 4 }}
+   217→              animate={{ opacity: 1, y: 0 }}
+   218→              transition={{ delay: 0.05 * i, duration: 0.18 }}
+   219→              className="list-none border-b border-border/40 last:border-b-0"
+   220→            >
+   221→              <div className="flex items-stretch">
+   222→                <button
+   223→                  type="button"
+   224→                  onClick={onOpenReminders}
+   225→                  aria-label={`Open the subject-wise ALA list — ${row.title}${flagMeta ? `, flagged ${flagMeta.label.toLowerCase()} priority` : ""}`}
+   226→                  title="Open the subject-wise list in the Reminders tab"
+   227→                  className="group/ala flex min-w-0 flex-1 items-center gap-2.5 px-3 py-2.5 text-left transition-colors hover:bg-muted/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring"
+   228→                >
+   229→                  {hue ? (
+   230→                    <span
+   231→                      className="shrink-0 rounded-md px-1.5 py-0.5 font-mono text-[10px] font-semibold"
+   232→                      style={{ backgroundColor: hue.bg, color: hue.fg }}
+   233→                    >
+   234→                      {row.subjectCode}
+   235→                    </span>
+   236→                  ) : (
+   237→                    <ClipboardList className="size-3.5 shrink-0 text-muted-foreground" aria-hidden="true" />
+   238→                  )}
+   239→                  <span className="min-w-0 flex-1">
+   240→                    <span className="flex min-w-0 items-center gap-1.5">
+   241→                      <span className="min-w-0 truncate text-sm font-medium leading-snug">{row.title}</span>
+   242→                      {flagMeta && (
+   243→                        <Flag
+   244→                          className={cn("size-3 shrink-0", flagMeta.icon)}
+   245→                          aria-hidden="true"
+   246→                        />
+   247→                      )}
+   248→                    </span>
+   249→                    {row.subjectName && (
+   250→                      <span className="block truncate text-[11px] text-muted-foreground">{row.subjectName}</span>
+   251→                    )}
+   252→                  </span>
+   253→                  <span className="shrink-0 text-right">
+   254→                    <span
+   255→                      className={cn(
+   256→                        "block rounded-full px-2 py-0.5 text-[10px] font-semibold tabular-nums transition-colors",
+   257→                        pill.className,
+   258→                        overdue && "group-hover/ala:bg-red-500/20"
+   259→                      )}
+   260→                    >
+   261→                      {pill.label}
+   262→                    </span>
+   263→                    <span className="mt-0.5 block text-[10px] text-muted-foreground">{fmtDT(row.dueAt)}</span>
+   264→                  </span>
+   265→                  <ChevronRight
+   266→                    className="size-3.5 shrink-0 text-muted-foreground/40 transition-transform group-hover/ala:translate-x-0.5 group-hover/ala:text-foreground"
+   267→                    aria-hidden="true"
+   268→                  />
+   269→                </button>
+   270→                {erpAssignmentUrl(row.externalId) && (
+   271→                  <a
+   272→                    href={erpAssignmentUrl(row.externalId) as string}
+   273→                    target="_blank"
+   274→                    rel="noopener noreferrer"
+   275→                    aria-label={`Open ${row.title} in the ERP portal (new tab)`}
+   276→                    title="Open in the ERP portal — submissions happen there (this app is a read-only mirror)"
+   277→                    className="flex w-9 shrink-0 items-center justify-center border-l border-border/40 text-muted-foreground/70 transition-all hover:bg-primary/10 hover:text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring"
+   278→                  >
+   279→                    <ExternalLink className="size-3.5" aria-hidden="true" />
+   280→                  </a>
+   281→                )}
+   282→              </div>
+   283→            </motion.li>
+   284→          );
+   285→        })}
+   286→      </ul>
+   287→    </div>
+   288→  );
+   289→}
+   290→
+   291→/**
+   292→ * Dashboard glance at the student's OWN triage layer: ALA rows carrying a
+   293→ * local note and/or priority flag (table AlaNote — device-local, never shown
+   294→ * on the ERP). Rows reuse the exact priority color language of the Reminders
+   295→ * list (ALA_PRIORITY_META). Clicking a row or the footer jumps to the
+   296→ * Reminders tab with the "Noted" filter pre-applied. Hidden entirely when
+   297→ * nothing is flagged — the dashboard stays clean until the student uses it.
+   298→ */
+   299→function FlaggedAlasCard({
+   300→  rows,
+   301→  onOpenFlagged,
+   302→}: {
+   303→  rows: { row: Reminder; note: AlaNoteRow }[];
+   304→  onOpenFlagged: () => void;
+   305→}) {
+   306→  const now = useNow();
+   307→  const SHOWN = 4;
+   308→  const visible = rows.slice(0, SHOWN);
+   309→  const extra = rows.length - visible.length;
+   310→  /* Priority mix in the header — urgency at a glance without reading rows. */
+   311→  const prioMix = ([3, 2, 1] as const)
+   312→    .map((level) => ({ level, n: rows.filter((r) => r.note.priority === level).length }))
+   313→    .filter((x) => x.n > 0);
+   314→
+   315→  if (rows.length === 0) return null;
+   316→  return (
+   317→    <div
+   318→      data-testid="flagged-ala-card"
+   319→      className="overflow-hidden rounded-xl border border-primary/25 bg-primary/[0.03]"
+   320→    >
+   321→      <div className="flex flex-wrap items-center gap-2 border-b border-border/60 px-3 py-2">
+   322→        <p className="flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+   323→          <StickyNote className="size-3.5 text-primary/80" aria-hidden="true" />
+   324→          Your flagged ALAs
+   325→        </p>
+   326→        <span className="flex-1" />
+   327→        {prioMix.map(({ level, n }) => {
+   328→          const meta = ALA_PRIORITY_META[level];
+   329→          return (
+   330→            <span
+   331→              key={level}
+   332→              className={cn(
+   333→                "inline-flex items-center gap-0.5 rounded-full px-1.5 py-0 text-[9px] font-bold uppercase tracking-wider",
+   334→                meta.chip
+   335→              )}
+   336→            >
+   337→              <Flag className="size-2.5" aria-hidden="true" />
+   338→              {n} {meta.label}
+   339→            </span>
+   340→          );
+   341→        })}
+   342→        <Badge variant="secondary" className="text-[10px] tabular-nums">
+   343→          {rows.length} noted
+   344→        </Badge>
+   345→      </div>
+   346→      <ul>
+   347→        {visible.map(({ row, note }) => {
+   348→          const hue = row.subjectCode ? hueColors(row.subjectCode) : null;
+   349→          const pill = deadlinePill(row.dueAt, now);
+   350→          const prio = alaPriorityOf(note.priority);
+   351→          return (
+   352→            <li key={row.id} className="list-none border-b border-border/40 last:border-b-0">
+   353→              <button
+   354→                type="button"
+   355→                onClick={onOpenFlagged}
+   356→                aria-label={`Open your flagged ALAs in the Reminders tab — ${row.title}${note.note ? `, note: ${note.note}` : ""}`}
+   357→                title="Open the flagged list in the Reminders tab (Noted filter)"
+   358→                className={cn(
+   359→                  "group/flag flex w-full min-w-0 items-center gap-2.5 border-l-[3px] px-3 py-2.5 text-left transition-colors hover:bg-muted/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring",
+   360→                  prio?.border ?? "border-l-transparent"
+   361→                )}
+   362→              >
+   363→                {hue ? (
+   364→                  <span
+   365→                    className="shrink-0 rounded-md px-1.5 py-0.5 font-mono text-[10px] font-semibold"
+   366→                    style={{ backgroundColor: hue.bg, color: hue.fg }}
+   367→                  >
+   368→                    {row.subjectCode}
+   369→                  </span>
+   370→                ) : (
+   371→                  <StickyNote className="size-3.5 shrink-0 text-primary/70" aria-hidden="true" />
+   372→                )}
+   373→                <span className="min-w-0 flex-1">
+   374→                  <span className="flex min-w-0 items-center gap-2">
+   375→                    <span className="min-w-0 truncate text-sm font-medium leading-snug">{row.title}</span>
+   376→                    {prio && (
+   377→                      <span
+   378→                        className={cn(
+   379→                          "inline-flex shrink-0 items-center gap-0.5 rounded-full px-1.5 py-0 text-[9px] font-bold uppercase tracking-wider",
+   380→                          prio.chip
+   381→                        )}
+   382→                      >
+   383→                        <Flag className="size-2.5" aria-hidden="true" />
+   384→                        {prio.label}
+   385→                      </span>
+   386→                    )}
+   387→                    {row.status !== "ACTIVE" && (
+   388→                      <span className="shrink-0 text-[10px] font-semibold text-emerald-600 dark:text-emerald-400">
+   389→                        done
+   390→                      </span>
+   391→                    )}
+   392→                  </span>
+   393→                  {note.note && (
+   394→                    <span
+   395→                      className="mt-0.5 flex items-start gap-1 text-[11px] italic leading-snug text-foreground/70"
+   396→                      title={note.note}
+   397→                    >
+   398→                      <StickyNote className="mt-0.5 size-3 shrink-0 text-primary/70" aria-hidden="true" />
+   399→                      <span className="min-w-0 truncate">{note.note}</span>
+   400→                    </span>
+   401→                  )}
+   402→                </span>
+   403→                <span className="shrink-0 text-right">
+   404→                  <span
+   405→                    className={cn(
+   406→                      "block rounded-full px-2 py-0.5 text-[10px] font-semibold tabular-nums",
+   407→                      pill.className
+   408→                    )}
+   409→                  >
+   410→                    {pill.label}
+   411→                  </span>
+   412→                  <span className="mt-0.5 block text-[10px] text-muted-foreground">{fmtDT(row.dueAt)}</span>
+   413→                </span>
+   414→                <ChevronRight
+   415→                  className="size-3.5 shrink-0 text-muted-foreground/40 transition-transform group-hover/flag:translate-x-0.5 group-hover/flag:text-foreground"
+   416→                  aria-hidden="true"
+   417→                />
+   418→              </button>
+   419→            </li>
+   420→          );
+   421→        })}
+   422→      </ul>
+   423→      <button
+   424→        type="button"
+   425→        onClick={onOpenFlagged}
+   426→        aria-label={`Open the Reminders tab — ${rows.length} flagged ALA${rows.length === 1 ? "" : "s"} with the Noted filter applied`}
+   427→        className="flex w-full items-center gap-2 px-3 py-2 text-left text-xs text-primary transition-colors hover:bg-primary/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring"
+   428→      >
+   429→        <ArrowRight className="size-3.5 shrink-0" aria-hidden="true" />
+   430→        <span className="min-w-0 flex-1 truncate font-medium">
+   431→          {extra > 0 ? `${extra} more flagged — open the noted list` : "Open the noted list"}
+   432→        </span>
+   433→        <span className="shrink-0 text-[10px] text-muted-foreground">private · never shown on the ERP</span>
+   434→      </button>
+   435→    </div>
+   436→  );
+   437→}
+   438→
+   439→function NextUpStrip({
+   440→  items,
+   441→  flagPriorities,
+   442→}: {
+   443→  items: Reminder[];
+   444→  /** externalId → priority (1–3) from the local AlaNote overlay. */
+   445→  flagPriorities: Map<string, number>;
+   446→}) {
+   447→  const now = useNow();
+   448→  /* Next class TODAY from the synced routine — shares the timetable query
+   449→     cache with the week plan + timetable cards, so no extra request. The
+   450→     batch-pick math (same-batch collapse + parallel picks) matches the
+   451→     week plan exactly, so the chip and the plan can never disagree. */
+   452→  const { data: ttRows } = useQuery({ queryKey: qk.timetable, queryFn: fetchTimetable });
+   453→  const nowDay = new Date(now).getDay();
+   454→  const nowMin = new Date(now).getHours() * 60 + new Date(now).getMinutes();
+   455→  const classInfo = useMemo(() => {
+   456→    const attending = applyBatchPicks(ttRows?.slots ?? [], ttRows?.picks ?? {}).attending;
+   457→    const today = attending.filter((s) => s.dayOfWeek === nowDay);
+   458→    const left = today
+   459→      .filter((s) => s.endMin > nowMin)
+   460→      .sort((a, b) => a.startMin - b.startMin);
+   461→    const next = left[0] ?? null;
+   462→    return {
+   463→      next,
+   464→      ongoing: next !== null && next.startMin <= nowMin,
+   465→      allDone: next === null && today.length > 0,
+   466→    };
+   467→  }, [ttRows, nowDay, nowMin]);
+   468→  const upcoming = items
+   469→    .filter((r) => r.status === "ACTIVE" && r.type !== "ATTENDANCE_WARNING")
+   470→    .sort((a, b) => new Date(a.dueAt).getTime() - new Date(b.dueAt).getTime());
+   471→  const overdue = upcoming.filter((r) => new Date(r.dueAt).getTime() < now);
+   472→  const next = upcoming.find((r) => new Date(r.dueAt).getTime() >= now);
+   473→
+   474→  if (upcoming.length === 0) return null;
+   475→  const shown = overdue.length > 0 ? overdue[0] : (next ?? upcoming[0]);
+   476→  const isOverdue = new Date(shown.dueAt).getTime() < now;
+   477→
+   478→  return (
+   479→    <div
+   480→      className={cn(
+   481→        "flex items-center gap-3 rounded-xl border px-4 py-3",
+   482→        isOverdue ? "border-red-500/30 bg-red-500/[0.05]" : "border-primary/25 bg-primary/[0.04]"
+   483→      )}
+   484→    >
+   485→      <span
+   486→        className={cn(
+   487→          "flex size-9 shrink-0 items-center justify-center rounded-lg",
+   488→          isOverdue ? "bg-red-500/10 text-red-600 dark:text-red-400" : "bg-emerald-500/10 text-emerald-600 dark:text-emerald-400"
+   489→        )}
+   490→      >
+   491→        <Hourglass className="size-4" aria-hidden="true" />
+   492→      </span>
+   493→      <div className="min-w-0 flex-1">
+   494→        <p className="flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
+   495→          <span className="relative flex size-1.5 shrink-0" aria-hidden="true">
+   496→            <span
+   497→              className={cn(
+   498→                "absolute inline-flex h-full w-full animate-ping rounded-full opacity-60",
+   499→                isOverdue ? "bg-red-500" : "bg-emerald-500"
+   500→              )}
+   501→              style={{ animationDuration: "2.2s" }}
+   502→            />
+   503→            <span className={cn("relative inline-flex size-1.5 rounded-full", isOverdue ? "bg-red-500" : "bg-emerald-500")} />
+   504→          </span>
+   505→          Next up {overdue.length > 0 && <span className="text-red-500">· {overdue.length} overdue</span>}
+   506→        </p>
+   507→        <p className="flex min-w-0 items-center gap-1.5">
+   508→          {shown.subjectCode && hueColors(shown.subjectCode) && (
+   509→            <span
+   510→              className="shrink-0 rounded-md px-1.5 py-0.5 font-mono text-[10px] font-semibold"
+   511→              style={(() => {
+   512→                const hue = hueColors(shown.subjectCode as string);
+   513→                return { backgroundColor: hue.bg, color: hue.fg };
+   514→              })()}
+   515→            >
+   516→              {shown.subjectCode}
+   517→            </span>
+   518→          )}
+   519→          {(() => {
+   520→            const flagMeta = alaPriorityOf(shown.externalId ? flagPriorities.get(shown.externalId) : undefined);
+   521→            return flagMeta ? (
+   522→              <Flag className={cn("size-3 shrink-0", flagMeta.icon)} aria-hidden="true" />
+   523→            ) : null;
+   524→          })()}
+   525→          <span className="truncate text-sm font-medium">{shown.title}</span>
+   526→        </p>
+   527→      </div>
+   528→      {/* Next class today — a glanceable bridge between deadlines and the routine.
+   529→          Desktop-only: the week plan + timetable cards carry the schedule on mobile. */}
+   530→      {(classInfo.next || classInfo.allDone) && (
+   531→        <div className="hidden shrink-0 items-center gap-3 sm:flex" aria-live="off">
+   532→          <Separator orientation="vertical" className="h-9" />
+   533→          <div className="text-right">
+   534→            <p className="flex items-center justify-end gap-1 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
+   535→              {classInfo.ongoing && (
+   536→                <CircleDot className="size-3 animate-pulse text-emerald-500" aria-hidden="true" />
+   537→              )}
+   538→              {classInfo.next ? (classInfo.ongoing ? "In class" : "Next class") : "Classes done"}
+   539→            </p>
+   540→            {classInfo.next ? (
+   541→              <>
+   542→                <p className="flex items-center justify-end gap-1.5 text-xs font-semibold">
+   543→                  <span
+   544→                    className="rounded-md px-1 py-px font-mono text-[10px]"
+   545→                    style={(() => {
+   546→                      const hue = hueColors(classInfo.next!.subjectCode);
+   547→                      return { backgroundColor: hue.bg, color: hue.fg };
+   548→                    })()}
+   549→                  >
+   550→                    {classInfo.next.subjectCode}
+   551→                  </span>
+   552→                  <span className="tabular-nums text-muted-foreground">
+   553→                    {hhmmFromMin(classInfo.next.startMin)}
+   554→                  </span>
+   555→                </p>
+   556→                <p className="text-[10px] tabular-nums text-muted-foreground">
+   557→                  {classInfo.ongoing
+   558→                    ? `ends in ${classInfo.next.endMin - nowMin} min`
+   559→                    : `starts in ${classInfo.next.startMin - nowMin} min`}
+   560→                </p>
+   561→              </>
+   562→            ) : (
+   563→              <p className="text-[10px] text-muted-foreground">nothing left today</p>
+   564→            )}
+   565→          </div>
+   566→        </div>
+   567→      )}
+   568→      <div className="shrink-0 text-right">
+   569→        <p
+   570→          className={cn(
+   571→            "text-sm font-bold tabular-nums",
+   572→            isOverdue ? "text-red-600 dark:text-red-400" : "text-emerald-600 dark:text-emerald-400"
+   573→          )}
+   574→        >
+   575→          {countdownLabel(shown.dueAt, now)}
+   576→        </p>
+   577→        <p className="text-[11px] text-muted-foreground">{fmtDT(shown.dueAt)}</p>
+   578→      </div>
+   579→    </div>
+   580→  );
+   581→}
+   582→
+   583→/* ------------------------------------------------------------------ */
+   584→
+   585→function DueBadge({ iso, now }: { iso: string; now: number }) {
+   586→  const d = new Date(iso);
+   587→  if (d.getTime() < now && !isToday(d)) {
+   588→    return <span className="text-xs font-medium text-red-600 dark:text-red-400">{fmtDT(iso)} · overdue</span>;
+   589→  }
+   590→  return <span className="text-xs text-muted-foreground">{fmtDT(iso)}</span>;
+   591→}
+   592→
+   593→function ReminderPreviewRow({ r, now }: { r: Reminder; now: number }) {
+   594→  return (
+   595→    <li className="flex items-start gap-2.5 rounded-lg border border-border/50 p-2.5 transition-colors hover:bg-muted/50">
+   596→      <TypeIcon type={r.type} />
+   597→      <div className="min-w-0 flex-1">
+   598→        <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
+   599→          <p className="min-w-0 flex-1 truncate text-sm font-medium">{r.title}</p>
+   600→          <SourceBadge source={r.source} />
+   601→        </div>
+   602→        <div className="mt-0.5 flex items-center gap-2">
+   603→          <DueBadge iso={r.dueAt} now={now} />
+   604→        </div>
+   605→      </div>
+   606→    </li>
+   607→  );
+   608→}
+   609→
+   610→function RemindersPreview({
+   611→  items,
+   612→  todayCount,
+   613→  weekCount,
+   614→  alaPending,
+   615→  alaTotal,
+   616→  alaUpcoming,
+   617→  onOpenReminders,
+   618→  flagPriorities,
+   619→}: {
+   620→  items: Reminder[];
+   621→  todayCount: number;
+   622→  weekCount: number;
+   623→  alaPending: number;
+   624→  alaTotal: number;
+   625→  alaUpcoming: AlaUpcomingRow[];
+   626→  onOpenReminders: () => void;
+   627→  /** externalId → priority (1–3) from the local AlaNote overlay. */
+   628→  flagPriorities: Map<string, number>;
+   629→}) {
+   630→  const now = useNow();
+   631→  const groups: { key: string; label: string; className: string; items: Reminder[] }[] = [
+   632→    { key: "overdue", label: "Overdue", className: "text-red-600 dark:text-red-400", items: [] },
+   633→    { key: "today", label: "Today", className: "text-emerald-600 dark:text-emerald-400", items: [] },
+   634→    { key: "tomorrow", label: "Tomorrow", className: "", items: [] },
+   635→    { key: "week", label: "This week", className: "", items: [] },
+   636→    { key: "later", label: "Later", className: "", items: [] },
+   637→  ];
+   638→  for (const r of items) {
+   639→    const g = dueGroup(r.dueAt, r.status, now);
+   640→    const bucket = groups.find((x) => x.key === g);
+   641→    if (bucket) bucket.items.push(r);
+   642→  }
+   643→  const visible = groups.filter((g) => g.items.length > 0);
+   644→
+   645→  return (
+   646→    <Card className="rounded-xl border-border/60">
+   647→      <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-3">
+   648→        <div>
+   649→          <CardTitle className="text-base tracking-tight">Reminders</CardTitle>
+   650→          <CardDescription className="text-xs">Next deadlines from the ERP and your own list</CardDescription>
+   651→        </div>
+   652→        <div className="flex gap-1.5">
+   653→          <Badge variant="secondary" className="tabular-nums">{todayCount} today</Badge>
+   654→          <Badge variant="secondary" className="tabular-nums">{weekCount} this week</Badge>
+   655→        </div>
+   656→      </CardHeader>
+   657→      <CardContent>
+   658→        {items.length === 0 ? (
+   659→          <p className="py-6 text-center text-sm text-muted-foreground">No active reminders</p>
+   660→        ) : (
+   661→          <div className="max-h-96 space-y-3 overflow-y-auto pr-1">
+   662→            {visible.map((g) => (
+   663→              <div key={g.key}>
+   664→                <p className={cn("mb-1.5 text-xs font-semibold uppercase tracking-wide", g.className)}>{g.label}</p>
+   665→                <ul className="space-y-1.5">
+   666→                  {g.items.slice(0, 5).map((r) => (
+   667→                    <ReminderPreviewRow key={r.id} r={r} now={now} />
+   668→                  ))}
+   669→                </ul>
+   670→              </div>
+   671→            ))}
+   672→          </div>
+   673→        )}
+   674→        <AlaDeadlinePanel
+   675→          rows={alaUpcoming}
+   676→          pending={alaPending}
+   677→          total={alaTotal}
+   678→          onOpenReminders={onOpenReminders}
+   679→          flagPriorities={flagPriorities}
+   680→        />
+   681→        {alaTotal > 0 && (
+   682→          <button
+   683→            type="button"
+   684→            onClick={onOpenReminders}
+   685→            aria-label={
+   686→              alaPending > 0
+   687→                ? `Open the Reminders tab — ${alaPending} of ${alaTotal} ALA and assignment submissions still pending`
+   688→                : `Open the Reminders tab — all ${alaTotal} ALA and assignment rows are submitted or closed`
+   689→            }
+   690→            className={cn(
+   691→              "mt-3 flex w-full items-center gap-2 rounded-lg border px-3 py-2 text-left text-xs transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+   692→              alaPending > 0
+   693→                ? "border-primary/25 bg-primary/[0.05] hover:bg-primary/10"
+   694→                : "border-emerald-500/30 bg-emerald-500/[0.06] hover:bg-emerald-500/10"
+   695→            )}
+   696→          >
+   697→            {alaPending > 0 ? (
+   698→              <ClipboardList className="size-3.5 shrink-0 text-primary" aria-hidden="true" />
+   699→            ) : (
+   700→              <CheckCircle2 className="size-3.5 shrink-0 text-emerald-600 dark:text-emerald-400" aria-hidden="true" />
+   701→            )}
+   702→            <span className="min-w-0 flex-1 truncate">
+   703→              <span className="font-semibold">
+   704→                {alaPending > 0 ? `${alaPending} of ${alaTotal} pending` : `All ${alaTotal} submitted or closed`}
+   705→              </span>{" "}
+   706→              <span className="text-muted-foreground">· open the subject-wise list</span>
+   707→            </span>
+   708→            <ChevronRight className="size-3.5 shrink-0 text-muted-foreground" aria-hidden="true" />
+   709→          </button>
+   710→        )}
+   711→      </CardContent>
+   712→    </Card>
+   713→  );
+   714→}
+   715→
+   716→/* ------------------------------------------------------------------ */
+   717→
+   718→/** Live "in 12 min"-style countdown for a future instant (null when absent/past). */
+   719→function inCountdown(iso: string | null, now: number): string | null {
+   720→  if (!iso) return null;
+   721→  const diff = new Date(iso).getTime() - now;
+   722→  if (diff <= 0) return null;
+   723→  const mins = Math.max(1, Math.round(diff / 60_000));
+   724→  if (mins < 60) return `in ${mins} min`;
+   725→  const hrs = Math.floor(mins / 60);
+   726→  const rem = mins % 60;
+   727→  return rem > 0 ? `in ${hrs}h ${rem}m` : `in ${hrs}h`;
+   728→}
+   729→
+   730→function ErpStatusCard({
+   731→  connected,
+   732→  demoMode,
+   733→  username,
+   734→  sync,
+   735→}: {
+   736→  connected: boolean;
+   737→  demoMode: boolean;
+   738→  username: string | null;
+   739→  sync: {
+   740→    status: string;
+   741→    lastSyncAt: string | null;
+   742→    lastSuccessAt: string | null;
+   743→    nextScheduledSyncAt: string | null;
+   744→    consecutiveFailures: number;
+   745→  };
+   746→}) {
+   747→  const now = useNow();
+   748→  /* Sync reliability from the SHARED qk.sync cache (the Settings sync-history
+   749→     card polls the same key — React Query dedupes, no extra traffic when both
+   750→     are mounted). Honest window: only the logs the server still retains. */
+   751→  const logsQ = useQuery({ queryKey: qk.sync, queryFn: fetchSyncLogs, staleTime: 15_000, refetchInterval: 60_000 });
+   752→  const logs = logsQ.data?.logs ?? [];
+   753→  const totalLogs = logs.length;
+   754→  const okLogs = logs.filter((l) => l.status === "success").length;
+   755→  const rate = totalLogs > 0 ? okLogs / totalLogs : null;
+   756→  const rateTone =
+   757→    rate == null ? null : rate >= 0.9 ? "emerald" : rate >= 0.7 ? "amber" : "red";
+   758→  const lastFail = logs.find((l) => l.status !== "success");
+   759→  const syncing = sync.status === "syncing";
+   760→  return (
+   761→    <Card className="rounded-xl border-border/60">
+   762→      <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-3">
+   763→        <div>
+   764→          <CardTitle className="text-base tracking-tight">ERP connection</CardTitle>
+   765→          <CardDescription className="text-xs">erp.gmiu.edu.in · read-only source of truth</CardDescription>
+   766→        </div>
+   767→        {syncing ? (
+   768→          <RefreshCw className="size-5 animate-spin text-primary" aria-hidden="true" />
+   769→        ) : connected ? (
+   770→          <CheckCircle2 className="size-5 text-emerald-500" aria-hidden="true" />
+   771→        ) : demoMode ? (
+   772→          <FlaskConical className="size-5 text-amber-500" aria-hidden="true" />
+   773→        ) : (
+   774→          <WifiOff className="size-5 text-muted-foreground" aria-hidden="true" />
+   775→        )}
+   776→      </CardHeader>
+   777→      <CardContent className="space-y-3">
+   778→        <p className="text-lg font-semibold tracking-tight">
+   779→          {connected ? (
+   780→            <span className="text-emerald-600 dark:text-emerald-400">
+   781→              ✓ Connected{username ? ` · ${username}` : ""}
+   782→            </span>
+   783→          ) : demoMode ? (
+   784→            <span className="text-amber-600 dark:text-amber-400">Demo ERP simulator</span>
+   785→          ) : (
+   786→            <span className="text-muted-foreground">Not connected</span>
+   787→          )}
+   788→        </p>
+   789→        <Separator />
+   790→        <dl className="space-y-2 text-sm">
+   791→          <div className="flex items-center justify-between gap-2">
+   792→            <dt className="text-muted-foreground">Last synced</dt>
+   793→            <dd className="font-medium" title={fmtDT(sync.lastSyncAt)}>{ago(sync.lastSyncAt, now)}</dd>
+   794→          </div>
+   795→          <div className="flex items-center justify-between gap-2">
+   796→            <dt className="text-muted-foreground">Next scheduled sync</dt>
+   797→            <dd className="font-medium">
+   798→              {sync.nextScheduledSyncAt ? fmtDT(sync.nextScheduledSyncAt) : "—"}
+   799→              {inCountdown(sync.nextScheduledSyncAt, now) && (
+   800→                <span className="ml-1.5 rounded-full bg-muted px-1.5 py-0.5 text-[10px] font-semibold tabular-nums text-muted-foreground">
+   801→                  {inCountdown(sync.nextScheduledSyncAt, now)}
+   802→                </span>
+   803→              )}
+   804→            </dd>
+   805→          </div>
+   806→          {rate != null && (
+   807→            <div className="flex items-center justify-between gap-2">
+   808→              <dt className="text-muted-foreground">Reliability</dt>
+   809→              <dd
+   810→                className="flex items-center gap-1.5 font-medium tabular-nums"
+   811→                title={`Success rate over the last ${totalLogs} recorded syncs${lastFail ? ` — last failure ${ago(lastFail.startedAt, now)}` : ""}`}
+   812→              >
+   813→                <span
+   814→                  aria-hidden="true"
+   815→                  className={cn(
+   816→                    "size-1.5 shrink-0 rounded-full",
+   817→                    rateTone === "emerald" && "bg-emerald-500",
+   818→                    rateTone === "amber" && "bg-amber-500",
+   819→                    rateTone === "red" && "bg-red-500"
+   820→                  )}
+   821→                />
+   822→                {okLogs}/{totalLogs} OK
+   823→              </dd>
+   824→            </div>
+   825→          )}
+   826→          {sync.consecutiveFailures > 0 && (
+   827→            <div className="flex items-center justify-between gap-2 rounded-lg bg-amber-500/10 px-2.5 py-1.5 text-amber-700 dark:text-amber-400">
+   828→              <dt className="flex items-center gap-1.5 font-medium">
+   829→                <AlertTriangle className="size-3.5" aria-hidden="true" /> Consecutive failures
+   830→              </dt>
+   831→              <dd className="font-semibold tabular-nums">{sync.consecutiveFailures}</dd>
+   832→            </div>
+   833→          )}
+   834→        </dl>
+   835→      </CardContent>
+   836→    </Card>
+   837→  );
+   838→}
+   839→
+   840→/* ------------------------------------------------------------------ */
+   841→
+   842→function ChangeRow({ c, onOpen }: { c: ChangeEvent; onOpen?: (code: string) => void }) {
+   843→  const now = useNow();
+   844→  const clickable = Boolean(onOpen && c.subjectCode);
+   845→  const hue = c.subjectCode ? hueColors(c.subjectCode) : null;
+   846→
+   847→  const inner = (
+   848→    <>
+   849→      <KindIcon kind={c.kind} />
+   850→      <div className="min-w-0 flex-1">
+   851→        <p className="text-sm leading-snug">{c.detail}</p>
+   852→        <p className="mt-0.5 flex flex-wrap items-center gap-1.5 text-xs text-muted-foreground">
+   853→          {c.subjectCode && hue && (
+   854→            <Badge
+   855→              variant="outline"
+   856→              className="gap-1 border-transparent px-1.5 py-0 font-mono text-[10px]"
+   857→              style={{ backgroundColor: hue.bg, color: hue.fg }}
+   858→            >
+   859→              {c.subjectCode}
+   860→            </Badge>
+   861→          )}
+   862→          {ago(c.createdAt, now)}
+   863→        </p>
+   864→      </div>
+   865→      {clickable && (
+   866→        <ChevronRight
+   867→          className="mt-1 size-3.5 shrink-0 text-muted-foreground/50 transition-transform group-hover/row:translate-x-0.5 group-hover/row:text-foreground"
+   868→          aria-hidden="true"
+   869→        />
+   870→      )}
+   871→    </>
+   872→  );
+   873→
+   874→  if (!clickable) {
+   875→    return (
+   876→      <li className="flex items-start gap-2.5 rounded-lg border border-border/50 p-2.5 transition-colors hover:bg-muted/50">
+   877→        {inner}
+   878→      </li>
+   879→    );
+   880→  }
+   881→
+   882→  return (
+   883→    <li className="group/row list-none p-0">
+   884→      <button
+   885→        type="button"
+   886→        onClick={() => onOpen?.(c.subjectCode as string)}
+   887→        aria-label={`Open ${c.subjectCode} in the subject drawer`}
+   888→        title={`Open ${c.subjectCode} — attendance, trend and what-if planner`}
+   889→        className="flex w-full items-start gap-2.5 rounded-lg border border-border/50 p-2.5 text-left transition-all hover:border-primary/40 hover:bg-muted/60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+   890→      >
+   891→        {inner}
+   892→      </button>
+   893→    </li>
+   894→  );
+   895→}
+   896→
+   897→/* ------------------------------------------------------------------ */
+   898→
+   899→function SubjectRow({
+   900→  s,
+   901→  onOpen,
+   902→  shimmer,
+   903→  spark,
+   904→  alaStat,
+   905→}: {
+   906→  s: SubjectView;
+   907→  onOpen: () => void;
+   908→  shimmer: boolean;
+   909→  /** Per-subject snapshot history — when ≥2 points, a mini trend line rides the row. */
+   910→  spark?: HistoryPoint[];
+   911→  /** Open ALA/assignment deadlines for this subject (amber when any overdue). */
+   912→  alaStat?: SubjectAlaStat;
+   913→}) {
+   914→  const c = statusColors(s.status);
+   915→  const trend = (spark ?? []).map((p) => p.percentage);
+   916→  return (
+   917→    <button
+   918→      type="button"
+   919→      onClick={onOpen}
+   920→      className={cn(
+   921→        "flex w-full items-center gap-3 rounded-lg border border-border/50 p-3 text-left transition-all hover:border-primary/40 hover:bg-muted/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+   922→        s.status === "none" && "border-dashed bg-muted/20"
+   923→      )}
+   924→      aria-label={`Open attendance details for ${s.name}${
+   925→        alaStat && alaStat.open > 0
+   926→          ? ` — ${alaStat.open} open ALA deadline${alaStat.open === 1 ? "" : "s"}${
+   927→              alaStat.overdue > 0 ? `, ${alaStat.overdue} overdue` : ""
+   928→            }`
+   929→          : ""
+   930→      }`}
+   931→    >
+   932→      <span className={cn("hidden shrink-0 rounded-md px-2 py-1 font-mono text-[11px] font-semibold sm:block", c.bg, c.text)}>
+   933→        {s.code}
+   934→      </span>
+   935→      <div className="min-w-0 flex-1">
+   936→        <div className="flex items-center justify-between gap-2">
+   937→          <p className="min-w-0 truncate text-sm font-medium">{s.name}</p>
+   938→          {s.status === "none" ? (
+   939→            <span
+   940→              className={cn("shrink-0 text-sm font-bold tabular-nums", c.text)}
+   941→              title="No classes held yet — the ERP has not recorded attendance for this subject"
+   942→            >
+   943→              —
+   944→            </span>
+   945→          ) : (
+   946→            <span className={cn("shrink-0 text-sm font-bold tabular-nums", c.text)}>{s.percentage.toFixed(2)}%</span>
+   947→          )}
+   948→        </div>
+   949→        <div className="mt-1.5 flex items-center gap-2">
+   950→          <MiniBar percentage={s.percentage} status={s.status} target={s.targetPct} className="flex-1" shimmer={shimmer} />
+   951→          {s.status === "safe" && (
+   952→            <SkipPips
+   953→              count={s.canSkip}
+   954→              title={
+   955→                s.canSkip > 0
+   956→                  ? `Skip budget: you could miss ${s.canSkip} more ${
+   957→                      s.canSkip === 1 ? "class" : "classes"
+   958→                    } and stay at/above ${s.targetPct}% (${s.present}/${s.total} now)`
+   959→                  : `No skip buffer — missing even 1 class would drop you below ${s.targetPct}%`
+   960→              }
+   961→              className="hidden sm:inline-flex"
+   962→            />
+   963→          )}
+   964→          {s.status === "none" ? (
+   965→            <span className="shrink-0 text-[11px] italic text-muted-foreground/80">no classes yet</span>
+   966→          ) : s.status !== "safe" && s.classesToTarget > 0 ? (
+   967→            <span className="shrink-0 text-[11px] font-medium text-amber-600 dark:text-amber-400">
+   968→              ⚠ needs {s.classesToTarget} more {s.classesToTarget === 1 ? "class" : "classes"}
+   969→            </span>
+   970→          ) : (
+   971→            <span className="shrink-0 text-[11px] text-muted-foreground tabular-nums">
+   972→              {s.present}/{s.total}
+   973→            </span>
+   974→          )}
+   975→          {s.hasCustomTarget && <CustomTargetChip target={s.targetPct} className="shrink-0" />}
+   976→          <AlaStatChip stat={alaStat} className="ml-auto" />
+   977→        </div>
+   978→      </div>
+   979→      {trend.length >= 2 && (
+   980→        <Sparkline
+   981→          points={trend}
+   982→          stroke={c.bar.includes("red") ? "#ef4444" : c.bar.includes("amber") ? "#f59e0b" : "#10b981"}
+   983→          width={56}
+   984→          height={18}
+   985→          target={s.targetPct}
+   986→          className="hidden shrink-0 opacity-70 md:block"
+   987→          ariaLabel={`${s.name} attendance trend, currently ${s.percentage.toFixed(2)}%`}
+   988→        />
+   989→      )}
+   990→      <ChevronRight className="size-4 shrink-0 text-muted-foreground/60" aria-hidden="true" />
+   991→    </button>
+   992→  );
+   993→}
+   994→
+   995→/* ------------------------------------------------------------------ */
+   996→
+   997→function NotificationRow({
+   998→  n,
+   999→}: {
+  1000→  n: { id: string; title: string; message: string; severity: string; createdAt: string; read: boolean };
+  1001→}) {
+  1002→  const now = useNow();
+  1003→  const Icon =
+  1004→    n.severity === "critical"
+  1005→      ? XCircle
+  1006→      : n.severity === "warning"
+  1007→        ? AlertTriangle
+  1008→        : n.severity === "success"
+  1009→          ? CheckCircle2
+  1010→          : Info;
+  1011→  const cls =
+  1012→    n.severity === "critical"
+  1013→      ? "text-red-600 dark:text-red-400 bg-red-500/10"
+  1014→      : n.severity === "warning"
+  1015→        ? "text-amber-600 dark:text-amber-400 bg-amber-500/10"
+  1016→        : n.severity === "success"
+  1017→          ? "text-emerald-600 dark:text-emerald-400 bg-emerald-500/10"
+  1018→          : "text-muted-foreground bg-muted";
+  1019→  return (
+  1020→    <li className="flex items-start gap-2.5 rounded-lg p-2 transition-colors hover:bg-muted/50">
+  1021→      <span className={cn("mt-0.5 flex size-6 shrink-0 items-center justify-center rounded-md", cls)}>
+  1022→        <Icon className="size-3.5" aria-hidden="true" />
+  1023→      </span>
+  1024→      <div className="min-w-0 flex-1">
+  1025→        <p className="text-sm font-medium leading-snug">{n.title}</p>
+  1026→        <p className="line-clamp-2 text-xs text-muted-foreground">{compactErrorText(n.message, 240)}</p>
+  1027→        <p className="mt-0.5 text-[11px] text-muted-foreground/80">{ago(n.createdAt, now)}</p>
+  1028→      </div>
+  1029→      {!n.read && <span className="mt-1.5 size-1.5 shrink-0 rounded-full bg-primary" aria-label="unread" />}
+  1030→    </li>
+  1031→  );
+  1032→}
+  1033→
+  1034→/* ------------------------------------------------------------------ */
+  1035→
+  1036→function CardSkeletonLight({ className }: { className?: string }) {
+  1037→  return (
+  1038→    <Card className={cn("rounded-xl border-border/60", className)}>
+  1039→      <CardContent className="p-6">
+  1040→        <div className="animate-pulse space-y-3">
+  1041→          <div className="h-4 w-1/3 rounded bg-muted" />
+  1042→          <div className="h-3 w-2/3 rounded bg-muted" />
+  1043→          <div className="h-20 w-full rounded bg-muted" />
+  1044→        </div>
+  1045→      </CardContent>
+  1046→    </Card>
+  1047→  );
+  1048→}
+  1049→
+  1050→export function DashboardTab({
+  1051→  onOpenAttendance,
+  1052→  onOpenSettings,
+  1053→  onOpenReminders,
+  1054→  onOpenFlaggedAlas,
+  1055→  onOpenSetupStep,
+  1056→}: {
+  1057→  onOpenAttendance: () => void;
+  1058→  onOpenSettings: () => void;
+  1059→  onOpenReminders: () => void;
+  1060→  /** Jump to the Reminders tab with the "Noted" filter pre-applied
+  1061→   *  (wired by page.tsx — sets a pending filter, then switches tabs). */
+  1062→  onOpenFlaggedAlas: () => void;
+  1063→  /** Deep-link a setup-checklist row into the exact Settings card
+  1064→   *  (page.tsx switches to the Settings tab and spotlights the target). */
+  1065→  onOpenSetupStep?: (focus: SettingsFocus) => void;
+  1066→}) {
+  1067→  /* Sort starts at the default and hydrates from localStorage after mount
+  1068→     (SSR renders "lowest", so a saved preference swaps in post-paint — same
+  1069→     pattern as the text-size setting). Saved on every change below. */
+  1070→  const [sort, setSortState] = useState<SubjectSort>("lowest");
+  1071→  useEffect(() => {
+  1072→    setSortState(loadSavedSort());
+  1073→  }, []);
+  1074→  const setSort = (next: SubjectSort) => {
+  1075→    setSortState(next);
+  1076→    try {
+  1077→      window.localStorage.setItem(SUBJECT_SORT_KEY, next);
+  1078→    } catch {
+  1079→      /* private mode / storage full — the preference just won't persist */
+  1080→    }
+  1081→  };
+  1082→  /* Store the CODE (not the object) and derive the view from fresh query data,
+  1083→     so the drawer reflects updated targets/percentages after refetches. */
+  1084→  // One-shot signal: the week plan's "Resolve now" opens the timetable's
+  1085→  // Manage dialog directly on the Parallel classes picker (and highlights it).
+  1086→  const [parallelSignal, setParallelSignal] = useState(false);
+  1087→  const [selectedCode, setSelectedCode] = useState<string | null>(null);
+  1088→  const [digestOpen, setDigestOpen] = useState(false);
+  1089→  const [showAllChanges, setShowAllChanges] = useState(false);
+  1090→  const [showAllNotifs, setShowAllNotifs] = useState(false);
+  1091→  const { data, isPending, isError, error } = useQuery({
+  1092→    queryKey: qk.dashboard,
+  1093→    queryFn: fetchDashboard,
+  1094→    refetchInterval: 20_000,
+  1095→  });
+  1096→  const history = useQuery({
+  1097→    queryKey: qk.history,
+  1098→    queryFn: fetchHistory,
+  1099→    refetchInterval: 60_000,
+  1100→  });
+  1101→  /* Full ALA queue — deduped with the page-level badge poll via the shared
+  1102→     qk.assignments cache. Feeds the per-subject "N ALAs" chips on subject rows
+  1103→     (amber when any deadline is overdue) that lead into the drawer's
+  1104→     Active-deadlines section. */
+  1105→  const alaQ = useQuery({
+  1106→    queryKey: qk.assignments,
+  1107→    queryFn: fetchAssignments,
+  1108→    refetchInterval: 60_000,
+  1109→  });
+  1110→  /* Local note/priority overlay — same shared cache the Reminders tab uses,
+  1111→     so a flag added there shows up here with zero extra fetches. */
+  1112→  const alaNotesQ = useQuery({
+  1113→    queryKey: qk.alaNotes,
+  1114→    queryFn: fetchAlaNotes,
+  1115→    staleTime: 30_000,
+  1116→  });
+  1117→  const flaggedRows = useMemo(() => {
+  1118→    const notes = alaNotesQ.data;
+  1119→    if (!notes || notes.length === 0) return [];
+  1120→    const map = new Map(notes.map((n) => [n.externalId, n]));
+  1121→    return (alaQ.data?.assignments ?? [])
+  1122→      .filter((a) => !!a.externalId && map.has(a.externalId))
+  1123→      .map((row) => ({ row, note: map.get(row.externalId as string) as AlaNoteRow }))
+  1124→      .sort(
+  1125→        (x, y) =>
+  1126→          y.note.priority - x.note.priority ||
+  1127→          new Date(x.row.dueAt).getTime() - new Date(y.row.dueAt).getTime()
+  1128→      );
+  1129→  }, [alaNotesQ.data, alaQ.data]);
+  1130→  /** externalId → priority (1–3), only flagged rows — feeds the flag chips in
+  1131→   *  the deadline panel, the Next-up strip and the flagged-ALA card. */
+  1132→  const flagPriorities = useMemo(() => {
+  1133→    const m = new Map<string, number>();
+  1134→    for (const n of alaNotesQ.data ?? []) if (n.priority > 0) m.set(n.externalId, n.priority);
+  1135→    return m;
+  1136→  }, [alaNotesQ.data]);
+  1137→  const now = useNow(60_000);
+  1138→  const alaStats = useMemo(
+  1139→    () => collectAlaStats(alaQ.data?.assignments, alaQ.data?.courseNames, now),
+  1140→    [alaQ.data, now]
+  1141→  );
+  1142→
+  1143→  /* Global ALA deadline counters for the today card (SMS-style brief). */
+  1144→  const alaOverdue = useMemo(
+  1145→    () =>
+  1146→      (alaQ.data?.assignments ?? []).reduce(
+  1147→        (n, a) => n + (a.status === "ACTIVE" && new Date(a.dueAt).getTime() < now ? 1 : 0),
+  1148→        0
+  1149→      ),
+  1150→    [alaQ.data, now]
+  1151→  );
+  1152→  const alaDueWeek = useMemo(() => {
+  1153→    const cut = now + 7 * 86_400_000;
+  1154→    return (alaQ.data?.assignments ?? []).reduce((n, a) => {
+  1155→      const t = new Date(a.dueAt).getTime();
+  1156→      return n + (a.status === "ACTIVE" && t >= now && t < cut ? 1 : 0);
+  1157→    }, 0);
+  1158→  }, [alaQ.data, now]);
+  1159→  /* Soonest ALA deadline that is NOT overdue — the actionable "next". */
+  1160→  const nextDue = useMemo(
+  1161→    () =>
+  1162→      (data?.reminders.alaUpcoming ?? []).find((u) => new Date(u.dueAt).getTime() >= now) ?? null,
+  1163→    [data, now]
+  1164→  );
+  1165→
+  1166→  const weekDelta = useMemo(() => {
+  1167→    const pts = history.data?.overall ?? [];
+  1168→    if (pts.length < 2) return null;
+  1169→    const cutoff = Date.now() - 7 * 24 * 3600 * 1000;
+  1170→    const first = pts.find((p) => new Date(p.t).getTime() >= cutoff) ?? pts[0];
+  1171→    const last = pts[pts.length - 1];
+  1172→    const d = last.percentage - first.percentage;
+  1173→    if (Math.abs(d) < 0.005) return null;
+  1174→    // Be honest about the window: when tracked history is younger than the
+  1175→    // 7-day span (e.g. live tracking just started), label the real span.
+  1176→    const spanDays = Math.max(
+  1177→      0,
+  1178→      (new Date(last.t).getTime() - new Date(first.t).getTime()) / 86_400_000
+  1179→    );
+  1180→    return { delta: d, spanDays, fullWeek: spanDays >= 6.5 };
+  1181→  }, [history.data]);
+  1182→
+  1183→  const [copied, setCopied] = useState(false);
+  1184→  const copyTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  1185→  const summaryText = useMemo(() => {
+  1186→    if (!data) return "";
+  1187→    const lines: string[] = [];
+  1188→    lines.push(
+  1189→      `Attendance summary — ${new Date().toLocaleString("en-IN", { timeZone: "Asia/Kolkata", dateStyle: "medium", timeStyle: "short" })} IST`
+  1190→    );
+  1191→    lines.push(
+  1192→      `Overall: ${data.overall.percentage.toFixed(2)}% (${data.overall.present}/${data.overall.total} classes, ${data.overall.absent} missed) — target ${data.target}% [${data.overall.status}]`
+  1193→    );
+  1194→    for (const s of data.subjects) {
+  1195→      lines.push(
+  1196→        `${s.code} ${s.name}: ${s.percentage.toFixed(2)}% (${s.present}/${s.total}) — target ${s.targetPct}% [${s.status}]${s.hasCustomTarget ? " (custom)" : ""}`
+  1197→      );
+  1198→    }
+  1199→    return lines.join("\n");
+  1200→  }, [data]);
+  1201→
+  1202→  const copySummary = async () => {
+  1203→    if (!summaryText) return;
+  1204→    try {
+  1205→      await navigator.clipboard.writeText(summaryText);
+  1206→      setCopied(true);
+  1207→      if (copyTimer.current) clearTimeout(copyTimer.current);
+  1208→      copyTimer.current = setTimeout(() => setCopied(false), 2000);
+  1209→    } catch {
+  1210→      // clipboard unavailable (insecure context / permission denied) — keep button inert
+  1211→    }
+  1212→  };
+  1213→
+  1214→  /* Native share sheet (mobile-first). Probed post-hydration so SSR markup
+  1215→     never differs from the client render. */
+  1216→  const [canShare, setCanShare] = useState(false);
+  1217→  const [shared, setShared] = useState(false);
+  1218→  const shareTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  1219→  useEffect(() => {
+  1220→    setCanShare(typeof navigator.share === "function");
+  1221→  }, []);
+  1222→  const shareSummary = async () => {
+  1223→    if (!summaryText) return;
+  1224→    try {
+  1225→      await navigator.share({ title: "Attendance summary", text: summaryText });
+  1226→      setShared(true);
+  1227→      if (shareTimer.current) clearTimeout(shareTimer.current);
+  1228→      shareTimer.current = setTimeout(() => setShared(false), 2000);
+  1229→    } catch {
+  1230→      // share sheet dismissed (AbortError) or unavailable — stay inert
+  1231→    }
+  1232→  };
+  1233→
+  1234→  if (isPending) {
+  1235→    return (
+  1236→      <div className="space-y-4">
+  1237→        <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-5">
+  1238→          <CardSkeletonLight className="md:col-span-2 xl:col-span-2" />
+  1239→          <CardSkeletonLight />
+  1240→          <CardSkeletonLight />
+  1241→          <CardSkeletonLight />
+  1242→        </div>
+  1243→        <CardSkeletonLight />
+  1244→        <div className="grid gap-4 lg:grid-cols-2">
+  1245→          <CardSkeletonLight />
+  1246→          <CardSkeletonLight />
+  1247→        </div>
+  1248→      </div>
+  1249→    );
+  1250→  }
+  1251→
+  1252→  if (isError || !data) {
+  1253→    return (
+  1254→      <Card className="rounded-xl border-red-500/30 bg-red-500/5">
+  1255→        <CardContent className="flex items-center gap-3 p-6 text-sm text-red-600 dark:text-red-400">
+  1256→          <XCircle className="size-5 shrink-0" aria-hidden="true" />
+  1257→          Could not load the dashboard: {error?.message ?? "unknown error"}
+  1258→        </CardContent>
+  1259→      </Card>
+  1260→    );
+  1261→  }
+  1262→
+  1263→  const { overall, subjects, target, mode } = data;
+  1264→  const sorted = sortSubjects(subjects, sort);
+  1265→
+  1266→  /* Stat-card compositions (derived from the SAME polled payload — no extra fetches):
+  1267→     subjects split by status for the mini composition bar, the worst below-target
+  1268→     subject for the warning card, and the reminders/ALA split for the bell card. */
+  1269→  const safeCount = subjects.filter((s) => s.status === "safe").length;
+  1270→  const warnCount = subjects.filter((s) => s.status === "warning").length;
+  1271→  const dangerCount = subjects.filter((s) => s.status === "danger").length;
+  1272→  const noneCount = subjects.filter((s) => s.status === "none").length;
+  1273→  const belowCount = warnCount + dangerCount;
+  1274→  const worst = subjects
+  1275→    .filter((s) => s.status !== "none" && s.percentage < s.targetPct)
+  1276→    .sort((a, b) => a.percentage - b.percentage)[0];
+  1277→  const compTotal = Math.max(subjects.length, 1);
+  1278→
+  1279→  if (mode === "none") {
+  1280→    return (
+  1281→      <EmptyHero
+  1282→        title="No ERP data available yet."
+  1283→        description="Connect your ERP account or run a first synchronization to fetch your attendance and reminders. Nothing is shown until real data arrives."
+  1284→        actionLabel="Connect / Sync ERP"
+  1285→        onAction={onOpenSettings}
+  1286→      />
+  1287→    );
+  1288→  }
+  1289→
+  1290→  return (
+  1291→    <motion.div
+  1292→      className="space-y-4"
+  1293→      initial="hidden"
+  1294→      animate="show"
+  1295→      variants={{
+  1296→        hidden: {},
+  1297→        show: { transition: { staggerChildren: 0.05 } },
+  1298→      }}
+  1299→    >
+  1300→      {/* Print-only report header — replaces the app chrome on paper/PDF */}
+  1301→      <div className="hidden print:block" aria-hidden="true">
+  1302→        <div className="flex items-end justify-between border-b-2 border-black/80 pb-2">
+  1303→          <div>
+  1304→            <p className="text-base font-bold tracking-tight">Attendance Report</p>
+  1305→            <p className="text-xs text-black/70">
+  1306→              Gyanmanjari Innovative University · erp.gmiu.edu.in
+  1307→              {data.semester !== "all" ? ` · Semester ${data.semester}` : ""}
+  1308→            </p>
+  1309→          </div>
+  1310→          <div className="text-right text-xs tabular-nums text-black/70">
+  1311→            <p className="font-semibold text-black">
+  1312→              Overall {overall.percentage.toFixed(2)}% <span className="font-normal">(target {target}%)</span>
+  1313→            </p>
+  1314→            <p>Generated {fmtDT(data.erp?.sync?.lastSyncAt ?? new Date().toISOString())}</p>
+  1315→          </div>
+  1316→        </div>
+  1317→      </div>
+  1318→
+  1319→      {/* Subject detail drawer (also covers what-if planning) */}
+  1320→      <SubjectDrawer
+  1321→        subject={data.subjects.find((s) => s.code === selectedCode) ?? null}
+  1322→        target={target}
+  1323→        globalTarget={target}
+  1324→        open={selectedCode !== null}
+  1325→        onOpenChange={(o) => {
+  1326→          if (!o) setSelectedCode(null);
+  1327→        }}
+  1328→      />
+  1329→
+  1330→      {/* Row 0 — next deadline countdown */}
+  1331→      <div className="print:hidden"><NextUpStrip items={data.reminders.items} flagPriorities={flagPriorities} /></div>
+  1332→
+  1333→      {/* Row 0.4 — finish-setup checklist. Derives every row from the live
+  1334→         config state and deep-links each row into the exact Settings card;
+  1335→         collapses once the core channels are live (never blocks on the
+  1336→         optional digest-time row), dismissal is device-local. */}
+  1337→      <div className="print:hidden">
+  1338→        <SetupChecklist onOpenStep={onOpenSetupStep} />
+  1339→      </div>
+  1340→
+  1341→      {/* Row 0.5 — the student's private triage layer (notes/priority flags).
+  1342→         Renders nothing until at least one ALA is flagged. */}
+  1343→      {flaggedRows.length > 0 && (
+  1344→        <div className="print:hidden">
+  1345→          <FlaggedAlasCard rows={flaggedRows} onOpenFlagged={onOpenFlaggedAlas} />
+  1346→        </div>
+  1347→      )}
+  1348→
+  1349→      {/* Row 0.6 — pocket "today card" (SMS-style brief). The card owns its own
+  1350→         isolated print path, so only its wrapper is hidden from the full report. */}
+  1351→      <div className="print:hidden">
+  1352→        <TodayCard
+  1353→          now={now}
+  1354→          overall={data.overall}
+  1355→          target={data.target}
+  1356→          subjects={data.subjects}
+  1357→          warningSubjects={data.warningSubjects}
+  1358→          alaPending={data.reminders.alaPending}
+  1359→          alaTotal={data.reminders.alaTotal}
+  1360→          alaOverdue={alaOverdue}
+  1361→          alaDueWeek={alaDueWeek}
+  1362→          nextDue={nextDue}
+  1363→          notedCount={alaNotesQ.data?.length ?? 0}
+  1364→          lastSyncAt={data.erp?.sync?.lastSuccessAt ?? null}
+  1365→        />
+  1366→      </div>
+  1367→
+  1368→      {/* Row 1 — overall + stats */}
+  1369→      <motion.div
+  1370→        className="grid gap-4 md:grid-cols-2 xl:grid-cols-5"
+  1371→        variants={{ hidden: { opacity: 0, y: 10 }, show: { opacity: 1, y: 0, transition: { duration: 0.25, ease: "easeOut" } } }}
+  1372→      >
+  1373→        <Card className="erp-card-accent rounded-xl border-border/60 transition-shadow hover:shadow-md md:col-span-2 xl:col-span-2">
+  1374→          <CardContent className="flex flex-col items-center gap-4 p-6 sm:flex-row sm:gap-6">
+  1375→            <ProgressRing percentage={overall.percentage} target={target} size={150} animated />
+  1376→            <div className="min-w-0 flex-1 space-y-2.5 text-center sm:text-left">
+  1377→              <div className="flex flex-wrap items-center justify-center gap-2 sm:justify-start">
+  1378→                <h2 className="text-lg font-semibold tracking-tight">Overall attendance</h2>
+  1379→                {data.semester !== "all" && (
+  1380→                  <Badge
+  1381→                    variant="outline"
+  1382→                    className="gap-1 border-primary/40 text-primary"
+  1383→                    title="A semester partition is active — only this semester's ERP subjects are counted"
+  1384→                  >
+  1385→                    <GraduationCap className="size-3" aria-hidden="true" />
+  1386→                    Sem {data.semester}
+  1387→                  </Badge>
+  1388→                )}
+  1389→                <StatusChip status={overall.status} target={target} />
+  1390→                <Button
+  1391→                  variant="ghost"
+  1392→                  size="sm"
+  1393→                  className="ml-auto h-7 gap-1 rounded-full border border-border/40 bg-background/40 px-2.5 text-xs text-muted-foreground hover:bg-accent hover:text-foreground print:hidden"
+  1394→                  onClick={copySummary}
+  1395→                  aria-label="Copy attendance summary to clipboard" data-noprint
+  1396→                  title="Copy a plain-text attendance summary (per-subject %, status, targets)"
+  1397→                >
+  1398→                  {copied ? (
+  1399→                    <CheckCircle2 className="size-3.5 text-emerald-500" aria-hidden="true" />
+  1400→                  ) : (
+  1401→                    <Copy className="size-3.5" aria-hidden="true" />
+  1402→                  )}
+  1403→                  {copied ? "Copied" : "Copy"}
+  1404→                </Button>
+  1405→                {canShare && (
+  1406→                  <Button
+  1407→                    variant="ghost"
+  1408→                    size="sm"
+  1409→                    className="h-7 gap-1 rounded-full border border-border/40 bg-background/40 px-2.5 text-xs text-muted-foreground hover:bg-accent hover:text-foreground print:hidden"
+  1410→                    onClick={shareSummary}
+  1411→                    aria-label="Share attendance summary via your device" data-noprint
+  1412→                    title="Share the plain-text attendance summary (per-subject %, status, targets)"
+  1413→                  >
+  1414→                    <Share2 className="size-3.5" aria-hidden="true" />
+  1415→                    {shared ? "Shared" : "Share"}
+  1416→                  </Button>
+  1417→                )}
+  1418→                <Button
+  1419→                  variant="ghost"
+  1420→                  size="sm"
+  1421→                  className="h-7 gap-1 rounded-full border border-border/40 bg-background/40 px-2.5 text-xs text-muted-foreground hover:bg-accent hover:text-foreground print:hidden"
+  1422→                  onClick={() => setDigestOpen(true)}
+  1423→                  aria-label="Open the weekly attendance report" data-noprint
+  1424→                >
+  1425→                  <CalendarRange className="size-3.5" aria-hidden="true" />
+  1426→                  This week
+  1427→                </Button>
+  1428→                <Button
+  1429→                  variant="ghost"
+  1430→                  size="sm"
+  1431→                  className="h-7 gap-1 rounded-full border border-border/40 bg-background/40 px-2.5 text-xs text-muted-foreground hover:bg-accent hover:text-foreground print:hidden"
+  1432→                  onClick={() => window.print()}
+  1433→                  aria-label="Print the attendance report or save it as PDF" data-noprint
+  1434→                  title="Print the report or save it as a PDF — hides all app chrome automatically"
+  1435→                >
+  1436→                  <Printer className="size-3.5" aria-hidden="true" />
+  1437→                  Print
+  1438→                </Button>
+  1439→                {weekDelta !== null && (
+  1440→                  <span
+  1441→                    className={cn(
+  1442→                      "rounded-full px-2 py-0.5 text-[11px] font-semibold tabular-nums",
+  1443→                      weekDelta.delta >= 0
+  1444→                        ? "bg-emerald-500/10 text-emerald-600 dark:text-emerald-400"
+  1445→                        : "bg-red-500/10 text-red-600 dark:text-red-400"
+  1446→                    )}
+  1447→                    title={
+  1448→                      weekDelta.fullWeek
+  1449→                        ? "Change over the last 7 days"
+  1450→                        : `Change over the ${weekDelta.spanDays < 1 ? "first day" : `last ${Math.max(1, Math.round(weekDelta.spanDays))} day(s)`} of tracked history`
+  1451→                    }
+  1452→                  >
+  1453→                    {weekDelta.delta >= 0 ? "▲" : "▼"} {Math.abs(weekDelta.delta).toFixed(2)} pts{" "}
+  1454→                    {weekDelta.fullWeek
+  1455→                      ? "/ 7d"
+  1456→                      : weekDelta.spanDays < 1
+  1457→                        ? "· day 1"
+  1458→                        : `/ ${Math.max(1, Math.round(weekDelta.spanDays))}d`}
+  1459→                  </span>
+  1460→                )}
+  1461→              </div>
+  1462→              <p className="text-sm text-muted-foreground tabular-nums">
+  1463→                <span className="font-semibold text-foreground">{overall.present}</span> present of{" "}
+  1464→                <span className="font-semibold text-foreground">{overall.total}</span> classes
+  1465→                <span className="text-muted-foreground/70"> ({overall.absent} missed)</span>
+  1466→              </p>
+  1467→              {/* Plain inline paragraphs — flex+gap chunks broke sentences into
+  1468→                  independently-wrapping fragments at card width. */}
+  1469→              <div className="space-y-1 text-sm">
+  1470→                {overall.classesToTarget > 0 ? (
+  1471→                  <p className="text-amber-600 dark:text-amber-400">
+  1472→                    <ArrowRight className="mr-1 inline size-3.5 shrink-0 align-[-3px]" aria-hidden="true" />
+  1473→                    Attend the next <b className="tabular-nums">{overall.classesToTarget}</b>{" "}
+  1474→                    {overall.classesToTarget === 1 ? "class" : "classes"} to reach {target}%
+  1475→                  </p>
+  1476→                ) : (
+  1477→                  <p className="text-emerald-600 dark:text-emerald-400">
+  1478→                    <CheckCircle2 className="mr-1 inline size-3.5 shrink-0 align-[-3px]" aria-hidden="true" />
+  1479→                    You are at or above the {target}% target
+  1480→                  </p>
+  1481→                )}
+  1482→                {overall.canSkip > 0 && (
+  1483→                  <p className="text-muted-foreground">
+  1484→                    <CalendarClock className="mr-1 inline size-3.5 shrink-0 align-[-3px]" aria-hidden="true" />
+  1485→                    You can skip <b className="tabular-nums text-foreground">{overall.canSkip}</b>{" "}
+  1486→                    {overall.canSkip === 1 ? "class" : "classes"} and stay above {target}%
+  1487→                  </p>
+  1488→                )}
+  1489→              </div>
+  1490→            </div>
+  1491→          </CardContent>
+  1492→        </Card>
+  1493→
+  1494→        <StatCard
+  1495→          icon={Layers}
+  1496→          label="Subjects"
+  1497→          value={subjects.length}
+  1498→          tone="emerald"
+  1499→          onClick={() => {
+  1500→            window.location.hash = "attendance";
+  1501→          }}
+  1502→          ariaLabel="Subjects — jump to the attendance tab"
+  1503→        >
+  1504→          {/* Composition bar: danger / warning / safe / no-classes-yet, sized by share */}
+  1505→          <div
+  1506→            className="flex h-1.5 w-full overflow-hidden rounded-full bg-muted"
+  1507→            role="img"
+  1508→            aria-label={`${safeCount} at target, ${belowCount} below target, ${noneCount} with no classes yet`}
+  1509→          >
+  1510→            {dangerCount > 0 && (
+  1511→              <span
+  1512→                className="h-full bg-red-500 transition-all duration-500"
+  1513→                style={{ width: `${(dangerCount / compTotal) * 100}%` }}
+  1514→              />
+  1515→            )}
+  1516→            {warnCount > 0 && (
+  1517→              <span
+  1518→                className="h-full bg-amber-500 transition-all duration-500"
+  1519→                style={{ width: `${(warnCount / compTotal) * 100}%` }}
+  1520→              />
+  1521→            )}
+  1522→            {safeCount > 0 && (
+  1523→              <span
+  1524→                className="h-full bg-emerald-500 transition-all duration-500"
+  1525→                style={{ width: `${(safeCount / compTotal) * 100}%` }}
+  1526→              />
+  1527→            )}
+  1528→            {noneCount > 0 && (
+  1529→              <span
+  1530→                className="h-full bg-slate-300 transition-all duration-500 dark:bg-slate-600"
+  1531→                style={{ width: `${(noneCount / compTotal) * 100}%` }}
+  1532→              />
+  1533→            )}
+  1534→          </div>
+  1535→          <p className="mt-1.5 text-[11px] leading-tight text-muted-foreground">
+  1536→            <span className="font-medium text-emerald-600 dark:text-emerald-400">{safeCount} at target</span>
+  1537→            <span aria-hidden="true"> · </span>
+  1538→            <span className={cn("font-medium", belowCount > 0 && "text-amber-600 dark:text-amber-400")}>
+  1539→              {belowCount} below
+  1540→            </span>
+  1541→            {noneCount > 0 && <span> · {noneCount} no classes yet</span>}
+  1542→          </p>
+  1543→        </StatCard>
+  1544→        <StatCard
+  1545→          icon={AlertTriangle}
+  1546→          label="Below target"
+  1547→          value={data.warningSubjects}
+  1548→          tone={data.warningSubjects > 0 ? "amber" : "emerald"}
+  1549→          onClick={
+  1550→            data.warningSubjects > 0
+  1551→              ? () => {
+  1552→                  window.location.hash = "attendance";
+  1553→                }
+  1554→              : undefined
+  1555→          }
+  1556→          ariaLabel={
+  1557→            data.warningSubjects > 0
+  1558→              ? "Below target — jump to the attendance tab"
+  1559→              : "All subjects at or above target"
+  1560→          }
+  1561→        >
+  1562→          {worst ? (
+  1563→            <div className="space-y-1">
+  1564→              <p
+  1565→                className="truncate text-[11px] font-medium text-foreground/80"
+  1566→                title={`${worst.name} — ${worst.percentage.toFixed(2)}% (target ${worst.targetPct}%)`}
+  1567→              >
+  1568→                worst: {worst.name}
+  1569→              </p>
+  1570→              <p className="flex items-center gap-1 text-[11px] leading-tight text-amber-600 dark:text-amber-400">
+  1571→                <Footprints className="size-3 shrink-0" aria-hidden="true" />
+  1572→                {worst.classesToTarget > 0 ? (
+  1573→                  <span>
+  1574→                    attend <b className="tabular-nums">{worst.classesToTarget}</b> to reach {worst.targetPct}%
+  1575→                  </span>
+  1576→                ) : (
+  1577→                  <span>recover by attending upcoming classes</span>
+  1578→                )}
+  1579→              </p>
+  1580→            </div>
+  1581→          ) : (
+  1582→            <p className="flex items-center gap-1 text-[11px] leading-tight text-emerald-600 dark:text-emerald-400">
+  1583→              <CheckCircle2 className="size-3 shrink-0" aria-hidden="true" />
+  1584→              {noneCount > 0
+  1585→                ? `every graded subject is at or above target (${noneCount} await first class)`
+  1586→                : "every subject is at or above its target"}
+  1587→            </p>
+  1588→          )}
+  1589→        </StatCard>
+  1590→        <StatCard
+  1591→          icon={BellRing}
+  1592→          label="Active reminders"
+  1593→          value={data.reminders.items.length}
+  1594→          onClick={() => {
+  1595→            window.location.hash = "reminders";
+  1596→          }}
+  1597→          ariaLabel="Active reminders — jump to the reminders tab"
+  1598→        >
+  1599→          <p className="flex flex-wrap items-center gap-x-1.5 gap-y-0.5 text-[11px] leading-tight text-muted-foreground">
+  1600→            <span className="font-medium text-foreground/80">{data.reminders.todayCount} today</span>
+  1601→            <span aria-hidden="true">·</span>
+  1602→            <span>{data.reminders.weekCount} this week</span>
+  1603→            <span aria-hidden="true">·</span>
+  1604→            <span
+  1605→              className={cn(
+  1606→                "font-medium",
+  1607→                data.reminders.alaPending > 0 ? "text-amber-600 dark:text-amber-400" : ""
+  1608→              )}
+  1609→            >
+  1610→              {data.reminders.alaPending} open ALAs
+  1611→            </span>
+  1612→          </p>
+  1613→        </StatCard>
+  1614→      </motion.div>
+  1615→
+  1616→      {/* Milestones — best ever, days at target, streak (honest from snapshot history) */}
+  1617→      <MilestonesStrip history={history.data} overallPct={overall.percentage} target={target} present={overall.present} total={overall.total} />
+  1618→
+  1619→      {/* One-time celebration when the target is (re)crossed or a personal best lands */}
+  1620→      <MilestoneCelebration
+  1621→        overallPct={overall.percentage}
+  1622→        present={overall.present}
+  1623→        total={overall.total}
+  1624→        target={target}
+  1625→        history={history.data}
+  1626→      />
+  1627→
+  1628→      {/* Weekly digest report dialog */}
+  1629→      <WeeklyDigestDialog open={digestOpen} onOpenChange={setDigestOpen} demoMode={mode === "demo"} />
+  1630→
+  1631→      {/* Row 1.5 — consolidated skip budget (scarcest subject first, rows open
+  1632→          the subject drawer). Shares the live per-subject canSkip math. */}
+  1633→      <SkipBudgetCard subjects={data.subjects} onOpenSubject={setSelectedCode} />
+  1634→
+  1635→      {/* Row 1.6 — the forward-looking twin: real routine slots × live attendance,
+  1636→          "what's left this week and what can be missed". Shares the timetable
+  1637→          query cache with the timetable card. */}
+  1638→      <WeekPlanCard
+  1639→        subjects={data.subjects}
+  1640→        onOpenSubject={setSelectedCode}
+  1641→        onResolvePicks={() => setParallelSignal(true)}
+  1642→      />
+  1643→
+  1644→      {/* Row 1.7 — academic record: published exam results (TTL-cached,
+  1645→          read-only ERP walk on cache miss). Display-only, no notify paths. */}
+  1646→      <ResultsCard />
+  1647→
+  1648→      {/* Row 2 — subject list */}
+  1649→      <Card className="rounded-xl border-border/60 transition-shadow hover:shadow-md">
+  1650→        <CardHeader className="flex flex-col gap-2 space-y-0 pb-3 sm:flex-row sm:items-center sm:justify-between">
+  1651→          <div className="min-w-0">
+  1652→            <CardTitle className="text-base tracking-tight">Subject attendance</CardTitle>
+  1653→            <CardDescription className="text-xs">Tap a subject for details and what-if planning</CardDescription>
+  1654→          </div>
+  1655→          <div className="flex items-center gap-1.5 print:hidden">
+  1656→            <Select value={sort} onValueChange={(v) => setSort(v as SubjectSort)}>
+  1657→              <SelectTrigger
+  1658→                className="h-8 w-full min-w-0 gap-1 text-xs sm:w-[190px]"
+  1659→                aria-label="Sort subjects"
+  1660→              >
+  1661→                <ArrowDownUp className="size-3.5 shrink-0 text-muted-foreground" aria-hidden="true" />
+  1662→                <SelectValue />
+  1663→              </SelectTrigger>
+  1664→              <SelectContent>
+  1665→                {SUBJECT_SORTS.map((o) => (
+  1666→                  <SelectItem key={o.key} value={o.key} className="text-xs">
+  1667→                    {o.label}
+  1668→                  </SelectItem>
+  1669→                ))}
+  1670→              </SelectContent>
+  1671→            </Select>
+  1672→            <Button variant="ghost" size="sm" className="h-8 shrink-0 gap-1 text-xs" onClick={onOpenAttendance}>
+  1673→              View all <ChevronRight className="size-3.5" aria-hidden="true" />
+  1674→            </Button>
+  1675→          </div>
+  1676→        </CardHeader>
+  1677→        <CardContent>
+  1678→          {subjects.length === 0 ? (
+  1679→            <p className="py-6 text-center text-sm text-muted-foreground">
+  1680→              {data.semester !== "all"
+  1681→                ? `No subjects synchronized for Semester ${data.semester}`
+  1682→                : "No subjects synchronized yet"}
+  1683→            </p>
+  1684→          ) : (
+  1685→            <>
+  1686→              <div className="max-h-96 space-y-2 overflow-y-auto pr-1">
+  1687→                {sorted.map((s) => (
+  1688→                  <SubjectRow
+  1689→                    key={s.id}
+  1690→                    s={s}
+  1691→                    onOpen={() => setSelectedCode(s.code)}
+  1692→                    shimmer={data.erp.sync.status === "syncing"}
+  1693→                    spark={history.data?.subjects[s.code]}
+  1694→                    alaStat={alaStats.get(s.name.trim().toLowerCase())}
+  1695→                  />
+  1696→                ))}
+  1697→              </div>
+  1698→              {/* Pip legend — the skip-budget dots on each row, decoded once here */}
+  1699→              <div
+  1700→                className="mt-2.5 flex flex-wrap items-center gap-x-4 gap-y-1 px-1 text-[10px] text-muted-foreground/85"
+  1701→                aria-hidden="true"
+  1702→              >
+  1703→                <span className="inline-flex items-center gap-1.5">
+  1704→                  <span className="size-1.5 rounded-full bg-emerald-500" />
+  1705→                  dot = one class you could still miss
+  1706→                </span>
+  1707→                <span className="inline-flex items-center gap-1.5">
+  1708→                  <span className="size-1.5 rounded-full border border-amber-500/70 bg-amber-500/15" />
+  1709→                  hollow = none left
+  1710→                </span>
+  1711→              </div>
+  1712→            </>
+  1713→          )}
+  1714→        </CardContent>
+  1715→      </Card>
+  1716→
+  1717→      {/* Row 2.5 — today's schedule / weekly timetable */}
+  1718→      {subjects.length > 0 && (
+  1719→        <TimetableCard
+  1720→          subjects={subjects}
+  1721→          mode={data.mode}
+  1722→          manageOpen={parallelSignal}
+  1723→          highlightParallel={parallelSignal}
+  1724→          onManageClose={() => setParallelSignal(false)}
+  1725→        />
+  1726→      )}
+  1727→
+  1728→      {/* Row 3 — reminders preview + ERP status */}
+  1729→      <div className="grid gap-4 lg:grid-cols-2">
+  1730→        <RemindersPreview
+  1731→          items={data.reminders.items}
+  1732→          todayCount={data.reminders.todayCount}
+  1733→          weekCount={data.reminders.weekCount}
+  1734→          alaPending={data.reminders.alaPending}
+  1735→          alaTotal={data.reminders.alaTotal}
+  1736→          alaUpcoming={data.reminders.alaUpcoming}
+  1737→          onOpenReminders={onOpenReminders}
+  1738→          flagPriorities={flagPriorities}
+  1739→        />
+  1740→        <ErpStatusCard
+  1741→          connected={data.erp.connected}
+  1742→          demoMode={data.erp.demoMode ?? false}
+  1743→          username={data.erp.username}
+  1744→          sync={data.erp.sync}
+  1745→        />
+  1746→      </div>
+  1747→
+  1748→      {/* Row 4 — changes feed + notifications */}
+  1749→      <div className="grid gap-4 lg:grid-cols-2">
+  1750→        <Card className="rounded-xl border-border/60">
+  1751→          <CardHeader className="pb-3">
+  1752→            <CardTitle className="text-base tracking-tight">Recent ERP changes</CardTitle>
+  1753→            <CardDescription className="text-xs">
+  1754→              Detected automatically by the sync engine
+  1755→              {data.changes.some((c) => c.subjectCode && data.subjects.some((s) => s.code === c.subjectCode)) &&
+  1756→                " — tap a code to open the subject"}
+  1757→            </CardDescription>
+  1758→          </CardHeader>
+  1759→          <CardContent>
+  1760→            {data.changes.length === 0 ? (
+  1761→              <p className="py-6 text-center text-sm text-muted-foreground">No changes recorded yet</p>
+  1762→            ) : (
+  1763→              <>
+  1764→                <ul className="max-h-96 space-y-1.5 overflow-y-auto pr-1">
+  1765→                  {(showAllChanges ? data.changes : data.changes.slice(0, 8)).map((c) => (
+  1766→                    <ChangeRow
+  1767→                      key={c.id}
+  1768→                      c={c}
+  1769→                      /* Only rows whose subject still exists are clickable — a code that
+  1770→                         no longer matches a live subject would open nothing (honest affordance). */
+  1771→                      onOpen={
+  1772→                        c.subjectCode && data.subjects.some((s) => s.code === c.subjectCode)
+  1773→                          ? setSelectedCode
+  1774→                          : undefined
+  1775→                      }
+  1776→                    />
+  1777→                  ))}
+  1778→                </ul>
+  1779→                {data.changes.length > 8 && (
+  1780→                  <Button
+  1781→                    variant="ghost"
+  1782→                    size="sm"
+  1783→                    className="mt-2 h-7 w-full gap-1 text-xs text-muted-foreground hover:text-foreground"
+  1784→                    onClick={() => setShowAllChanges((v) => !v)}
+  1785→                    aria-expanded={showAllChanges}
+  1786→                  >
+  1787→                    {showAllChanges ? (
+  1788→                      <>Show less</>
+  1789→                    ) : (
+  1790→                      <>
+  1791→                        Show all {data.changes.length} events <ChevronRight className="size-3.5" aria-hidden="true" />
+  1792→                      </>
+  1793→                    )}
+  1794→                  </Button>
+  1795→                )}
+  1796→              </>
+  1797→            )}
+  1798→          </CardContent>
+  1799→        </Card>
+  1800→
+  1801→        <Card className="rounded-xl border-border/60">
+  1802→          <CardHeader className="pb-3">
+  1803→            <CardTitle className="text-base tracking-tight">Recent notifications</CardTitle>
+  1804→            <CardDescription className="text-xs">{data.unreadCount} unread</CardDescription>
+  1805→          </CardHeader>
+  1806→          <CardContent>
+  1807→            {data.notifications.length === 0 ? (
+  1808→              <p className="py-6 text-center text-sm text-muted-foreground">Nothing here yet</p>
+  1809→            ) : (
+  1810→              <>
+  1811→                <ul className="max-h-96 space-y-1 overflow-y-auto pr-1">
+  1812→                  {(showAllNotifs ? data.notifications : data.notifications.slice(0, 5)).map((n) => (
+  1813→                    <NotificationRow key={n.id} n={n} />
+  1814→                  ))}
+  1815→                </ul>
+  1816→                {data.notifications.length > 5 && (
+  1817→                  <Button
+  1818→                    variant="ghost"
+  1819→                    size="sm"
+  1820→                    className="mt-2 h-7 w-full gap-1 text-xs text-muted-foreground hover:text-foreground"
+  1821→                    onClick={() => setShowAllNotifs((v) => !v)}
+  1822→                    aria-expanded={showAllNotifs}
+  1823→                  >
+  1824→                    {showAllNotifs ? (
+  1825→                      <>Show less</>
+  1826→                    ) : (
+  1827→                      <>
+  1828→                        Show all {data.notifications.length} <ChevronRight className="size-3.5" aria-hidden="true" />
+  1829→                      </>
+  1830→                    )}
+  1831→                  </Button>
+  1832→                )}
+  1833→              </>
+  1834→            )}
+  1835→          </CardContent>
+  1836→        </Card>
+  1837→      </div>
+  1838→    </motion.div>
+  1839→  );
+  1840→}
+  1841→
