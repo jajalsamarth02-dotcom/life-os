@@ -82,7 +82,7 @@ check("file: roundtrip without env", runProbe(SECRET, {}, true) === SECRET);
 check("fallback: roundtrip", runProbe(SECRET, {}, false) === SECRET);
 
 /* 4. the REAL ciphertext: decrypts with the recovered key (read-only) */
-const { PrismaClient } = require(`${ROOT}/node_modules/@prisma/client`);
+const { PrismaClient } = await import(`${ROOT}/node_modules/@prisma/client`);
 const p = new PrismaClient();
 const real = await p.erpConnection.findFirst();
 let realOk = false;

@@ -3045,7 +3045,7 @@ function NtfySetupDialog({
       setSavedTopic(false);
       setTestResult(null);
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+     
   }, [open]);
 
   const topicValid = isValidNtfyTopic(topic);

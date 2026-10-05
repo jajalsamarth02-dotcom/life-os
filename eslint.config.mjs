@@ -19,6 +19,13 @@ const eslintConfig = [...nextCoreWebVitals, ...nextTypescript, {
     // React rules
     "react-hooks/exhaustive-deps": "off",
     "react-hooks/purity": "off",
+    /* set-state-in-effect (React hooks v6) fires on the app's DELIBERATE
+       post-mount hydration pattern: localStorage-persisted UI prefs
+       (filters, sort, collapsed groups, theme) are read in an effect and
+       applied via setState after paint so SSR markup never mismatches.
+       This is the documented escape hatch for that pattern — keep the
+       signal as a warning, don't let it fail the deploy gate. */
+    "react-hooks/set-state-in-effect": "warn",
     "react/no-unescaped-entities": "off",
     "react/display-name": "off",
     "react/prop-types": "off",

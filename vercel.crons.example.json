@@ -1,0 +1,10 @@
+{
+  "$schema": "https://openapi.vercel.sh/vercel.json",
+  "_comment": "EXAMPLE ONLY — do not commit this file as vercel.json. Copy the crons block into your vercel.json if you want Vercel Cron to drive the ERP sync cadence. Every 15 minutes requires the Pro plan; on Hobby use a daily schedule (e.g. 0 3 * * *) — the app stays correct, the data just refreshes less often. CRON_SECRET must be set as an environment variable; Vercel then sends it automatically as the Bearer token consumed by /api/cron/sync.",
+  "crons": [
+    {
+      "path": "/api/cron/sync",
+      "schedule": "*/15 * * * *"
+    }
+  ]
+}

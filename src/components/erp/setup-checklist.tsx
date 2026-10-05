@@ -303,7 +303,7 @@ export function SetupChecklist({ onOpenStep }: { onOpenStep?: (f: SettingsFocus)
       });
     }
     return out;
-    /* eslint-disable-next-line react-hooks/exhaustive-deps */
+     
   }, [wa.data, ntfy.data, cal.data]);
   const coreDone =
     rows.find((r) => r.key === "wa")?.state === "done" &&

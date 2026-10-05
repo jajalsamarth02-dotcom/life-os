@@ -168,7 +168,7 @@ export function QrReveal({
                 <div className="w-fit rounded-xl border border-border/60 bg-white p-3 shadow-sm">
                   {/* Fixed dark-on-white — scanning is contrast-critical and
                      never theme-adaptive. Rendered at 2×, shown at 1×. */}
-                  {/* eslint-disable-next-line @next/next/no-img-element */}
+                  { }
                   <img
                     src={dataUrl}
                     alt={alt}

@@ -230,7 +230,7 @@ export function CommandPalette({
       lastResult: s.lastResult,
       nowMs: Date.now(),
     });
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+     
   }, [waQ.data]);
   const waCare = React.useMemo(() => (waHealth ? waCareAction(waHealth.verdict) : null), [waHealth]);
 
@@ -247,7 +247,7 @@ export function CommandPalette({
       lastResult: s.lastResult,
       nowMs: Date.now(),
     });
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+     
   }, [ntfyQ.data]);
   const ntfyCare = React.useMemo(() => (ntfyHealth ? ntfyCareAction(ntfyHealth.verdict) : null), [ntfyHealth]);
 

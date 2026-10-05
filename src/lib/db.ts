@@ -48,7 +48,10 @@ function getClient(): PrismaClient {
   const cached = globalForPrisma.prisma;
   if (cached && hasAllModels(cached) && hasExpectedFields(cached)) return cached;
   return new PrismaClient({
-    log: ['query'],
+    /* Query logging is a DEV tool only — in production (Vercel serverless
+       included) it would log one line per query against log quotas and slow
+       hot paths. Same client behavior either way. */
+    log: process.env.NODE_ENV === "development" ? ['query'] : [],
   });
 }
 

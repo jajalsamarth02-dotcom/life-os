@@ -25,7 +25,18 @@ import path from "path";
  * on failure and retries ONCE, so a file restored under a live server heals
  * on the next attempt with no restart. The env-correct path is untouched
  * (a failed env key re-derives the same env key and still throws the
- * original error). */
+ * original error).
+ *
+ * r116 hardening — the recurrence took a THIRD form: a keeper-respawned dev
+ * server resolved a different key than the one that encrypted the stored
+ * credentials (spawn-environment lottery: cwd/env not inherited the way the
+ * previous boot had them), so its first scheduled sync failed with "key
+ * changed?" while the app's data sat intact. decryptSecret no longer
+ * depends on the priority lottery: it tries EVERY key candidate (env, file
+ * fallback, documented deterministic fallback) — a record encrypted under
+ * any historically valid key still decrypts; encryptSecret keeps writing
+ * with the priority key. If literally nothing decrypts the payload, the
+ * original error is preserved and the caller's message stays honest. */
 
 let cachedFileKey: Buffer | null | undefined;
 
@@ -53,6 +64,19 @@ function getKey(): Buffer {
   return crypto.createHash("sha256").update("erp-sync-student-app::fallback-key").digest();
 }
 
+/** Every key the app has ever legitimately used, in priority order. Used by
+ *  decryptSecret's multi-candidate recovery (r116) — NEVER by encryptSecret,
+ *  which must keep producing ciphertext under the single priority key. */
+function candidateKeys(): Buffer[] {
+  const keys: Buffer[] = [];
+  const hex = process.env.APP_ENCRYPTION_KEY;
+  if (hex && /^[0-9a-fA-F]{64}$/.test(hex)) keys.push(Buffer.from(hex, "hex"));
+  const fromFile = readKeyFile();
+  if (fromFile) keys.push(fromFile);
+  keys.push(crypto.createHash("sha256").update("erp-sync-student-app::fallback-key").digest());
+  return keys;
+}
+
 export function encryptSecret(plain: string): string {
   const iv = crypto.randomBytes(12);
   const cipher = crypto.createCipheriv("aes-256-gcm", getKey(), iv);
@@ -69,21 +93,32 @@ export function decryptSecret(payload: string): string {
     decipher.setAuthTag(Buffer.from(tagB64, "base64"));
     return Buffer.concat([decipher.update(Buffer.from(dataB64, "base64")), decipher.final()]).toString("utf8");
   };
-  try {
-    return attempt(getKey());
-  } catch (err) {
-    // r105 self-heal: a sticky cache (null = "file was missing at first
-    // probe", or a stale buffer) must not outlive the disk state it was
-    // derived from. One invalidation + retry; if it fails again the
-    // ORIGINAL error is rethrown — the caller's message stays honest.
-    if (cachedFileKey !== undefined) {
-      cachedFileKey = undefined;
-      try {
-        return attempt(getKey());
-      } catch {
-        /* fall through to the original error */
+  // r116 multi-candidate recovery: try every legitimate key this app may
+  // have written the record under (env, file, deterministic fallback). The
+  // first success wins; GCM auth failures just move to the next candidate.
+  let firstErr: unknown = new Error("No key candidates resolved");
+  for (const key of candidateKeys()) {
+    try {
+      return attempt(key);
+    } catch (err) {
+      if (firstErr instanceof Error && firstErr.message !== "No key candidates resolved") {
+        /* keep the FIRST (priority-key) error for the honest message */
+      } else {
+        firstErr = err;
       }
     }
-    throw err;
   }
+  // r105 self-heal (kept from the original fix): the file probe may be a
+  // sticky cache derived from a disk state that has since changed (file
+  // restored / rewritten under a live server). Invalidate it once and
+  // re-derive every candidate before giving up.
+  cachedFileKey = undefined;
+  for (const key of candidateKeys()) {
+    try {
+      return attempt(key);
+    } catch {
+      /* fall through to the original error */
+    }
+  }
+  throw firstErr;
 }

@@ -402,7 +402,7 @@ export function MilestoneCelebration({
       writeStore(next);
       setKind(fire);
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+     
   }, [dataKey]);
 
   /* Auto-dismiss */
