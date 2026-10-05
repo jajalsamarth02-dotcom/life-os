@@ -42,6 +42,15 @@ import {
 import { toast } from "sonner";
 import { apikeyShapeHint, parseNotifyHealth, stripProviderHtml, type NotifyHealth } from "@/lib/notify-health";
 import {
+  buildNtfyAppDeepLink,
+  buildNtfyWebLink,
+  isValidNtfyTopic,
+  normalizeNtfyServer,
+  ntfySetupFallbackText,
+  ntfyTopicHint,
+  randomNtfyTopic,
+} from "@/lib/ntfy-pair";
+import {
   CALLMEBOT_ACTIVATE_MESSAGE,
   CALLMEBOT_DEFAULT_ACTIVATE_DIGITS,
   CALLMEBOT_INSTRUCTIONS_URL,
@@ -134,6 +143,7 @@ import {
   restoreAlaNotes,
   ApiError,
   qk,
+  type NtfyStatusResponse,
   type WaStatusResponse,
 } from "./api";
 import { CustomTargetChip, erpAssignmentUrl, fmtDT, syncLogIcon } from "./shared";
@@ -2208,14 +2218,18 @@ function ChannelHealthLine({ health, raw }: { health: NotifyHealth; raw: string 
 
 const REPAIR_STEPS = ["Open the chat", "Paste the reply", "Save & verify"] as const;
 
-function WaStepDot({
+/** Generic 3-state stepper dot shared by the care wizards (WA r109, ntfy r111).
+ *  Done dots navigate back to that step; `labels` localizes the aria-label. */
+function WizardStepDot({
   state,
   index,
   onClick,
+  labels,
 }: {
   state: "done" | "active" | "pending";
   index: number;
   onClick?: () => void;
+  labels: readonly string[];
 }) {
   const clickable = state === "done" && onClick;
   return (
@@ -2224,7 +2238,7 @@ function WaStepDot({
       onClick={onClick}
       disabled={!clickable}
       aria-label={
-        clickable ? `Back to step ${index + 1}: ${REPAIR_STEPS[index]}` : undefined
+        clickable ? `Back to step ${index + 1}: ${labels[index]}` : undefined
       }
       aria-current={state === "active" ? "step" : undefined}
       className={cn(
@@ -2354,8 +2368,9 @@ function WaRepairDialog({
             <React.Fragment key={label}>
               {i > 0 && <div className="h-px flex-1 bg-border/70" aria-hidden="true" />}
               <div role="listitem" className="flex items-center gap-1.5">
-                <WaStepDot
+                <WizardStepDot
                   index={i}
+                  labels={REPAIR_STEPS}
                   state={i < step ? "done" : i === step ? "active" : "pending"}
                   onClick={i < step ? () => setStep(i) : undefined}
                 />
@@ -2955,12 +2970,399 @@ function WhatsAppCard({ autoOpenRepairNonce = 0 }: { autoOpenRepairNonce?: numbe
 
 /* ------------------------------------------------------------------ */
 
+const SETUP_STEPS = ["Create the topic", "Save & test"] as const;
+
+/**
+ * The ntfy guided setup (r111) — the mirror of the WhatsApp repair wizard
+ * for the free channel. Two steps, because ntfy genuinely needs no
+ * conversation: the wizard MINTS an unguessable topic (the r111 rulebook,
+ * crypto-quality), hands the student a one-tap ntfy:// deep link that
+ * subscribes the app for them, then saves + tests + enables behind their
+ * own button presses. Same skeleton as WaRepairDialog: per-open reset
+ * (r107), clickable done dots, honest gates (Send test disabled until the
+ * topic is saved; nothing sends by itself), one live health verdict.
+ */
+function NtfySetupDialog({
+  open,
+  onOpenChange,
+  status,
+  health,
+}: {
+  open: boolean;
+  onOpenChange: (v: boolean) => void;
+  status: NtfyStatusResponse;
+  health: NotifyHealth;
+}) {
+  const qc = useQueryClient();
+  const refresh = () => qc.invalidateQueries({ queryKey: qk.ntfyStatus });
+  const [step, setStep] = useState(0);
+  const [topic, setTopic] = useState("");
+  const [server, setServer] = useState("");
+  const [showServer, setShowServer] = useState(false);
+  const [copied, setCopied] = useState(false);
+  const [busy, setBusy] = useState<null | "save" | "test" | "enable">(null);
+  const [savedTopic, setSavedTopic] = useState(false);
+  const [testResult, setTestResult] = useState<null | { ok: boolean; snippet: string }>(null);
+
+  /* One-shot reset per open (r107 convention): a re-open mints a FRESH
+     topic — a half-shared topic from the last attempt must not leak. A
+     repair (failing) pre-fills the saved custom server, if any — an
+     unconfigured channel reports isDefaultServer=false, so the custom
+     server is detected via configured && !isDefaultServer. */
+  useEffect(() => {
+    if (open) {
+      const hasCustomServer = status.configured && !status.isDefaultServer;
+      setStep(0);
+      setTopic(randomNtfyTopic());
+      setServer(hasCustomServer ? (status.serverHost ?? "") : "");
+      setShowServer(hasCustomServer);
+      setCopied(false);
+      setBusy(null);
+      setSavedTopic(false);
+      setTestResult(null);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open]);
+
+  const topicValid = isValidNtfyTopic(topic);
+  const topicHint = ntfyTopicHint(topic);
+  const appLink = useMemo(() => buildNtfyAppDeepLink(topic, server), [topic, server]);
+  const webLink = useMemo(() => buildNtfyWebLink(topic, server), [topic, server]);
+  const serverHint = useMemo(() => {
+    const trimmed = server.trim();
+    if (!trimmed) return null;
+    return normalizeNtfyServer(trimmed) ? null : "That doesn't look like a server — e.g. https://ntfy.example.com";
+  }, [server]);
+  const live = health.verdict === "live";
+
+  const saveTopic = async () => {
+    setBusy("save");
+    try {
+      await postNtfyAction("save", { topic: topic.trim(), server: server.trim() || undefined });
+      setSavedTopic(true);
+      toast.success("ntfy topic saved", {
+        description: "Stored AES-256-GCM encrypted. Send the test to confirm the subscription.",
+      });
+      refresh();
+    } catch (e) {
+      toast.error("Could not save the topic", {
+        description: e instanceof ApiError ? e.message : "Try again.",
+      });
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  const sendTest = async () => {
+    setBusy("test");
+    try {
+      const res = await postNtfyAction("test");
+      setTestResult({ ok: Boolean(res.ok), snippet: stripProviderHtml(res.snippet ?? "") });
+      (res.ok ? toast.success : toast.error)(
+        res.ok ? "Test push sent — check your ntfy app" : "The ntfy server did not accept the test",
+        { description: stripProviderHtml(res.snippet ?? "") }
+      );
+      refresh();
+    } catch (e) {
+      toast.error("ntfy action failed", { description: e instanceof ApiError ? e.message : "Try again." });
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  const enablePushes = async () => {
+    setBusy("enable");
+    try {
+      await postNtfyAction("enable", { enabled: true });
+      toast.success("ntfy pushes enabled", {
+        description: status?.digestTime
+          ? `A pending-work digest arrives daily at ${status.digestTime} IST, plus sync-triggered alerts when something changed.`
+          : "A short pending-work digest is sent at most once a day, right after a scheduled sync, when something changed.",
+      });
+      refresh();
+    } catch (e) {
+      toast.error("Could not enable pushes", { description: e instanceof ApiError ? e.message : "Try again." });
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  const copyFallback = async () => {
+    try {
+      await navigator.clipboard.writeText(ntfySetupFallbackText(topic.trim(), server.trim() || null));
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+      toast.success("Copied — follow it on any device");
+    } catch {
+      toast.error("Could not copy — write the topic down instead");
+    }
+  };
+
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="max-w-md rounded-xl border-border/60 sm:max-w-md">
+        <DialogHeader>
+          <DialogTitle className="flex items-center gap-2 text-base tracking-tight">
+            <Radio className="size-4 text-sky-500" aria-hidden="true" />
+            {health.verdict === "failing" ? "Repair ntfy push" : "Set up free push alerts"}
+          </DialogTitle>
+          <DialogDescription>
+            {health.verdict === "failing"
+              ? "A fresh private topic and re-subscribing fixes a rejected push — about one minute."
+              : "Free push to your phone — no phone number, no apikey, no pairing conversation."}
+          </DialogDescription>
+        </DialogHeader>
+
+        {/* Stepper header — done steps navigate back */}
+        <div className="flex items-center gap-1.5" role="list" aria-label="Setup steps">
+          {SETUP_STEPS.map((label, i) => (
+            <React.Fragment key={label}>
+              {i > 0 && <div className="h-px flex-1 bg-border/70" aria-hidden="true" />}
+              <div role="listitem" className="flex items-center gap-1.5">
+                <WizardStepDot
+                  index={i}
+                  labels={SETUP_STEPS}
+                  state={i < step ? "done" : i === step ? "active" : "pending"}
+                  onClick={i < step ? () => setStep(i) : undefined}
+                />
+                <span
+                  className={cn(
+                    "hidden text-[11px] font-medium sm:inline",
+                    i === step ? "text-foreground" : "text-muted-foreground"
+                  )}
+                >
+                  {label}
+                </span>
+              </div>
+            </React.Fragment>
+          ))}
+        </div>
+
+        {step === 0 && (
+          <div className="space-y-3">
+            <p className="text-xs leading-relaxed text-muted-foreground">
+              The topic name below is <b className="font-semibold text-foreground">your private address</b> —
+              anyone who knows it can read your alerts, so the wizard minted an unguessable one.
+            </p>
+            <div className="space-y-1.5">
+              <Label htmlFor="ntfy-topic" className="text-xs">
+                Private topic
+              </Label>
+              <div className="flex gap-1.5">
+                <Input
+                  id="ntfy-topic"
+                  value={topic}
+                  onChange={(e) => setTopic(e.target.value)}
+                  className="font-mono text-sm"
+                  aria-label="ntfy private topic name"
+                  autoComplete="off"
+                  spellCheck={false}
+                />
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="icon"
+                  className="size-9 shrink-0"
+                  disabled={busy !== null}
+                  onClick={() => setTopic(randomNtfyTopic())}
+                  aria-label="Generate a new random private topic"
+                >
+                  <Dices className="size-4" aria-hidden="true" />
+                </Button>
+              </div>
+              {topicHint && (
+                <p className="flex items-start gap-1.5 text-[11px] leading-snug text-amber-700 dark:text-amber-400">
+                  <TriangleAlert className="mt-0.5 size-3.5 shrink-0" aria-hidden="true" />
+                  {topicHint}
+                </p>
+              )}
+            </div>
+
+            {appLink ? (
+              <a
+                href={appLink}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="flex h-10 w-full items-center justify-center gap-2 rounded-md bg-sky-600 text-sm font-medium text-white shadow-sm transition-colors hover:bg-sky-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-500/50"
+                aria-label="Open the ntfy app with this topic ready to subscribe"
+              >
+                <Radio className="size-4" aria-hidden="true" />
+                Open the ntfy app — topic ready
+              </a>
+            ) : (
+              <div className="flex h-10 w-full items-center justify-center gap-2 rounded-md border border-amber-500/40 bg-amber-500/10 text-xs font-medium text-amber-700 dark:text-amber-400">
+                <TriangleAlert className="size-4 shrink-0" aria-hidden="true" />
+                Fix the topic above to continue
+              </div>
+            )}
+            {webLink && (
+              <a
+                href={webLink}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="flex h-8 w-full items-center justify-center gap-1.5 rounded-md text-xs font-medium text-sky-700 transition-colors hover:bg-sky-500/10 dark:text-sky-400"
+                aria-label="Subscribe in the ntfy web app instead"
+              >
+                <ExternalLink className="size-3.5" aria-hidden="true" />
+                No app yet? Subscribe in the web app
+              </a>
+            )}
+
+            {/* Self-hosted server — collapsed unless a repair restored one */}
+            <div>
+              <button
+                type="button"
+                className="text-[11px] font-medium text-muted-foreground underline-offset-2 hover:text-foreground hover:underline"
+                onClick={() => setShowServer((v) => !v)}
+                aria-expanded={showServer}
+              >
+                {showServer ? "Hide" : "Advanced"}: self-hosted server {showServer ? "−" : "+"}
+              </button>
+              {showServer && (
+                <div className="mt-1.5 space-y-1">
+                  <Input
+                    value={server}
+                    onChange={(e) => setServer(e.target.value)}
+                    placeholder="https://ntfy.example.com (optional)"
+                    className="h-8 font-mono text-xs"
+                    aria-label="ntfy server URL, optional"
+                    autoComplete="off"
+                    spellCheck={false}
+                  />
+                  {serverHint && (
+                    <p className="flex items-start gap-1.5 text-[11px] leading-snug text-amber-700 dark:text-amber-400">
+                      <TriangleAlert className="mt-0.5 size-3.5 shrink-0" aria-hidden="true" />
+                      {serverHint}
+                    </p>
+                  )}
+                  <p className="text-[10px] leading-snug text-muted-foreground">
+                    Leave empty for ntfy.sh. HTTP servers add ?secure=false to the app link so it still opens.
+                  </p>
+                </div>
+              )}
+            </div>
+
+            <Button variant="ghost" size="sm" className="h-8 w-full gap-1.5 text-muted-foreground" onClick={copyFallback}>
+              {copied ? (
+                <CheckCircle2 className="size-3.5 text-emerald-500" aria-hidden="true" />
+              ) : (
+                <Copy className="size-3.5" aria-hidden="true" />
+              )}
+              {copied ? "Copied" : "No ntfy app here? Copy the steps instead"}
+            </Button>
+            <Button size="sm" className="h-9 w-full" disabled={!topicValid || !appLink} onClick={() => setStep(1)}>
+              I&apos;ve subscribed — next
+            </Button>
+          </div>
+        )}
+
+        {step === 1 && (
+          <div className="space-y-3">
+            <div className="rounded-lg border border-border/60 bg-muted/40 px-3 py-2.5">
+              <div className="flex min-w-0 flex-wrap items-center gap-1.5 text-xs">
+                <Radio className="size-3.5 shrink-0 text-sky-500" aria-hidden="true" />
+                <span className="text-muted-foreground">Topic</span>
+                <Badge variant="secondary" className="max-w-full truncate font-mono text-[10px]">
+                  {topic.trim()}
+                </Badge>
+                <span className="text-muted-foreground/70">
+                  via {normalizeNtfyServer(server)?.host ?? "ntfy.sh"}
+                </span>
+              </div>
+              <p className="mt-1.5 text-[10px] leading-snug text-muted-foreground">
+                Stored encrypted (AES-256-GCM), never exported. Keep the topic subscribed in the app —
+                deleting it there silences this channel.
+              </p>
+            </div>
+
+            <div className="flex gap-2">
+              <Button
+                size="sm"
+                className="h-9 flex-1 gap-1.5"
+                disabled={!topicValid || busy !== null || savedTopic}
+                onClick={saveTopic}
+              >
+                {busy === "save" ? (
+                  <Loader2 className="size-3.5 animate-spin" aria-hidden="true" />
+                ) : (
+                  <Save className="size-3.5" aria-hidden="true" />
+                )}
+                {savedTopic ? "Saved" : "Save topic"}
+              </Button>
+              <Button
+                size="sm"
+                variant="secondary"
+                className="h-9 flex-1 gap-1.5"
+                disabled={!savedTopic || busy !== null}
+                onClick={sendTest}
+              >
+                {busy === "test" ? (
+                  <Loader2 className="size-3.5 animate-spin" aria-hidden="true" />
+                ) : (
+                  <Radio className="size-3.5" aria-hidden="true" />
+                )}
+                Send test
+              </Button>
+            </div>
+            {!savedTopic && (
+              <p className="text-[11px] leading-snug text-muted-foreground">
+                Saving stores the topic on the server side. Nothing is sent until you press Send test —
+                and only you ever trigger messages.
+              </p>
+            )}
+
+            {testResult && (
+              <p
+                className={cn(
+                  "rounded-md border px-2.5 py-1.5 text-[11px] leading-snug",
+                  testResult.ok
+                    ? "border-emerald-500/40 bg-emerald-500/10 text-emerald-700 dark:text-emerald-400"
+                    : "border-red-500/40 bg-red-500/10 text-red-700 dark:text-red-400"
+                )}
+              >
+                {testResult.ok ? "Delivered: " : "Failed: "}
+                {testResult.snippet || (testResult.ok ? "message queued" : "unknown response")}
+              </p>
+            )}
+
+            {savedTopic && !status.enabled && (
+              <Button size="sm" variant="outline" className="h-9 w-full gap-1.5 border-sky-500/40 text-sky-700 hover:bg-sky-500/10 hover:text-sky-700 dark:text-sky-400 dark:hover:text-sky-400" disabled={busy !== null} onClick={enablePushes}>
+                {busy === "enable" ? (
+                  <Loader2 className="size-3.5 animate-spin" aria-hidden="true" />
+                ) : (
+                  <BellRing className="size-3.5" aria-hidden="true" />
+                )}
+                Turn pushes on
+              </Button>
+            )}
+
+            {live && (
+              <div className="flex items-center gap-2 rounded-lg border border-emerald-500/40 bg-emerald-500/10 px-3 py-2.5">
+                <CheckCircle2 className="size-5 shrink-0 text-emerald-600 dark:text-emerald-400" aria-hidden="true" />
+                <div className="min-w-0">
+                  <p className="text-xs font-semibold text-emerald-700 dark:text-emerald-400">Push is live</p>
+                  <p className="text-[11px] leading-snug text-emerald-700/80 dark:text-emerald-400/80">
+                    {health.detail} Alerts flow to your ntfy app — this channel works even while WhatsApp
+                    is being repaired.
+                  </p>
+                </div>
+              </div>
+            )}
+          </div>
+        )}
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+/* ------------------------------------------------------------------ */
+
 /**
  * Push notifications via ntfy.sh — the free second channel. Same honest
  * gating as WhatsApp: nothing is sent while unconfigured or disabled, and
  * the test/digest buttons are the ONLY things that can trigger a send.
  */
-function NtfyCard() {
+function NtfyCard({ autoOpenSetupNonce = 0 }: { autoOpenSetupNonce?: number } = {}) {
   const qc = useQueryClient();
   const { data: status } = useQuery({ queryKey: qk.ntfyStatus, queryFn: fetchNtfyStatus });
   const [topic, setTopic] = useState("");
@@ -2968,13 +3370,21 @@ function NtfyCard() {
   const [digestTime, setDigestTime] = useState("");
   const [copied, setCopied] = useState(false);
   const [busy, setBusy] = useState<null | "save" | "test" | "digest" | "time" | "clearTime">(null);
+  const [setupOpen, setSetupOpen] = useState(false);
+
+  /* r111 care chain: a deep-link (dashboard checklist row / palette care
+     command) lands INSIDE the wizard. Nonce-driven so the same deep-link
+     arriving twice re-opens each time; the wizard's own per-open reset
+     keeps the state fresh (same pattern as WhatsAppCard r110). */
+  useEffect(() => {
+    if (autoOpenSetupNonce > 0) setSetupOpen(true);
+  }, [autoOpenSetupNonce]);
 
   const refresh = () => qc.invalidateQueries({ queryKey: qk.ntfyStatus });
 
   const suggestTopic = () => {
-    // erp-sync- + 8 random base36 chars — long enough to be unguessable in practice.
-    const rand = Array.from({ length: 8 }, () => "abcdefghijklmnopqrstuvwxyz0123456789"[Math.floor(Math.random() * 36)]).join("");
-    setTopic(`erp-sync-${rand}`);
+    // The r111 rulebook mints it — crypto-quality, prefix-pinned, unguessable.
+    setTopic(randomNtfyTopic());
     setCopied(false);
   };
 
@@ -3097,22 +3507,35 @@ function NtfyCard() {
       </CardHeader>
       <CardContent className="space-y-3">
         {!configured ? (
-          <ol className="list-inside list-decimal space-y-1 text-sm text-muted-foreground">
-            <li>
-              Install the free{" "}
-              <a
-                href="https://ntfy.sh"
-                target="_blank"
-                rel="noopener noreferrer"
-                className="font-medium text-primary underline-offset-2 hover:underline"
+          <div className="space-y-2">
+            <ol className="list-inside list-decimal space-y-1 text-sm text-muted-foreground">
+              <li>
+                Install the free{" "}
+                <a
+                  href="https://ntfy.sh"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="font-medium text-primary underline-offset-2 hover:underline"
+                >
+                  ntfy app
+                </a>{" "}
+                (Android/iOS) or use the web app
+              </li>
+              <li>Subscribe to a private topic — the wizard mints an unguessable one and opens the app for you</li>
+              <li>Send a test, then flip the switch on</li>
+            </ol>
+            {status && (
+              <Button
+                size="sm"
+                variant="outline"
+                className="h-8 gap-1.5 border-sky-500/40 text-sky-700 hover:bg-sky-500/10 hover:text-sky-700 dark:text-sky-400 dark:hover:text-sky-400"
+                onClick={() => setSetupOpen(true)}
               >
-                ntfy app
-              </a>{" "}
-              (Android/iOS) or use the web app
-            </li>
-            <li>Subscribe to a private topic — tap the dice below for an unguessable one, and copy it into the app</li>
-            <li>Paste the topic here, send a test, then flip the switch on</li>
-          </ol>
+                <Radio className="size-3.5" aria-hidden="true" />
+                Start guided setup
+              </Button>
+            )}
+          </div>
         ) : (
           <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
             <Badge variant="secondary" className="font-mono text-[10px]">{status?.topicMasked}</Badge>
@@ -3248,13 +3671,43 @@ function NtfyCard() {
           </div>
         </div>
 
-        {status && healthN && <ChannelHealthLine health={healthN} raw={status.lastResult} />}
+        {status && healthN && (
+          <div className="space-y-1.5">
+            <ChannelHealthLine health={healthN} raw={status.lastResult} />
+            {healthN.verdict === "failing" && (
+              <div className="flex flex-wrap items-center gap-x-2 gap-y-1.5 rounded-lg border border-amber-500/40 bg-amber-500/10 px-2.5 py-2">
+                <p className="flex min-w-0 flex-1 items-start gap-1.5 text-[11px] leading-snug text-amber-700 dark:text-amber-400">
+                  <TriangleAlert className="mt-0.5 size-3.5 shrink-0" aria-hidden="true" />
+                  The last push failed — a fresh topic and re-subscribing usually fixes it. The wizard
+                  mints a new unguessable topic and opens the app for you.
+                </p>
+                <Button
+                  size="sm"
+                  className="h-7 shrink-0 gap-1.5 bg-amber-600 text-white hover:bg-amber-700"
+                  onClick={() => setSetupOpen(true)}
+                >
+                  <Radio className="size-3.5" aria-hidden="true" />
+                  Repair push
+                </Button>
+              </div>
+            )}
+          </div>
+        )}
 
         <p className="flex items-start gap-1.5 text-[11px] leading-snug text-muted-foreground">
           <ShieldCheck className="mt-0.5 size-3.5 shrink-0" aria-hidden="true" />
           Anyone who knows the topic name can push to your device — the dice suggests an unguessable one.
           Nothing is sent while disabled or unconfigured; pushes are generated only from real synced ERP data.
         </p>
+
+        {status && healthN && (
+          <NtfySetupDialog
+            open={setupOpen}
+            onOpenChange={setSetupOpen}
+            status={status}
+            health={healthN}
+          />
+        )}
       </CardContent>
     </Card>
   );
@@ -3264,11 +3717,12 @@ function NtfyCard() {
 
 /** Deep-link targets the dashboard's setup checklist and the palette's care
  *  group can spotlight: "notify" = the WhatsApp/ntfy channel grid, "backup"
- *  = data & backups (which hosts the calendar subscription block), and
- *  "wa-repair" = the channel grid PLUS the repair wizard opened for you
- *  (r110 — the care chain: dashboard row / palette command lands INSIDE the
- *  wizard, not one button short of it). */
-export type SettingsFocus = "notify" | "backup" | "wa-repair";
+ *  = data & backups (which hosts the calendar subscription block),
+ *  "wa-repair" = the channel grid PLUS the WhatsApp repair wizard opened
+ *  for you (r110 — the care chain), and "ntfy-setup" = the same chain for
+ *  the ntfy guided setup wizard (r111 — the free channel gets the same
+ *  one-tap-deeper treatment). */
+export type SettingsFocus = "notify" | "backup" | "wa-repair" | "ntfy-setup";
 
 export function SettingsTab({
   focus,
@@ -3292,8 +3746,10 @@ export function SettingsTab({
   const [spotlight, setSpotlight] = useState<SettingsFocus | null>(null);
   const spotTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   /* r110: a "wa-repair" focus lands INSIDE the wizard. A nonce (not a boolean)
-     so the SAME focus arriving twice re-opens the wizard each time. */
+     so the SAME focus arriving twice re-opens the wizard each time.
+     r111: "ntfy-setup" gets the identical treatment for the ntfy wizard. */
   const [repairNonce, setRepairNonce] = useState(0);
+  const [setupNonce, setSetupNonce] = useState(0);
   React.useEffect(() => {
     if (!focus) return;
     onConsumeFocus?.();
@@ -3301,6 +3757,7 @@ export function SettingsTab({
     el?.scrollIntoView({ behavior: "smooth", block: "center" });
     setSpotlight(focus);
     if (focus === "wa-repair") setRepairNonce((n) => n + 1);
+    if (focus === "ntfy-setup") setSetupNonce((n) => n + 1);
     if (spotTimer.current) clearTimeout(spotTimer.current);
     spotTimer.current = setTimeout(() => setSpotlight(null), 2800);
   }, [focus, onConsumeFocus]);
@@ -3323,11 +3780,13 @@ export function SettingsTab({
       <NotificationPrefsCard />
       <div
         ref={notifyRef}
-        className={spotClass(spotlight === "notify" || spotlight === "wa-repair")}
+        className={spotClass(
+          spotlight === "notify" || spotlight === "wa-repair" || spotlight === "ntfy-setup"
+        )}
       >
         <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
           <WhatsAppCard autoOpenRepairNonce={repairNonce} />
-          <NtfyCard />
+          <NtfyCard autoOpenSetupNonce={setupNonce} />
         </div>
       </div>
       <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">

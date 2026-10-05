@@ -262,7 +262,10 @@ export function SetupChecklist({ onOpenStep }: { onOpenStep?: (f: SettingsFocus)
               : h.atLabel
                 ? `${h.detail} (${h.atLabel})`
                 : h.detail,
-        target: "notify",
+        /* r111 care chain (mirrors the WhatsApp row): an unconfigured or
+           failing push channel lands INSIDE the ntfy setup wizard — the
+           wizard mints the topic and opens the app for the student. */
+        target: h.verdict === "failing" || h.verdict === "unconfigured" ? "ntfy-setup" : "notify",
         icon: Radio,
         chipClass: "bg-sky-500/10 text-sky-600 dark:text-sky-400",
       });

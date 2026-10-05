@@ -29,6 +29,7 @@ import {
   MonitorSmartphone,
   Moon,
   Printer,
+  Radio,
   RefreshCw,
   Settings as SettingsIcon,
   StickyNote,
@@ -50,7 +51,7 @@ import {
 } from "@/components/ui/command";
 import { cn } from "@/lib/utils";
 import { cycleTextSize, TEXT_SIZES } from "@/lib/text-size";
-import { fetchAlaNotes, fetchAssignments, fetchResults, fetchReminders, fetchTimetable, fetchWaStatus, postDemoEvolve, postSync, putSelectedSemester, qk, type RetryFocusHandoff, type SubjectFocusHandoff } from "./api";
+import { fetchAlaNotes, fetchAssignments, fetchNtfyStatus, fetchResults, fetchReminders, fetchTimetable, fetchWaStatus, postDemoEvolve, postSync, putSelectedSemester, qk, type RetryFocusHandoff, type SubjectFocusHandoff } from "./api";
 import {
   isSupported as browserRemindersSupported,
   isEnabled as browserRemindersEnabled,
@@ -62,6 +63,7 @@ import {
 import { buildHousekeepingNudgeSummary, buildHousekeepingPlan } from "@/lib/reminder-hygiene";
 import { parseNotifyHealth } from "@/lib/notify-health";
 import { waCareAction } from "@/lib/wa-pair";
+import { ntfyCareAction } from "@/lib/ntfy-pair";
 import { promptInstall, useCanInstall, useIsInstalled } from "./install-prompt";
 import { subjectStories } from "@/lib/results-summary";
 import { buildSingleClassIcs, upcomingClassSlots } from "./ics";
@@ -231,6 +233,23 @@ export function CommandPalette({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [waQ.data]);
   const waCare = React.useMemo(() => (waHealth ? waCareAction(waHealth.verdict) : null), [waHealth]);
+
+  /* ntfy verdict: same single-rulebook consumption (r106 → r111 ntfyCareAction).
+     Rides the cached ntfy-status query — cold cache fetches once (15s
+     staleTime), then it shares the cache with the checklist + card. */
+  const ntfyQ = useQuery({ queryKey: qk.ntfyStatus, queryFn: fetchNtfyStatus, staleTime: 15_000 });
+  const ntfyHealth = React.useMemo(() => {
+    const s = ntfyQ.data;
+    if (!s) return null;
+    return parseNotifyHealth({
+      enabled: s.enabled,
+      configured: s.configured,
+      lastResult: s.lastResult,
+      nowMs: Date.now(),
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [ntfyQ.data]);
+  const ntfyCare = React.useMemo(() => (ntfyHealth ? ntfyCareAction(ntfyHealth.verdict) : null), [ntfyHealth]);
 
   /* Sweep noise count: the SAME rulebook as the dashboard nudge and the
      sweep dialog (r108 convention — no surface re-derives housekeeping
@@ -533,6 +552,16 @@ export function CommandPalette({
       badge: waCare.kind === "repair" ? "fix" : undefined,
       badgeClass: "border-amber-500/40 bg-amber-500/10 text-amber-600 dark:text-amber-400",
       onSelect: () => run(() => onOpenSettingsFocus(waCare.focus)),
+    });
+  }
+  if (ntfyCare && ntfyCare.kind !== "none") {
+    careItems.push({
+      value: `${ntfyCare.label} ntfy push notifications free channel topic subscribe alerts android iphone setup repair verify`,
+      icon: ntfyCare.kind === "verify" ? Bell : Radio,
+      label: ntfyCare.label,
+      badge: ntfyCare.kind === "repair" ? "fix" : undefined,
+      badgeClass: "border-amber-500/40 bg-amber-500/10 text-amber-600 dark:text-amber-400",
+      onSelect: () => run(() => onOpenSettingsFocus(ntfyCare.focus)),
     });
   }
   if (careNoiseCount > 0) {
