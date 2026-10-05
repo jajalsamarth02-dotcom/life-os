@@ -38,6 +38,7 @@ import {
   X,
 } from "lucide-react";
 import { toast } from "sonner";
+import { apikeyShapeHint, parseNotifyHealth, stripProviderHtml, type NotifyHealth } from "@/lib/notify-health";
 import { isIOS, promptInstall, useCanInstall, useIsInstalled } from "./install-prompt";
 import { compactErrorText } from "@/lib/compact-error";
 import {
@@ -2134,6 +2135,52 @@ function DataBackupCard() {
 /* WhatsApp alerts card (CallMeBot)                                    */
 /* ------------------------------------------------------------------ */
 
+/** The one delivery-health line both channel cards print — toned by the
+ *  notify-health verdict (r106): fresh emerald when the last attempt was
+ *  delivered, red when the provider refused it, amber while unverified,
+ *  muted when off/unconfigured. The raw stored string survives in the
+ *  title attribute for debugging; the visible text is provider-HTML-free. */
+function ChannelHealthLine({ health, raw }: { health: NotifyHealth; raw: string | null }) {
+  const frame = {
+    emerald: "border-emerald-500/30 bg-emerald-500/[0.06]",
+    red: "border-red-500/30 bg-red-500/[0.06]",
+    amber: "border-amber-500/30 bg-amber-500/[0.06]",
+    muted: "border-border/50 bg-muted/40",
+  }[health.tone];
+  const dot = {
+    emerald: "bg-emerald-500",
+    red: "bg-red-500",
+    amber: "bg-amber-500",
+    muted: "bg-muted-foreground/40",
+  }[health.tone];
+  const label = {
+    emerald: "text-emerald-700 dark:text-emerald-400",
+    red: "text-red-700 dark:text-red-400",
+    amber: "text-amber-700 dark:text-amber-400",
+    muted: "text-muted-foreground",
+  }[health.tone];
+  return (
+    <div className={cn("rounded-lg border px-3 py-2", frame)} title={raw ?? undefined}>
+      <div className="flex flex-wrap items-center gap-2">
+        <span className={cn("size-1.5 shrink-0 rounded-full", dot)} aria-hidden="true" />
+        <span className={cn("text-xs font-semibold", label)}>{health.label}</span>
+        {health.atLabel && (
+          <span className="font-mono text-[10px] text-muted-foreground">{health.atLabel}</span>
+        )}
+        {health.trigger && (
+          <Badge
+            variant="outline"
+            className="border-border/60 text-[9px] font-bold uppercase tracking-wider text-muted-foreground"
+          >
+            {health.trigger}
+          </Badge>
+        )}
+      </div>
+      <p className="mt-0.5 text-[11px] leading-snug text-muted-foreground">{health.detail}</p>
+    </div>
+  );
+}
+
 function WhatsAppCard() {
   const qc = useQueryClient();
   const { data: status } = useQuery({ queryKey: qk.waStatus, queryFn: fetchWaStatus });
@@ -2159,13 +2206,13 @@ function WhatsAppCard() {
       } else if (action === "test") {
         const res = await postWaAction("test");
         (res.ok ? toast.success : toast.error)(res.ok ? "Test message sent — check WhatsApp" : "The provider did not accept the test", {
-          description: res.snippet,
+          description: stripProviderHtml(res.snippet ?? ""),
         });
         refresh();
       } else {
         const res = await postWaAction("digest");
         (res.ok ? toast.success : toast.error)(res.ok ? "Digest sent — check WhatsApp" : "The provider did not accept the digest", {
-          description: res.snippet,
+          description: stripProviderHtml(res.snippet ?? ""),
         });
         refresh();
       }
@@ -2215,6 +2262,16 @@ function WhatsAppCard() {
   const enabled = status?.enabled ?? false;
   const configured = status?.configured ?? false;
   const savedTime = status?.digestTime ?? null;
+  /* ONE health verdict per render — the line, the apikey-repair hint and any
+   * future consumer read the same object (r106 rulebook consumer #2). */
+  const health = status
+    ? parseNotifyHealth({
+        enabled: status.enabled,
+        configured: status.configured,
+        lastResult: status.lastResult,
+        nowMs: Date.now(),
+      })
+    : null;
 
   return (
     <Card className="rounded-xl border-border/60">
@@ -2278,18 +2335,33 @@ function WhatsAppCard() {
             onChange={(e) => setPhone(e.target.value)}
             aria-label="WhatsApp phone number with country code"
           />
-          <Input
-            type="password"
-            placeholder={configured ? "apikey saved — paste to replace" : "CallMeBot apikey"}
-            value={apikey}
-            onChange={(e) => setApikey(e.target.value)}
-            aria-label="CallMeBot apikey"
-          />
+          <div className="relative">
+            <Input
+              type="password"
+              placeholder={configured ? "apikey saved — paste to replace" : "CallMeBot apikey"}
+              value={apikey}
+              onChange={(e) => setApikey(e.target.value)}
+              aria-label="CallMeBot apikey"
+              className={cn("pr-8", apikeyShapeHint(apikey) && "border-amber-500/50 focus-visible:ring-amber-500/30")}
+            />
+            {apikey.trim() && !apikeyShapeHint(apikey) && (
+              <CheckCircle2
+                className="absolute right-2.5 top-1/2 size-3.5 -translate-y-1/2 text-emerald-500"
+                aria-hidden="true"
+              />
+            )}
+          </div>
           <Button size="sm" variant="outline" className="h-9 gap-1.5" disabled={busy !== null} onClick={() => run("save")}>
             {busy === "save" ? <Loader2 className="size-3.5 animate-spin" aria-hidden="true" /> : <Save className="size-3.5" aria-hidden="true" />}
             Save
           </Button>
         </div>
+        {apikeyShapeHint(apikey) && (
+          <p className="flex items-start gap-1.5 text-[11px] leading-snug text-amber-700 dark:text-amber-400">
+            <TriangleAlert className="mt-0.5 size-3.5 shrink-0" aria-hidden="true" />
+            {apikeyShapeHint(apikey)}
+          </p>
+        )}
 
         <div className="flex flex-wrap gap-2">
           <Button size="sm" variant="secondary" className="h-8 gap-1.5" disabled={!configured || busy !== null} onClick={() => run("test")}>
@@ -2359,10 +2431,17 @@ function WhatsAppCard() {
           </div>
         </div>
 
-        {status?.lastResult && (
-          <p className="truncate rounded-lg bg-muted/60 px-2.5 py-1.5 font-mono text-[10px] text-muted-foreground" title={status.lastResult}>
-            last: {status.lastResult}
-          </p>
+        {status && health && (
+          <div className="space-y-1.5">
+            <ChannelHealthLine health={health} raw={status.lastResult} />
+            {health.verdict === "failing" && (
+              <p className="flex items-start gap-1.5 text-[11px] leading-snug text-amber-700 dark:text-amber-400">
+                <TriangleAlert className="mt-0.5 size-3.5 shrink-0" aria-hidden="true" />
+                The provider rejected the saved key — send the pairing message from your WhatsApp again,
+                save the fresh apikey above, then press Send test to confirm the pair.
+              </p>
+            )}
+          </div>
         )}
 
         <p className="flex items-start gap-1.5 text-[11px] leading-snug text-muted-foreground">
@@ -2429,14 +2508,14 @@ function NtfyCard() {
         const res = await postNtfyAction("test");
         (res.ok ? toast.success : toast.error)(
           res.ok ? "Test push sent — check your ntfy app" : "The ntfy server did not accept the test",
-          { description: res.snippet }
+          { description: stripProviderHtml(res.snippet ?? "") }
         );
         refresh();
       } else {
         const res = await postNtfyAction("digest");
         (res.ok ? toast.success : toast.error)(
           res.ok ? "Digest pushed — check your ntfy app" : "The ntfy server did not accept the digest",
-          { description: res.snippet }
+          { description: stripProviderHtml(res.snippet ?? "") }
         );
         refresh();
       }
@@ -2486,6 +2565,16 @@ function NtfyCard() {
   const enabled = status?.enabled ?? false;
   const configured = status?.configured ?? false;
   const savedTime = status?.digestTime ?? null;
+  /* Same one-rulebook verdict as the WhatsApp card — the two channels speak
+   * the same health language (r106). */
+  const healthN = status
+    ? parseNotifyHealth({
+        enabled: status.enabled,
+        configured: status.configured,
+        lastResult: status.lastResult,
+        nowMs: Date.now(),
+      })
+    : null;
 
   return (
     <Card className="rounded-xl border-border/60">
@@ -2660,11 +2749,7 @@ function NtfyCard() {
           </div>
         </div>
 
-        {status?.lastResult && (
-          <p className="truncate rounded-lg bg-muted/60 px-2.5 py-1.5 font-mono text-[10px] text-muted-foreground" title={status.lastResult}>
-            last: {status.lastResult}
-          </p>
-        )}
+        {status && healthN && <ChannelHealthLine health={healthN} raw={status.lastResult} />}
 
         <p className="flex items-start gap-1.5 text-[11px] leading-snug text-muted-foreground">
           <ShieldCheck className="mt-0.5 size-3.5 shrink-0" aria-hidden="true" />

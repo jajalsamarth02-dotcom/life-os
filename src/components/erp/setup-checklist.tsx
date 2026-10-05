@@ -11,6 +11,12 @@
  *
  * Honesty rules: unknown state never renders as "done"; a saved-but-disabled
  * channel reads as its own amber "Saved but off" state, not as either extreme.
+ * r106: "done" now means DELIVERED, not merely enabled — the channel's last
+ * send result (via lib/notify-health, the one rulebook shared with Settings)
+ * demotes a configured+enabled channel whose last attempt FAILED to its own
+ * red "Send failed" state, and an enabled-but-never-tested one to amber
+ * "Unverified". A failing channel can never collapse the card to the
+ * "Setup complete" strip (coreDone counts real deliveries only).
  * When the three core steps are live the card collapses to a slim strip (the
  * optional digest row never blocks completion) that the user can hide —
  * device-local, and a newly pending core step resurfaces it regardless.
@@ -21,6 +27,7 @@ import { useQuery } from "@tanstack/react-query";
 import { motion } from "framer-motion";
 import {
   AlarmClock,
+  AlertTriangle,
   BadgeCheck,
   CalendarClock,
   CheckCircle2,
@@ -37,6 +44,7 @@ import {
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
+import { parseNotifyHealth } from "@/lib/notify-health";
 import { cn } from "@/lib/utils";
 import { fetchCalendarToken, fetchNtfyStatus, fetchWaStatus, qk } from "./api";
 import type { SettingsFocus } from "./settings-tab";
@@ -44,26 +52,39 @@ import type { SettingsFocus } from "./settings-tab";
 /** Device-local dismissal of the collapsed strip (only honored while core steps stay done). */
 const HIDE_KEY = "erp:setupDoneHidden";
 
-type RowState = "done" | "partial" | "todo";
+type RowState = "done" | "attention" | "partial" | "todo";
 
 interface RowSpec {
   key: string;
   title: string;
   desc: string;
   state: RowState;
+  /** Chip caption — driven by the health verdict for channel rows. */
+  chipText: string;
   optional?: boolean;
   target: SettingsFocus;
   icon: LucideIcon;
   chipClass: string;
 }
 
-function StateChip({ state }: { state: RowState }) {
+function StateChip({ state, chipText }: { state: RowState; chipText: string }) {
   if (state === "done") {
     return (
       <span className="inline-flex shrink-0 items-center gap-1 text-[11px] font-semibold text-emerald-600 dark:text-emerald-400">
         <CheckCircle2 className="size-3.5" aria-hidden="true" />
         Done
       </span>
+    );
+  }
+  if (state === "attention") {
+    return (
+      <Badge
+        variant="outline"
+        className="shrink-0 border-red-500/50 bg-red-500/[0.06] text-[10px] font-semibold uppercase tracking-wide text-red-600 dark:text-red-400"
+      >
+        <AlertTriangle className="size-3" aria-hidden="true" />
+        {chipText}
+      </Badge>
     );
   }
   if (state === "partial") {
@@ -73,7 +94,7 @@ function StateChip({ state }: { state: RowState }) {
         className="shrink-0 border-amber-500/50 text-[10px] font-semibold uppercase tracking-wide text-amber-600 dark:text-amber-400"
       >
         <CircleDashed className="size-3" aria-hidden="true" />
-        Saved but off
+        {chipText}
       </Badge>
     );
   }
@@ -93,26 +114,35 @@ function RowButton({ row, onOpenStep }: { row: RowSpec; onOpenStep?: (f: Setting
     <button
       type="button"
       onClick={() => onOpenStep?.(row.target)}
-      aria-label={`${row.title} — ${row.state === "done" ? "done" : "open in Settings"}`}
+      aria-label={`${row.title} — ${row.chipText.toLowerCase()}${
+        row.state === "done" ? "" : " — open in Settings"
+      }`}
       className={cn(
         "group flex w-full items-center gap-3 rounded-lg border px-3 py-2.5 text-left transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
         row.state === "done"
           ? "border-border/40 bg-muted/20 hover:bg-muted/40"
-          : "border-border/60 hover:border-violet-500/40 hover:bg-violet-500/[0.05]",
+          : row.state === "attention"
+            ? "border-red-500/30 bg-red-500/[0.04] hover:border-red-500/50 hover:bg-red-500/[0.07]"
+            : "border-border/60 hover:border-violet-500/40 hover:bg-violet-500/[0.05]",
         row.optional && "border-dashed"
       )}
     >
       <span
         className={cn(
           "flex size-8 shrink-0 items-center justify-center rounded-lg",
-          row.chipClass
+          row.state === "attention" ? "bg-red-500/10 text-red-600 dark:text-red-400" : row.chipClass
         )}
       >
         <Icon className="size-4" aria-hidden="true" />
       </span>
       <span className="min-w-0 flex-1">
         <span className="flex flex-wrap items-center gap-x-2 gap-y-0.5">
-          <span className={cn("text-sm font-medium tracking-tight", row.state === "done" && "text-muted-foreground")}>
+          <span
+            className={cn(
+              "text-sm font-medium tracking-tight",
+              (row.state === "done" || row.state === "attention") && "text-muted-foreground"
+            )}
+          >
             {row.title}
           </span>
           {row.optional && (
@@ -124,11 +154,16 @@ function RowButton({ row, onOpenStep }: { row: RowSpec; onOpenStep?: (f: Setting
             </Badge>
           )}
         </span>
-        <span className="mt-0.5 block truncate text-xs text-muted-foreground">{row.desc}</span>
+        <span className="mt-0.5 block truncate text-xs text-muted-foreground" title={row.desc}>
+          {row.desc}
+        </span>
       </span>
-      <StateChip state={row.state} />
+      <StateChip state={row.state} chipText={row.chipText} />
       <ChevronRight
-        className="size-4 shrink-0 text-muted-foreground/50 transition-transform duration-150 group-hover:translate-x-0.5 group-hover:text-violet-500"
+        className={cn(
+          "size-4 shrink-0 text-muted-foreground/50 transition-transform duration-150 group-hover:translate-x-0.5",
+          row.state === "attention" ? "group-hover:text-red-500" : "group-hover:text-violet-500"
+        )}
         aria-hidden="true"
       />
     </button>
@@ -166,33 +201,64 @@ export function SetupChecklist({ onOpenStep }: { onOpenStep?: (f: SettingsFocus)
 
   const rows = useMemo<RowSpec[]>(() => {
     const out: RowSpec[] = [];
+    const nowMs = Date.now();
+    /* One health rulebook (lib/notify-health) for BOTH channel rows — the
+     * same verdicts the Settings cards print; the two views cannot drift. */
+    const channelState = (h: ReturnType<typeof parseNotifyHealth> | null) =>
+      !h
+        ? { state: "todo" as const, chipText: "To do" }
+        : h.verdict === "live"
+          ? { state: "done" as const, chipText: "Done" }
+          : h.verdict === "failing"
+            ? { state: "attention" as const, chipText: h.label }
+            : { state: "partial" as const, chipText: h.label };
     if (wa.data) {
-      const done = wa.data.configured && wa.data.enabled;
+      const h = parseNotifyHealth({
+        enabled: wa.data.enabled,
+        configured: wa.data.configured,
+        lastResult: wa.data.lastResult,
+        nowMs,
+      });
+      const { state, chipText } = channelState(h);
       out.push({
         key: "wa",
         title: "WhatsApp alerts",
-        state: done ? "done" : wa.data.configured ? "partial" : "todo",
-        desc: done
-          ? `Live on ${wa.data.phoneMasked ?? "your number"}`
-          : wa.data.configured
-            ? "Credentials saved — alerts are switched off"
-            : "Pending-work digests straight to your WhatsApp",
+        state,
+        chipText,
+        desc:
+          h.verdict === "live"
+            ? `Live on ${wa.data.phoneMasked ?? "your number"} — last message ${h.atLabel ?? "delivered"}`
+            : h.verdict === "unconfigured"
+              ? "Pending-work digests straight to your WhatsApp"
+              : h.atLabel
+                ? `${h.detail} (${h.atLabel})`
+                : h.detail,
         target: "notify",
         icon: MessageCircle,
         chipClass: "bg-emerald-500/10 text-emerald-600 dark:text-emerald-400",
       });
     }
     if (ntfy.data) {
-      const done = ntfy.data.configured && ntfy.data.enabled;
+      const h = parseNotifyHealth({
+        enabled: ntfy.data.enabled,
+        configured: ntfy.data.configured,
+        lastResult: ntfy.data.lastResult,
+        nowMs,
+      });
+      const { state, chipText } = channelState(h);
       out.push({
         key: "ntfy",
         title: "Push via ntfy",
-        state: done ? "done" : ntfy.data.configured ? "partial" : "todo",
-        desc: done
-          ? `Push live on ${ntfy.data.topicMasked ?? "your topic"}`
-          : ntfy.data.configured
-            ? "Topic saved — push is switched off"
-            : "Free push alerts — no phone number or apikey needed",
+        state,
+        chipText,
+        desc:
+          h.verdict === "live"
+            ? `Push live on ${ntfy.data.topicMasked ?? "your topic"} — last message ${h.atLabel ?? "delivered"}`
+            : h.verdict === "unconfigured"
+              ? "Free push alerts — no phone number or apikey needed"
+              : h.atLabel
+                ? `${h.detail} (${h.atLabel})`
+                : h.detail,
         target: "notify",
         icon: Radio,
         chipClass: "bg-sky-500/10 text-sky-600 dark:text-sky-400",
@@ -204,6 +270,7 @@ export function SetupChecklist({ onOpenStep }: { onOpenStep?: (f: SettingsFocus)
         key: "cal",
         title: "Calendar subscription",
         state: done ? "done" : "todo",
+        chipText: done ? "Done" : "To do",
         desc: done
           ? "Your phone's calendar updates itself — classes and deadlines, auto-refreshing"
           : "Classes and deadlines appear in your phone's calendar, auto-updating",
@@ -219,6 +286,7 @@ export function SetupChecklist({ onOpenStep }: { onOpenStep?: (f: SettingsFocus)
         key: "digest",
         title: "Daily digest time",
         state: digestTime ? "done" : "todo",
+        chipText: digestTime ? "Done" : "To do",
         optional: true,
         desc: digestTime
           ? `Daily summary arrives at ${digestTime} IST`
