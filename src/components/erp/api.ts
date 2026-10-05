@@ -73,6 +73,8 @@ export const qk = {
   dashboard: ["dashboard"] as const,
   attendance: ["attendance"] as const,
   history: ["history"] as const,
+  /** r114 — the archive shelf: pre-rollover series, fetched only when the toggle is on. */
+  historyArchive: ["history", "archive"] as const,
   timetable: ["timetable"] as const,
   reminders: (filter: RemindersFilter, includeDone: boolean) =>
     ["reminders", filter, includeDone] as const,
@@ -119,6 +121,8 @@ export const fetchDigest = (days = 7) =>
   api<DigestResponse>(`/api/digest?days=${days}`);
 export const fetchAttendance = () => api<AttendanceResponse>("/api/attendance");
 export const fetchHistory = () => api<HistoryResponse>("/api/history");
+/** r114 — removed-subjects scope; a read-only record of the last term. */
+export const fetchHistoryArchive = () => api<HistoryResponse>("/api/history?scope=archive");
 /** The weekly routine + the student's parallel-class picks (one shared cache). */
 export const fetchTimetable = () => api<TimetableResponse>("/api/timetable");
 

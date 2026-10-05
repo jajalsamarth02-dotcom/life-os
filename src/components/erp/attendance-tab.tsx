@@ -11,7 +11,8 @@ import { Slider } from "@/components/ui/slider";
 import { cn } from "@/lib/utils";
 import { attendanceStatus, classesToReachTarget } from "@/lib/attendance";
 import { earlyTermBadge } from "@/lib/term-pulse";
-import { fetchAssignments, fetchAttendance, fetchHistory, qk, type SubjectFocusHandoff } from "./api";
+import { archiveAvailable, archiveSpan, archiveSubtitle } from "@/lib/term-archive";
+import { fetchAssignments, fetchAttendance, fetchHistory, fetchHistoryArchive, qk, type SubjectFocusHandoff } from "./api";
 import { HistoryHeatmap } from "./history-heatmap";
 import { RecoveryPlan } from "./recovery-plan";
 import { SubjectDrawer } from "./subject-drawer";
@@ -378,6 +379,20 @@ export function AttendanceTab({ onOpenSettings }: { onOpenSettings: () => void }
     queryFn: fetchHistory,
     refetchInterval: 60_000,
   });
+  /* r114 — the archive shelf: removed subjects' pre-rollover record. Fetched
+     once up-front (a static, read-only payload; staleTime keeps it cheap)
+     so the Archive switch can exist the moment the tab renders — the
+     availability is only knowable from the payload itself. */
+  const archiveQ = useQuery({
+    queryKey: qk.historyArchive,
+    queryFn: fetchHistoryArchive,
+    staleTime: 300_000,
+  });
+  const [archiveOn, setArchiveOn] = useState(false);
+  const archiveData = archiveQ.data ?? null;
+  const archiveIsAvailable = archiveAvailable(archiveData);
+  const archiveSubtitleText = archiveSubtitle(archiveData);
+  const archiveAnchor = archiveSpan(archiveData)?.to.slice(0, 10) ?? null;
   /* Full ALA queue — deduped with the page-level badge poll via the shared
      qk.assignments cache. Feeds the per-subject "N ALAs" chips on subject cards
      (amber when any deadline is overdue); each card's drawer lists them. */
@@ -543,24 +558,41 @@ export function AttendanceTab({ onOpenSettings }: { onOpenSettings: () => void }
       {/* Recovery pace & ETA, measured from sync snapshots */}
       <RecoveryPlan overall={overall} subjects={subjects} target={target} history={history.data} />
 
-      {/* Trend chart (from sync snapshots) */}
+      {/* Trend chart (from sync snapshots) — or the r114 archive shelf:
+          the same chart wearing its finished-term clothes. Forward-looking
+          tools (recovery, what-if, drawers) stay bound to CURRENT data. */}
       <TrendSection
-        history={history.data}
+        history={archiveOn ? archiveQ.data : history.data}
         subjects={subjects}
         target={target}
         focusDay={focusDay}
         onFocusDay={setFocusDay}
+        archive={{
+          on: archiveOn,
+          available: archiveIsAvailable,
+          subtitle: archiveSubtitleText,
+          onToggle: () => {
+            setArchiveOn((v) => !v);
+            setFocusDay(null); // a focused day from the other era must not survive the flip
+          },
+        }}
       />
 
-      {/* Daily history heatmap (from sync snapshots) */}
-      {history.data && history.data.overall.length > 0 && (
-        <HistoryHeatmap
-          overall={history.data.overall}
-          target={target}
-          focusKey={focusDay}
-          onSelectDay={setFocusDay}
-        />
-      )}
+      {/* Daily history heatmap (from sync snapshots) — follows the archive scope */}
+      {(() => {
+        const heatOverall = archiveOn ? archiveQ.data?.overall ?? [] : history.data?.overall ?? [];
+        if (heatOverall.length === 0) return null;
+        return (
+          <HistoryHeatmap
+            overall={heatOverall}
+            target={target}
+            focusKey={focusDay}
+            onSelectDay={setFocusDay}
+            anchorDate={archiveOn ? archiveAnchor : null}
+            archive={archiveOn}
+          />
+        );
+      })()}
 
       {/* Subject grid */}
       <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3">

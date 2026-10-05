@@ -37,6 +37,8 @@ export function HistoryHeatmap({
   target,
   focusKey = null,
   onSelectDay,
+  anchorDate = null,
+  archive = false,
 }: {
   overall: HistoryPoint[];
   target: number;
@@ -44,6 +46,10 @@ export function HistoryHeatmap({
   focusKey?: string | null;
   /** Click a day cell to select/deselect it (cross-links with the trend chart). */
   onSelectDay?: (key: string | null) => void;
+  /** r114 — ISO day the grid ENDS at (the archive's last day); null = today. */
+  anchorDate?: string | null;
+  /** r114 — archived surface: amber-accented title, honest about its era. */
+  archive?: boolean;
 }) {
   const [hover, setHover] = React.useState<DayCell | null>(null);
 
@@ -54,10 +60,12 @@ export function HistoryHeatmap({
     return map;
   }, [overall]);
 
-  /* grid: weeks × 7 days, ending with the current week */
+  /* grid: weeks × 7 days, ending with the current week — or, in archive
+     mode, ending at the archive's final week (a record of a finished era
+     must not trail off into empty future cells). */
   const weeks = React.useMemo(() => {
-    const today = new Date();
-    const lastMonday = startOfWeek(today, { weekStartsOn: 1 });
+    const anchor = anchorDate ? new Date(`${anchorDate}T00:00:00`) : new Date();
+    const lastMonday = startOfWeek(anchor, { weekStartsOn: 1 });
     const cols: DayCell[][] = [];
     for (let w = WEEKS - 1; w >= 0; w--) {
       const colStart = new Date(lastMonday);
@@ -67,13 +75,13 @@ export function HistoryHeatmap({
         const date = new Date(colStart);
         date.setDate(date.getDate() + d);
         const key = dayKey(date);
-        const point = date <= today ? (byDay.get(key) ?? null) : null;
+        const point = date <= anchor ? (byDay.get(key) ?? null) : null;
         col.push({ key, date, point });
       }
       cols.push(col);
     }
     return cols;
-  }, [byDay]);
+  }, [byDay, anchorDate]);
 
   /* month labels: mark a column that CONTAINS the 1st of a new month
      (handles months that start mid-week, e.g. Oct 1 on a Wednesday) */
@@ -99,13 +107,19 @@ export function HistoryHeatmap({
   const caption = hover?.point ?? focusedCell?.point ?? latest;
 
   return (
-    <Card className="rounded-xl border-border/60">
+    <Card className={cn("rounded-xl", archive ? "border-amber-500/25" : "border-border/60")}>
       <CardHeader className="pb-3">
         <CardTitle className="flex items-center gap-2 text-base tracking-tight">
-          <CalendarDays className="size-4 text-primary" aria-hidden="true" />
-          Attendance history — last {WEEKS} weeks
+          <CalendarDays className={cn("size-4", archive ? "text-amber-600 dark:text-amber-400" : "text-primary")} aria-hidden="true" />
+          {archive && anchorDate
+            ? `Archived attendance — ${WEEKS} weeks to ${format(new Date(`${anchorDate}T00:00:00`), "d MMM yyyy")}`
+            : `Attendance history — last ${WEEKS} weeks`}
         </CardTitle>
-        <CardDescription>Daily overall attendance from every sync snapshot</CardDescription>
+        <CardDescription>
+          {archive
+            ? "Daily overall attendance from the archived term's sync snapshots (read-only)"
+            : "Daily overall attendance from every sync snapshot"}
+        </CardDescription>
       </CardHeader>
       <CardContent className="space-y-3">
         {daysWithData === 0 ? (
@@ -144,7 +158,7 @@ export function HistoryHeatmap({
                       <div key={wi} className="flex flex-col gap-1">
                         {col.map((cell) => {
                           const pct = cell.point?.percentage ?? null;
-                          const future = cell.date > new Date();
+                          const future = cell.date > (anchorDate ? new Date(`${anchorDate}T23:59:59`) : new Date());
                           const focused = focusKey != null && cell.key === focusKey;
                           const clickable =
                             onSelectDay != null && cell.point != null && !future;

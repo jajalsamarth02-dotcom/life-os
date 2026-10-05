@@ -15,7 +15,7 @@ import {
   YAxis,
 } from "recharts";
 import { format } from "date-fns";
-import { Activity, CalendarCheck, Download, X } from "lucide-react";
+import { Activity, Archive, CalendarCheck, Download, X } from "lucide-react";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
@@ -134,12 +134,49 @@ export function downloadCsv(filename: string, headers: string[], rows: (string |
 
 const SUBJECT_COLORS = ["#10b981", "#f59e0b", "#84cc16", "#f97316", "#14b8a6", "#a8a29e", "#ef4444"];
 
+/* r114 — the archive switch: a pressed-state pill, not a hidden toggle.
+   Present in EVERY TrendSection state (loading, sparse, full) so the way
+   back to the current term is always one tap away. */
+function ArchiveSwitch({
+  archive,
+  className,
+}: {
+  archive: { on: boolean; onToggle: () => void };
+  className?: string;
+}) {
+  const on = archive.on;
+  return (
+    <button
+      type="button"
+      role="switch"
+      aria-checked={on}
+      onClick={archive.onToggle}
+      className={cn(
+        "inline-flex shrink-0 items-center gap-1 rounded-md border px-2 py-1 text-[11px] font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+        on
+          ? "border-amber-500/40 bg-amber-500/10 text-amber-700 dark:text-amber-400"
+          : "border-border/60 text-muted-foreground hover:bg-muted/60",
+        className
+      )}
+      title={
+        on
+          ? "Viewing the archived (pre-rollover) record — tap to return to the current term"
+          : "Open the archived record of the subjects removed at the term rollover"
+      }
+    >
+      <Archive className="size-3.5" aria-hidden="true" />
+      {on ? "Back to current" : "Archive"}
+    </button>
+  );
+}
+
 export function TrendSection({
   history,
   subjects,
   target,
   focusDay = null,
   onFocusDay,
+  archive,
 }: {
   history: HistoryResponse | undefined;
   subjects: SubjectView[];
@@ -148,23 +185,44 @@ export function TrendSection({
   focusDay?: string | null;
   /** Click a chart point to focus that day (cross-links with the heatmap). */
   onFocusDay?: (key: string | null) => void;
+  /** r114 — the archive shelf: read-only pre-rollover record. */
+  archive?: {
+    on: boolean;
+    available: boolean;
+    subtitle: string | null;
+    onToggle: () => void;
+  };
 }) {
   const [selected, setSelected] = useState<string[]>([]);
   const [rangeDays, setRangeDays] = useState(14);
+  const archiveOn = archive?.on ?? false;
+
+  /* Scope flips reset the window: the archive spans a finished term, so it
+     opens at "All"; the live trend returns to the 14-day habit. */
+  useEffect(() => {
+    setRangeDays(archiveOn ? 3650 : 14);
+  }, [archiveOn]);
+
+  /* In archive mode the selectable series are the REMOVED subjects' codes
+     (current SubjectView rows don't exist for them) — the pill row and the
+     default selection both follow the active scope. */
+  const availableCodes = useMemo(
+    () => (archiveOn ? Object.keys(history?.subjects ?? {}) : subjects.map((s) => s.code)),
+    [archiveOn, history, subjects]
+  );
 
   useEffect(() => {
-    if (subjects.length > 0) {
+    if (availableCodes.length > 0) {
       setSelected((prev) => {
-        const codes = subjects.map((s) => s.code);
-        const next = prev.filter((c) => codes.includes(c));
-        return next.length > 0 ? next.slice(0, 3) : codes.slice(0, 2);
+        const next = prev.filter((c) => availableCodes.includes(c));
+        return next.length > 0 ? next.slice(0, 3) : availableCodes.slice(0, 2);
       });
     }
-  }, [subjects]);
+  }, [availableCodes]);
 
   const chartRows = useMemo(() => {
     if (!history) return [];
-    const cutoff = Date.now() - rangeDays * 24 * 3600 * 1000;
+    const cutoff = rangeDays >= 3650 ? 0 : Date.now() - rangeDays * 24 * 3600 * 1000;
     const overallFiltered = history.overall.filter((p) => new Date(p.t).getTime() >= cutoff);
     const timeSet = new Set<string>();
     overallFiltered.forEach((p) => timeSet.add(p.t));
@@ -199,24 +257,55 @@ export function TrendSection({
     });
   }, [history, selected, rangeDays]);
 
-  if (!history) return null;
+  if (!history) {
+    /* Archive payload still loading — never a silent fall-back to current
+       data (that would flash the wrong era); an honest pulse instead. */
+    if (archiveOn) {
+      return (
+        <Card className="rounded-xl border-amber-500/25">
+          <CardContent className="p-6">
+            <div className="animate-pulse space-y-3">
+              <div className="h-4 w-1/3 rounded bg-muted" />
+              <div className="h-32 w-full rounded bg-muted" />
+            </div>
+            {archive?.available !== false && archive && (
+              <ArchiveSwitch archive={archive} className="mt-3" />
+            )}
+          </CardContent>
+        </Card>
+      );
+    }
+    return null;
+  }
   if (history.overall.length < 2) {
     return (
-      <Card className="rounded-xl border-border/60">
+      <Card className={cn("rounded-xl", archiveOn ? "border-amber-500/25" : "border-border/60")}>
         <CardHeader className="pb-2">
           <CardTitle className="flex items-center gap-2 text-base tracking-tight">
-            <Activity className="size-4 text-emerald-500" aria-hidden="true" />
-            Attendance trend
+            {archiveOn ? (
+              <Archive className="size-4 text-amber-600 dark:text-amber-400" aria-hidden="true" />
+            ) : (
+              <Activity className="size-4 text-emerald-500" aria-hidden="true" />
+            )}
+            {archiveOn ? "Archived term" : "Attendance trend"}
           </CardTitle>
           <CardDescription className="text-xs">
-            A trend line appears automatically once a second sync snapshot has been recorded.
+            {archiveOn
+              ? "The archived record is too sparse for a trend line."
+              : "A trend line appears automatically once a second sync snapshot has been recorded."}
           </CardDescription>
         </CardHeader>
+        {archive?.available && <CardContent className="pb-4"><ArchiveSwitch archive={archive} /></CardContent>}
       </Card>
     );
   }
 
-  const colorFor = (code: string) => SUBJECT_COLORS[subjects.findIndex((s) => s.code === code) % SUBJECT_COLORS.length];
+  const colorFor = (code: string) => {
+    const idx = availableCodes.indexOf(code);
+    return idx >= 0
+      ? SUBJECT_COLORS[idx % SUBJECT_COLORS.length]
+      : SUBJECT_COLORS[subjects.findIndex((s) => s.code === code) % SUBJECT_COLORS.length];
+  };
   const first = history.overall[0]?.percentage ?? 0;
   const last = history.overall[history.overall.length - 1]?.percentage ?? 0;
   const delta = last - first;
@@ -261,12 +350,16 @@ export function TrendSection({
   };
 
   return (
-    <Card className="overflow-hidden rounded-xl border-border/60">
+    <Card className={cn("overflow-hidden rounded-xl", archiveOn ? "border-amber-500/25" : "border-border/60")}>
       <CardHeader className="flex flex-col gap-3 pb-2 sm:flex-row sm:items-start sm:justify-between">
         <div>
           <CardTitle className="flex items-center gap-2 text-base tracking-tight">
-            <Activity className="size-4 text-emerald-500" aria-hidden="true" />
-            Attendance trend
+            {archiveOn ? (
+              <Archive className="size-4 text-amber-600 dark:text-amber-400" aria-hidden="true" />
+            ) : (
+              <Activity className="size-4 text-emerald-500" aria-hidden="true" />
+            )}
+            {archiveOn ? "Archived term" : "Attendance trend"}
             <span
               className={cn(
                 "rounded-full px-2 py-0.5 text-[11px] font-semibold tabular-nums",
@@ -277,10 +370,13 @@ export function TrendSection({
             </span>
           </CardTitle>
           <CardDescription className="text-xs">
-            Overall {last.toFixed(2)}% · {singleSubject ? `${singleSubject.code} target ${singleSubject.targetPct}%${singleSubject.hasCustomTarget ? " (custom)" : ""}` : `target ${target}%`} · from sync snapshots
+            {archiveOn
+              ? archive?.subtitle ?? "Removed subjects' recorded history, before the term rollover."
+              : `Overall ${last.toFixed(2)}% · ${singleSubject ? `${singleSubject.code} target ${singleSubject.targetPct}%${singleSubject.hasCustomTarget ? " (custom)" : ""}` : `target ${target}%`} · from sync snapshots`}
           </CardDescription>
         </div>
         <div className="flex flex-wrap items-center gap-1.5">
+          {archive?.available && <ArchiveSwitch archive={archive} />}
           {[7, 14, 30].map((d) => (
             <button
               key={d}
@@ -297,6 +393,21 @@ export function TrendSection({
               {d}d
             </button>
           ))}
+          {archiveOn && (
+            <button
+              type="button"
+              onClick={() => setRangeDays(3650)}
+              className={cn(
+                "rounded-md border px-2 py-1 text-[11px] font-medium transition-colors",
+                rangeDays >= 3650
+                  ? "border-primary/40 bg-primary/10 text-primary"
+                  : "border-border/60 text-muted-foreground hover:bg-muted/60"
+              )}
+              aria-pressed={rangeDays >= 3650}
+            >
+              All
+            </button>
+          )}
           {focusDay != null && (
             <span className="inline-flex items-center gap-1 rounded-md border border-primary/40 bg-primary/10 px-2 py-1 text-[11px] font-medium text-primary">
               <CalendarCheck className="size-3" aria-hidden="true" />
@@ -319,37 +430,44 @@ export function TrendSection({
         <div className="flex flex-wrap gap-1.5">
           <button
             type="button"
-            onClick={() => setSelected((prev) => (prev.length === subjects.length ? [] : subjects.map((s) => s.code)))}
+            onClick={() =>
+              setSelected((prev) => (prev.length === availableCodes.length ? [] : [...availableCodes]))
+            }
             className={cn(
               "rounded-full border px-2.5 py-1 text-[11px] font-medium transition-colors",
-              selected.length === subjects.length
+              selected.length === availableCodes.length
                 ? "border-emerald-500/40 bg-emerald-500/10 text-emerald-700 dark:text-emerald-400"
                 : "border-border/60 text-muted-foreground hover:bg-muted/60"
             )}
           >
-            All subjects
+            {archiveOn ? "All archived" : "All subjects"}
           </button>
-          {subjects.map((s) => {
-            const active = selected.includes(s.code);
+          {availableCodes.map((code) => {
+            const active = selected.includes(code);
             return (
               <button
-                key={s.code}
+                key={code}
                 type="button"
                 onClick={() =>
-                  setSelected((prev) => (prev.includes(s.code) ? prev.filter((c) => c !== s.code) : [...prev, s.code]))
+                  setSelected((prev) => (prev.includes(code) ? prev.filter((c) => c !== code) : [...prev, code]))
                 }
                 className={cn(
                   "flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-[11px] font-medium transition-colors",
                   active ? "border-border bg-muted/70" : "border-border/50 text-muted-foreground hover:bg-muted/40"
                 )}
                 aria-pressed={active}
+                title={
+                  archiveOn
+                    ? "Removed from the ERP at the term rollover — archived history"
+                    : undefined
+                }
               >
                 <span
                   className="size-2 rounded-full"
-                  style={{ backgroundColor: active ? colorFor(s.code) : "var(--muted-foreground)" }}
+                  style={{ backgroundColor: active ? colorFor(code) : "var(--muted-foreground)" }}
                   aria-hidden="true"
                 />
-                {s.code}
+                {code}
               </button>
             );
           })}
