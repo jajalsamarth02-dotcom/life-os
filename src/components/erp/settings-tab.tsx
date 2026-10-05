@@ -61,7 +61,14 @@ import {
   waPairFallbackText,
 } from "@/lib/wa-pair";
 import { isIOS, promptInstall, useCanInstall, useIsInstalled } from "./install-prompt";
+import { QrReveal } from "./qr-reveal";
 import { compactErrorText } from "@/lib/compact-error";
+import {
+  QR_CAPTIONS,
+  buildWebcalUrl,
+  qrPayloadForCalendar,
+  qrPayloadFromLink,
+} from "@/lib/qr-pair";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -1888,6 +1895,16 @@ function DataBackupCard() {
                   )}
                 </button>
               </div>
+              {/* Scan-to-adopt (r112) — the iPhone twin swaps in a webcal://
+                 payload, which the iOS camera turns into a subscribe sheet. */}
+              <QrReveal
+                payload={qrPayloadForCalendar(calUrl)}
+                caption={QR_CAPTIONS.calendar}
+                webcalPayload={buildWebcalUrl(calUrl)}
+                webcalCaption={QR_CAPTIONS.calendarWebcal}
+                label="Scan to subscribe on your phone"
+                alt="QR code of the calendar subscription link — scan it with your phone's camera"
+              />
               <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-[10px] leading-snug text-muted-foreground">
                 <span className="min-w-0">
                   Your calendar app re-fetches this URL on its own schedule — moved deadlines update in place
@@ -2444,6 +2461,13 @@ function WaRepairDialog({
                 Enter a valid international bot number to continue
               </div>
             )}
+            {/* Scan-to-adopt (r112) — the same wa.me deep link, camera-delivered
+               to the phone when this browser is a desktop. */}
+            <QrReveal
+              payload={qrPayloadFromLink(pairLink)}
+              caption={QR_CAPTIONS.wa}
+              alt="QR code of the WhatsApp activation link — scan it with your phone's camera"
+            />
             <Button
               variant="ghost"
               size="sm"
@@ -3207,6 +3231,13 @@ function NtfySetupDialog({
                 No app yet? Subscribe in the web app
               </a>
             )}
+            {/* Scan-to-adopt (r112) — the topic's web link, camera-delivered
+               to the phone; the web link scans universally (https). */}
+            <QrReveal
+              payload={qrPayloadFromLink(webLink)}
+              caption={QR_CAPTIONS.ntfy}
+              alt="QR code of the ntfy topic page link — scan it with your phone's camera"
+            />
 
             {/* Self-hosted server — collapsed unless a repair restored one */}
             <div>
