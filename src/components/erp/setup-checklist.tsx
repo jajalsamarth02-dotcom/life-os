@@ -233,7 +233,10 @@ export function SetupChecklist({ onOpenStep }: { onOpenStep?: (f: SettingsFocus)
               : h.atLabel
                 ? `${h.detail} (${h.atLabel})`
                 : h.detail,
-        target: "notify",
+        /* r110 care chain: a REJECTED key jumps straight INTO the repair
+           wizard (Settings scrolls there AND opens it) — the row was already
+           honest about the failure; now it lands one tap from the fix. */
+        target: h.verdict === "failing" || h.verdict === "unconfigured" ? "wa-repair" : "notify",
         icon: MessageCircle,
         chipClass: "bg-emerald-500/10 text-emerald-600 dark:text-emerald-400",
       });

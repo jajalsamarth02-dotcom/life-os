@@ -2639,7 +2639,7 @@ function WaRepairDialog({
   );
 }
 
-function WhatsAppCard() {
+function WhatsAppCard({ autoOpenRepairNonce = 0 }: { autoOpenRepairNonce?: number } = {}) {
   const qc = useQueryClient();
   const { data: status } = useQuery({ queryKey: qk.waStatus, queryFn: fetchWaStatus });
   const [phone, setPhone] = useState("");
@@ -2647,6 +2647,14 @@ function WhatsAppCard() {
   const [repairOpen, setRepairOpen] = useState(false);
   const [digestTime, setDigestTime] = useState("");
   const [busy, setBusy] = useState<null | "save" | "test" | "digest" | "time" | "clearTime">(null);
+
+  /* r110 care chain: a deep-link (dashboard checklist row / palette care
+     command) lands INSIDE the wizard. Nonce-driven so the same deep-link
+     arriving twice re-opens each time; the wizard's own per-open reset
+     keeps the state fresh. */
+  useEffect(() => {
+    if (autoOpenRepairNonce > 0) setRepairOpen(true);
+  }, [autoOpenRepairNonce]);
 
   const refresh = () => qc.invalidateQueries({ queryKey: qk.waStatus });
 
@@ -3254,10 +3262,13 @@ function NtfyCard() {
 
 /* ------------------------------------------------------------------ */
 
-/** Deep-link targets the dashboard's setup checklist can spotlight:
- *  "notify" = the WhatsApp/ntfy channel grid, "backup" = data & backups
- *  (which hosts the calendar subscription block). */
-export type SettingsFocus = "notify" | "backup";
+/** Deep-link targets the dashboard's setup checklist and the palette's care
+ *  group can spotlight: "notify" = the WhatsApp/ntfy channel grid, "backup"
+ *  = data & backups (which hosts the calendar subscription block), and
+ *  "wa-repair" = the channel grid PLUS the repair wizard opened for you
+ *  (r110 — the care chain: dashboard row / palette command lands INSIDE the
+ *  wizard, not one button short of it). */
+export type SettingsFocus = "notify" | "backup" | "wa-repair";
 
 export function SettingsTab({
   focus,
@@ -3280,12 +3291,16 @@ export function SettingsTab({
   const backupRef = useRef<HTMLDivElement | null>(null);
   const [spotlight, setSpotlight] = useState<SettingsFocus | null>(null);
   const spotTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  /* r110: a "wa-repair" focus lands INSIDE the wizard. A nonce (not a boolean)
+     so the SAME focus arriving twice re-opens the wizard each time. */
+  const [repairNonce, setRepairNonce] = useState(0);
   React.useEffect(() => {
     if (!focus) return;
     onConsumeFocus?.();
-    const el = focus === "notify" ? notifyRef.current : backupRef.current;
+    const el = focus === "backup" ? backupRef.current : notifyRef.current;
     el?.scrollIntoView({ behavior: "smooth", block: "center" });
     setSpotlight(focus);
+    if (focus === "wa-repair") setRepairNonce((n) => n + 1);
     if (spotTimer.current) clearTimeout(spotTimer.current);
     spotTimer.current = setTimeout(() => setSpotlight(null), 2800);
   }, [focus, onConsumeFocus]);
@@ -3308,10 +3323,10 @@ export function SettingsTab({
       <NotificationPrefsCard />
       <div
         ref={notifyRef}
-        className={spotClass(spotlight === "notify")}
+        className={spotClass(spotlight === "notify" || spotlight === "wa-repair")}
       >
         <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
-          <WhatsAppCard />
+          <WhatsAppCard autoOpenRepairNonce={repairNonce} />
           <NtfyCard />
         </div>
       </div>

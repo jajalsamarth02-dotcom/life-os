@@ -11,6 +11,8 @@
  *   buildWaPairLink        — the one-tap wa.me deep link (chat + prefilled text)
  *   waPairFallbackText     — the clipboard fallback when WhatsApp is not on the device
  *   extractApikeyFromReply — paste the bot's WHOLE reply, get the key out of it
+ *   resolveWaSaveInput     — the save payload rulebook (repair keeps the saved phone)
+ *   waCareAction           — which care affordance a health verdict offers (r110)
  *
  * Boundaries (deliberate):
  *  - The activation number is EDITABLE at every call site. CallMeBot has
@@ -23,6 +25,8 @@
  *    wizard still asks before saving and before test-sending (spec: no
  *    automatic sends, ever).
  */
+
+import type { NotifyHealth } from "@/lib/notify-health";
 
 /** Most widely documented CallMeBot WhatsApp activation number (Oct 2026). */
 export const CALLMEBOT_DEFAULT_ACTIVATE_DIGITS = "34621331709";
@@ -128,4 +132,43 @@ export function resolveWaSaveInput(input: {
   const saved = normalizeWaDigits(input.existingPhone ?? "");
   if (!saved) throw new Error("Phone is required the first time — add your WhatsApp number.");
   return { phone: saved, apikey };
+}
+
+/* ---------- care routing (r110) ---------- */
+
+/**
+ * What the app should OFFER for the WhatsApp channel, derived from the ONE
+ * health verdict (parseNotifyHealth — the r106 single-verdict rule). The
+ * palette's care group and any future care surface consume this instead of
+ * re-deciding:
+ *
+ *   failing      → "repair" — the wizard (fresh pairing fixes a rejected key)
+ *   unconfigured → "setup"  — the SAME wizard (guided setup IS the repair)
+ *   unverified   → "verify" — the Settings card's Send test (no wizard; the
+ *                  pair may be fine, only a send can say so)
+ *   saved-off    → "none"   — configured but deliberately off; respect it
+ *   live         → "none"   — nothing to care for
+ *
+ * NEVER adds a "send" kind: the palette launches surfaces, it never fires
+ * messages (the Settings test button stays the ONE send affordance).
+ */
+export type WaCareAction =
+  | { kind: "repair"; label: string; focus: "wa-repair" }
+  | { kind: "setup"; label: string; focus: "wa-repair" }
+  | { kind: "verify"; label: string; focus: "notify" }
+  | { kind: "none"; label: null; focus: null };
+
+export function waCareAction(verdict: NotifyHealth["verdict"]): WaCareAction {
+  switch (verdict) {
+    case "failing":
+      return { kind: "repair", label: "Repair the WhatsApp pairing", focus: "wa-repair" };
+    case "unconfigured":
+      return { kind: "setup", label: "Set up WhatsApp alerts — guided", focus: "wa-repair" };
+    case "unverified":
+      return { kind: "verify", label: "Verify the WhatsApp pairing — send a test", focus: "notify" };
+    case "saved-off":
+    case "live":
+    default:
+      return { kind: "none", label: null, focus: null };
+  }
 }

@@ -474,6 +474,7 @@ export default function Home() {
         subjects={data?.subjects}
         semester={data?.semester}
         onOpenSettingsFocus={openSettingsFocus}
+        onOpenHousekeeping={openHousekeeping}
       />
 
       <footer className="relative mt-auto border-t border-border/60 bg-card/50 print:hidden">

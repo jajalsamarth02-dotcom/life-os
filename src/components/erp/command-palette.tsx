@@ -11,6 +11,7 @@ import {
   AlertTriangle,
   ArrowRight,
   BarChart3,
+  Bell,
   CalendarClock,
   CalendarDays,
   CalendarPlus,
@@ -19,11 +20,13 @@ import {
   ExternalLink,
   Flag,
   FlaskConical,
+  Ghost,
   GraduationCap,
   History,
   Keyboard,
   LayoutDashboard,
   ListFilter,
+  MonitorSmartphone,
   Moon,
   Printer,
   RefreshCw,
@@ -32,6 +35,7 @@ import {
   Sun,
   Target,
   Timer,
+  Wrench,
   Zap,
 } from "lucide-react";
 import {
@@ -46,7 +50,19 @@ import {
 } from "@/components/ui/command";
 import { cn } from "@/lib/utils";
 import { cycleTextSize, TEXT_SIZES } from "@/lib/text-size";
-import { fetchAlaNotes, fetchAssignments, fetchResults, fetchReminders, fetchTimetable, postDemoEvolve, postSync, putSelectedSemester, qk, type RetryFocusHandoff, type SubjectFocusHandoff } from "./api";
+import { fetchAlaNotes, fetchAssignments, fetchResults, fetchReminders, fetchTimetable, fetchWaStatus, postDemoEvolve, postSync, putSelectedSemester, qk, type RetryFocusHandoff, type SubjectFocusHandoff } from "./api";
+import {
+  isSupported as browserRemindersSupported,
+  isEnabled as browserRemindersEnabled,
+  permissionState as browserRemindersPermission,
+  requestPermission as requestBrowserRemindersPermission,
+  setEnabled as setBrowserRemindersEnabled,
+  type PermissionState,
+} from "@/lib/browser-reminders";
+import { buildHousekeepingNudgeSummary, buildHousekeepingPlan } from "@/lib/reminder-hygiene";
+import { parseNotifyHealth } from "@/lib/notify-health";
+import { waCareAction } from "@/lib/wa-pair";
+import { promptInstall, useCanInstall, useIsInstalled } from "./install-prompt";
 import { subjectStories } from "@/lib/results-summary";
 import { buildSingleClassIcs, upcomingClassSlots } from "./ics";
 import { downloadTextFile } from "./download";
@@ -95,6 +111,10 @@ interface CommandPaletteProps {
    *  "export the calendar" action (Settings stays the ONE export surface;
    *  the palette only launches it, never re-builds the file). */
   onOpenSettingsFocus: (focus: SettingsFocus) => void;
+  /** r110 care group: open the one-pass housekeeping sweep (the same
+   *  consume-once jump the dashboard nudge uses — pendingCleanup →
+   *  Reminders → dialog opens pre-fed with the ALA feed). */
+  onOpenHousekeeping: () => void;
 }
 
 /**
@@ -112,6 +132,7 @@ export function CommandPalette({
   subjects,
   semester = "all",
   onOpenSettingsFocus,
+  onOpenHousekeeping,
 }: CommandPaletteProps) {
   const queryClient = useQueryClient();
   const { resolvedTheme, setTheme } = useTheme();
@@ -191,6 +212,60 @@ export function CommandPalette({
   /* Deadline launcher — joins the shared assignments query cache (already
      polled by the ALA section and the app badge), so it costs no extra fetch. */
   const assignmentsQ = useQuery({ queryKey: qk.assignments, queryFn: fetchAssignments, staleTime: 15_000 });
+
+  /* ---------- r110 CARE CENTER — the repair affordances, one group, anywhere ---------- */
+
+  /* WhatsApp verdict: the single-rulebook consumption (parseNotifyHealth →
+     waCareAction). Joins the cached wa-status query; cold cache fetches once
+     (15s staleTime), then it rides the same cache as the checklist + card. */
+  const waQ = useQuery({ queryKey: qk.waStatus, queryFn: fetchWaStatus, staleTime: 15_000 });
+  const waHealth = React.useMemo(() => {
+    const s = waQ.data;
+    if (!s) return null;
+    return parseNotifyHealth({
+      enabled: s.enabled,
+      configured: s.configured,
+      lastResult: s.lastResult,
+      nowMs: Date.now(),
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [waQ.data]);
+  const waCare = React.useMemo(() => (waHealth ? waCareAction(waHealth.verdict) : null), [waHealth]);
+
+  /* Sweep noise count: the SAME rulebook as the dashboard nudge and the
+     sweep dialog (r108 convention — no surface re-derives housekeeping
+     numbers). Clock pinned per data version (r107 lesson). */
+  const carePlan = React.useMemo(
+    () => (assignmentsQ.data?.assignments ? buildHousekeepingPlan(assignmentsQ.data.assignments, Date.now()) : null),
+    [assignmentsQ.data]
+  );
+  const careSummary = React.useMemo(
+    () => (carePlan ? buildHousekeepingNudgeSummary(carePlan) : null),
+    [carePlan]
+  );
+  const careNoiseCount = careSummary ? careSummary.staleCount + careSummary.ghostCount : 0;
+
+  const canInstallNow = useCanInstall();
+  const alreadyInstalled = useIsInstalled();
+
+  const enableBrowserAlerts = async () => {
+    const result: PermissionState = await requestBrowserRemindersPermission();
+    if (result === "granted") {
+      setBrowserRemindersEnabled(true);
+      toast.success("Browser due-alerts enabled", {
+        description: "A system alert fires when a reminder becomes due — even in a background tab.",
+      });
+    } else if (result === "denied") {
+      toast.error("Permission denied", {
+        description: "Your browser blocked notifications — unblock this site in the address-bar settings to use due-alerts.",
+      });
+    } else {
+      toast.info("Due-alerts unavailable", {
+        description: "This browser doesn't support system notifications — WhatsApp or ntfy cover you instead.",
+      });
+    }
+  };
+
   /* Retry-story launcher — READ-ONLY cache join (enabled:false never fetches):
      it sees whatever the dashboard's results card already loaded. Cold or
      garbage-collected cache → undefined → the group simply stays hidden.
@@ -436,6 +511,77 @@ export function CommandPalette({
     { tab: "reminders" as const, label: "Reminders", icon: CalendarClock, kbd: "3" },
     { tab: "settings" as const, label: "Settings", icon: SettingsIcon, kbd: "4" },
   ];
+
+  /* r110 Care center — every repair/care affordance launchable from ANYWHERE.
+     One array so the group renders (and is capped) uniformly; each entry's
+     `value` is BOTH the scored key and the rendered value prop (the r102
+     contract: what is scored is exactly what is shown). */
+  interface CareItem {
+    value: string;
+    icon: typeof Wrench;
+    label: string;
+    badge?: string;
+    badgeClass?: string;
+    onSelect: () => void;
+  }
+  const careItems: CareItem[] = [];
+  if (waCare && waCare.kind !== "none") {
+    careItems.push({
+      value: `${waCare.label} whatsapp callmebot pairing apikey alerts channel broken failed setup repair verify`,
+      icon: waCare.kind === "verify" ? Bell : Wrench,
+      label: waCare.label,
+      badge: waCare.kind === "repair" ? "fix" : undefined,
+      badgeClass: "border-amber-500/40 bg-amber-500/10 text-amber-600 dark:text-amber-400",
+      onSelect: () => run(() => onOpenSettingsFocus(waCare.focus)),
+    });
+  }
+  if (careNoiseCount > 0) {
+    careItems.push({
+      value: `sweep the ala wall clean up ${careNoiseCount} noise rows overdue duplicate ghosts dismiss housekeeping reminders one pass`,
+      icon: Ghost,
+      label: `Sweep the ALA wall — ${careNoiseCount} noise ${careNoiseCount === 1 ? "row" : "rows"} pre-checked`,
+      badge: "1 pass",
+      badgeClass: "border-amber-500/40 bg-amber-500/10 text-amber-600 dark:text-amber-400",
+      onSelect: () => run(onOpenHousekeeping),
+    });
+  }
+  if (
+    browserRemindersSupported() &&
+    (browserRemindersPermission() !== "granted" || !browserRemindersEnabled())
+  ) {
+    careItems.push({
+      value: "enable browser due alerts notifications permission system reminder alarm background tab",
+      icon: Bell,
+      label: "Enable browser due-alerts",
+      onSelect: () => run(() => void enableBrowserAlerts()),
+    });
+  }
+  if (canInstallNow && !alreadyInstalled) {
+    careItems.push({
+      value: "install app pwa home screen standalone add to homescreen offline own window",
+      icon: MonitorSmartphone,
+      label: "Install ERP Sync as an app",
+      badge: "PWA",
+      badgeClass: "border-violet-500/40 bg-violet-500/10 text-violet-600 dark:text-violet-400",
+      onSelect: () =>
+        run(async () => {
+          const res = await promptInstall();
+          if (res === "accepted") {
+            toast.success("Installing ERP Sync…", {
+              description: "Own window, home-screen icon, faster launches.",
+            });
+          } else if (res === "dismissed") {
+            toast.info("Install dismissed", {
+              description: "You can install any time from this palette or Settings.",
+            });
+          } else {
+            toast.info("Install unavailable right now", {
+              description: "Use your browser menu → “Add to Home screen” / “Install”.",
+            });
+          }
+        }),
+    });
+  }
 
   return (
     <CommandDialog open={open} onOpenChange={onOpenChange}>
@@ -939,6 +1085,30 @@ export function CommandPalette({
             <CommandShortcut>?</CommandShortcut>
           </CommandItem>
         </CommandGroup>
+
+        {/* r110 Care center — the 11th palette group; rankedCap from birth
+            (the census rule). Every entry launches a surface; none sends. */}
+        {careItems.length > 0 && (
+          <CommandGroup heading="Care center">
+            {rankedCap(careItems, (i) => i.value, 6, paletteSearch).map((item) => (
+              <CommandItem key={item.value} value={item.value} onSelect={item.onSelect}>
+                <item.icon className="size-4 shrink-0 text-muted-foreground" aria-hidden="true" />
+                <span>{item.label}</span>
+                {item.badge && (
+                  <span
+                    className={cn(
+                      "ml-auto rounded border px-1 font-mono text-[10px] font-semibold",
+                      item.badgeClass ?? "border-border/60 text-muted-foreground"
+                    )}
+                    aria-hidden="true"
+                  >
+                    {item.badge}
+                  </span>
+                )}
+              </CommandItem>
+            ))}
+          </CommandGroup>
+        )}
 
         <CommandGroup heading="ERP portal · opens in a new tab">
           {[
