@@ -527,12 +527,21 @@ export function MiniBar({
   target?: number;
 }) {
   const c = statusColors(status);
+  /* r113 — status gradients replace the flat fills (shimmer keeps the flat
+     color so the sweep highlight stays uniform while syncing). */
+  const GRADIENTS: Record<AttendanceStatus, string> = {
+    safe: "bg-gradient-to-r from-emerald-600 to-emerald-400",
+    warning: "bg-gradient-to-r from-amber-600 to-amber-400",
+    danger: "bg-gradient-to-r from-red-600 to-red-400",
+    none: "bg-muted-foreground/40",
+  };
+  const fill = shimmer ? c.bar : GRADIENTS[status];
   const showTick =
     typeof target === "number" && target > 0 && target > percentage && target < 100;
   return (
     <div className={cn("relative h-2 w-full overflow-hidden rounded-full bg-muted", className)}>
       <motion.div
-        className={cn("h-full rounded-full", c.bar, shimmer && "erp-shimmer")}
+        className={cn("h-full rounded-full", fill, shimmer && "erp-shimmer")}
         initial={{ width: 0 }}
         animate={{ width: `${Math.max(0, Math.min(100, percentage))}%` }}
         transition={{ duration: 0.6, ease: [0.22, 1, 0.36, 1] }}

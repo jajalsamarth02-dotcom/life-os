@@ -3,13 +3,14 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { motion } from "framer-motion";
-import { GraduationCap, Inbox, PanelRightOpen, Target, TrendingUp, Users, XCircle, Zap } from "lucide-react";
+import { GraduationCap, Inbox, PanelRightOpen, Sprout, Target, TrendingUp, Users, XCircle, Zap } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Slider } from "@/components/ui/slider";
 import { cn } from "@/lib/utils";
 import { attendanceStatus, classesToReachTarget } from "@/lib/attendance";
+import { earlyTermBadge } from "@/lib/term-pulse";
 import { fetchAssignments, fetchAttendance, fetchHistory, qk, type SubjectFocusHandoff } from "./api";
 import { HistoryHeatmap } from "./history-heatmap";
 import { RecoveryPlan } from "./recovery-plan";
@@ -272,6 +273,19 @@ function SubjectCard({
           <div className="flex flex-wrap items-center gap-2">
             <StatusChip status={s.status} target={s.targetPct} />
             {s.hasCustomTarget && <CustomTargetChip target={s.targetPct} />}
+            {(() => {
+              const etb = earlyTermBadge(s);
+              return etb ? (
+                <Badge
+                  variant="outline"
+                  className="gap-1 border-border text-muted-foreground"
+                  title={etb.title}
+                >
+                  <Sprout className="size-3 text-emerald-600 dark:text-emerald-400" aria-hidden="true" />
+                  {etb.text}
+                </Badge>
+              ) : null;
+            })()}
             {safe ? (
               s.canSkip > 0 ? (
                 <Badge variant="outline" className="gap-1.5 border-emerald-500/30 text-emerald-700 dark:text-emerald-400">

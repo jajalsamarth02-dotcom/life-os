@@ -32,6 +32,7 @@ import {
   Brush,
   Ghost,
   CalendarX2,
+  Sprout,
 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -85,6 +86,13 @@ import {
   SkipPips,
   type SubjectAlaStat,
 } from "./shared";
+import {
+  overallSampleNote,
+  sampleChipText,
+  sampleTitle,
+  termPulseVerdict,
+  type TermPulseTone,
+} from "@/lib/term-pulse";
 import type { AlaNoteRow, AlaUpcomingRow, ChangeEvent, HistoryPoint, Reminder, SubjectView } from "./types";
 import { ALA_PRIORITY_META, alaPriorityOf } from "./reminders-tab";
 import type { SettingsFocus } from "./settings-tab";
@@ -970,6 +978,39 @@ function ChangeRow({ c, onOpen }: { c: ChangeEvent; onOpen?: (code: string) => v
 
 /* ------------------------------------------------------------------ */
 
+/* r113 — the early-term lens strip: one quiet sentence beside the stat row
+   while samples are small; retires itself (renders nothing) once every
+   graded subject reaches 10 classes. Context only — the status chips and
+   recovery math above stay untouched. */
+function TermPulseStrip({ headline, tone }: { headline: string; tone: TermPulseTone }) {
+  return (
+    <div
+      role="note"
+      aria-label="Early-term sample size note"
+      className={cn(
+        "flex items-start gap-2 rounded-lg border px-3 py-2 text-xs leading-snug",
+        tone === "amber"
+          ? "border-amber-500/30 bg-gradient-to-r from-amber-500/10 via-amber-500/5 to-transparent text-amber-800 dark:text-amber-200/90"
+          : "border-border/60 bg-muted/40 text-muted-foreground"
+      )}
+    >
+      <Sprout
+        className={cn(
+          "mt-0.5 size-3.5 shrink-0",
+          tone === "amber" ? "text-amber-600 dark:text-amber-400" : "text-emerald-600 dark:text-emerald-400"
+        )}
+        aria-hidden="true"
+      />
+      <p>
+        {headline}{" "}
+        <span className={"text-muted-foreground/80"}>
+          The status chips and recovery math stay exact — this note just sizes the sample.
+        </span>
+      </p>
+    </div>
+  );
+}
+
 function SubjectRow({
   s,
   onOpen,
@@ -992,7 +1033,10 @@ function SubjectRow({
       type="button"
       onClick={onOpen}
       className={cn(
-        "flex w-full items-center gap-3 rounded-lg border border-border/50 p-3 text-left transition-all hover:border-primary/40 hover:bg-muted/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+        "flex w-full items-center gap-3 rounded-lg border p-3 text-left transition-all duration-200 hover:-translate-y-px hover:bg-muted/40 hover:shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+        s.status === "danger"
+          ? "border-red-500/25 hover:border-red-500/50" /* r113 — quiet danger accent, no alarm */
+          : "border-border/50 hover:border-primary/40",
         s.status === "none" && "border-dashed bg-muted/20"
       )}
       aria-label={`Open attendance details for ${s.name}${
@@ -1047,6 +1091,15 @@ function SubjectRow({
             </span>
           )}
           {s.hasCustomTarget && <CustomTargetChip target={s.targetPct} className="shrink-0" />}
+          {sampleChipText(s.total) && (
+            <span
+              className="hidden shrink-0 items-center gap-1 rounded-full border border-border bg-muted/50 px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground sm:inline-flex"
+              title={sampleTitle(s.total) ?? undefined}
+            >
+              <Sprout className="size-2.5 text-emerald-600 dark:text-emerald-400" aria-hidden="true" />
+              {sampleChipText(s.total)}
+            </span>
+          )}
           <AlaStatChip stat={alaStat} className="ml-auto" />
         </div>
       </div>
@@ -1526,6 +1579,11 @@ export function DashboardTab({
     .filter((s) => s.status !== "none" && s.percentage < s.targetPct)
     .sort((a, b) => a.percentage - b.percentage)[0];
   const compTotal = Math.max(subjects.length, 1);
+  /* r113 — the early-term lens: sample-size context for a term that just
+     rolled over (same polled payload, zero extra fetches). */
+  const pulse = termPulseVerdict(subjects);
+  const overallNote = overallSampleNote(overall.total);
+  const worstSampleTitle = worst ? sampleTitle(worst.total) : null;
 
   if (mode === "none") {
     return (
@@ -1741,6 +1799,12 @@ export function DashboardTab({
                     {overall.canSkip === 1 ? "class" : "classes"} and stay above {target}%
                   </p>
                 )}
+                {overallNote && (
+                  <p className="text-muted-foreground" title={sampleTitle(overall.total) ?? undefined}>
+                    <Sprout className="mr-1 inline size-3.5 shrink-0 align-[-3px] text-emerald-600 dark:text-emerald-400" aria-hidden="true" />
+                    {overallNote}
+                  </p>
+                )}
               </div>
             </div>
           </CardContent>
@@ -1832,6 +1896,12 @@ export function DashboardTab({
                   <span>recover by attending upcoming classes</span>
                 )}
               </p>
+              {worstSampleTitle && (
+                <p className="flex items-start gap-1 text-[11px] leading-tight text-muted-foreground">
+                  <Sprout className="mt-px size-3 shrink-0 text-emerald-600 dark:text-emerald-400" aria-hidden="true" />
+                  {worstSampleTitle}
+                </p>
+              )}
             </div>
           ) : (
             <p className="flex items-center gap-1 text-[11px] leading-tight text-emerald-600 dark:text-emerald-400">
@@ -1867,6 +1937,10 @@ export function DashboardTab({
           </p>
         </StatCard>
       </motion.div>
+
+      {/* r113 — early-term lens: sample-size context while the term is young.
+          Renders nothing once every graded subject reaches 10 classes. */}
+      {pulse.headline && <TermPulseStrip headline={pulse.headline} tone={pulse.tone ?? "muted"} />}
 
       {/* r108 — housekeeping nudge: the dashboard's one honest tap into the
           sweep (numbers from the same rulebook as the dialog; dismissible
