@@ -18,6 +18,7 @@ import { decryptSecret, encryptSecret } from "@/lib/crypto";
 import { pruneSnapshots, recordSnapshots } from "@/lib/sync/history";
 import { maybeAutoNotify } from "@/lib/notify/whatsapp";
 import { maybeNtfyAutoNotify } from "@/lib/notify/ntfy";
+import { nextAssignmentStatus } from "@/lib/reminder-hygiene";
 
 /**
  * SYNC ENGINE
@@ -466,7 +467,6 @@ async function applySnapshot(snapshot: ErpSnapshot, settings: AppSettings): Prom
       const externalId = `${ASSIGNMENT_EXT_PREFIX}${a.externalId}`;
       seenAssign.add(externalId);
       const completed = isSubmissionComplete(a.submissionStatus, a.approvalStatus);
-      const status = completed ? "DONE" : "ACTIVE";
       // Date-only from the ERP → store mid-day UTC so the calendar date is
       // displayed identically in any timezone and the item only turns overdue
       // late on the last date.
@@ -480,6 +480,10 @@ async function applySnapshot(snapshot: ErpSnapshot, settings: AppSettings): Prom
       const description = descriptionBits.join(" · ");
 
       const existing = await db.reminder.findUnique({ where: { externalId } });
+      // r107: route the status through the hygiene rulebook — a DISMISSED row
+      // stays dismissed until the ERP itself reports completion (a quiet
+      // "back to Pending" on the ERP must not resurrect a swept ghost).
+      const status = nextAssignmentStatus(existing?.status ?? "ACTIVE", completed);
       if (!existing) {
         await db.reminder.create({
           data: {

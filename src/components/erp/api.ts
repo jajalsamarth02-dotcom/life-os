@@ -275,6 +275,21 @@ export const snoozeReminder = (id: string, dueAt: string) =>
     body: JSON.stringify({ dueAt }),
   });
 
+/** The r107 housekeeping sweep: dismiss / mark done / delete in one call.
+ *  ERP rows can only be dismissed (sync-owned; delete would resurrect);
+ *  attendance warnings are refused server-side with a per-id reason. */
+export interface BulkRemindersResult {
+  changed: number;
+  perAction: { dismiss: number; done: number; delete: number };
+  skipped: { id: string; reason: string }[];
+}
+
+export const bulkReminders = (action: "dismiss" | "done" | "delete", ids: string[]) =>
+  api<BulkRemindersResult>("/api/reminders/bulk", {
+    method: "POST",
+    body: JSON.stringify({ action, ids }),
+  });
+
 /** Fetch the full JSON backup produced by GET /api/export. */
 export async function fetchBackup(): Promise<{ blob: Blob; filename: string }> {
   const res = await fetch("/api/export");

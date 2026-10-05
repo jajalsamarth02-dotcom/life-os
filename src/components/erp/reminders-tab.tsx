@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { motion } from "framer-motion";
 import {
@@ -13,6 +13,7 @@ import {
   CalendarDays,
   CalendarPlus,
   Check,
+  Brush,
   CheckCircle2,
   ChevronDown,
   ChevronLeft,
@@ -25,11 +26,13 @@ import {
   Download,
   ExternalLink,
   Flag,
+  Ghost,
   Link2,
   Loader2,
   Lock,
   Plus,
   Search,
+  ShieldCheck,
   StickyNote,
   Trash2,
   TriangleAlert,
@@ -39,6 +42,7 @@ import {
   XCircle,
 } from "lucide-react";
 import { toast } from "sonner";
+import { buildHousekeepingPlan } from "@/lib/reminder-hygiene";
 import { downloadRemindersIcs } from "@/lib/ics";
 import {
   AlertDialog,
@@ -98,6 +102,7 @@ import {
 } from "@/lib/browser-reminders";
 import {
   createReminder,
+  bulkReminders,
   deleteReminder,
   fetchAlaNotes,
   fetchAssignments,
@@ -1383,9 +1388,12 @@ async function copyText(text: string): Promise<boolean> {
 function AlaOverdueDigest({
   groups,
   onViewOverdue,
+  onCleanup,
 }: {
   groups: AlaGroup[];
   onViewOverdue: () => void;
+  /** r107: present when the ALA list is loaded — opens the housekeeping sweep. */
+  onCleanup?: () => void;
 }) {
   const [copied, setCopied] = useState(false);
   const now = useNow();
@@ -1462,6 +1470,18 @@ function AlaOverdueDigest({
         >
           View
         </Button>
+        {onCleanup && (
+          <Button
+            variant="outline"
+            size="sm"
+            className="h-7 gap-1 border-red-500/40 px-2.5 text-xs text-red-700 hover:bg-red-500/10 hover:text-red-800 dark:text-red-300 dark:hover:text-red-200 focus-visible:ring-red-500/50"
+            onClick={onCleanup}
+            aria-label="Open the housekeeping sweep for stale overdue and duplicate rows"
+          >
+            <Brush className="size-3" aria-hidden="true" />
+            Clean up
+          </Button>
+        )}
       </div>
     </motion.div>
   );
@@ -2139,6 +2159,10 @@ function AlaSection({
   });
 
   const qc = useQueryClient();
+  /* r107 housekeeping — one sweep entry for the ALA wall: the overdue digest
+     banner grows a "Clean up" button that opens the SAME dialog the timeline
+     uses, fed with the full assignment list (AssignmentRow = Reminder). */
+  const [cleanupOpen, setCleanupOpen] = useState(false);
   /* Local-only note/priority overlay (AlaNote table) — fetched separately so
      ERP sync refetches never churn it; keyed by the row's stable externalId. */
   const { data: alaNotes } = useQuery({
@@ -2819,7 +2843,11 @@ function AlaSection({
 
             {/* Overdue digest — collapses to nothing the moment any filter is active */}
             {!searching && dayOffset == null && (
-              <AlaOverdueDigest groups={groups} onViewOverdue={() => setStatus("overdue")} />
+              <AlaOverdueDigest
+                groups={groups}
+                onViewOverdue={() => setStatus("overdue")}
+                onCleanup={data ? () => setCleanupOpen(true) : undefined}
+              />
             )}
 
             {/* Deadline overviews — radar ↔ month calendar toggle; stays visible for the selected day */}
@@ -2880,6 +2908,9 @@ function AlaSection({
           </div>
         )}
       </CardContent>
+      {data && (
+        <HousekeepingDialog items={data.assignments} open={cleanupOpen} onOpenChange={setCleanupOpen} />
+      )}
     </Card>
   );
 }
@@ -2888,9 +2919,294 @@ function AlaSection({
 
 const GROUP_ORDER: DueGroup[] = ["overdue", "today", "tomorrow", "week", "later", "done"];
 
+/* ------------------------------------------------------------------ */
+/* r107 — Housekeeping: one dialog that sweeps the overdue graveyard    */
+/* and the ERP's re-issued duplicate rows, instead of N individual taps. */
+
+function hkOverdueLabel(dueAt: string, nowMs: number): string {
+  const days = Math.floor((nowMs - new Date(dueAt).getTime()) / 86_400_000);
+  if (days <= 0) return "overdue since today";
+  if (days === 1) return "1 day overdue";
+  return `${days} days overdue`;
+}
+
+function HousekeepingDialog({
+  items,
+  open,
+  onOpenChange,
+}: {
+  items: Reminder[];
+  open: boolean;
+  onOpenChange: (v: boolean) => void;
+}) {
+  const qc = useQueryClient();
+  /* Pin "now" at open time — NOT useNow(): the housekeeping clock must not
+     tick while the student reviews rows, or labels re-render every second
+     and the plan identity churns (which used to re-seed the selection). */
+  const [pinnedNowMs, setPinnedNowMs] = useState(0);
+  useEffect(() => {
+    if (open) setPinnedNowMs(Date.now());
+  }, [open]);
+  const plan = useMemo(
+    () => (open && pinnedNowMs ? buildHousekeepingPlan(items, pinnedNowMs) : null),
+    [items, pinnedNowMs, open]
+  );
+
+  const [selected, setSelected] = useState<Set<string>>(new Set());
+  /* One-shot seeding: pre-select the obvious sweep (stale ghosts + duplicate
+     ghosts) exactly once per open — a later plan refresh (refetch, not the
+     ticking clock now that it is pinned) must never clobber the student's
+     hand-toggled checkboxes. */
+  const seededRef = useRef(false);
+  useEffect(() => {
+    if (open) seededRef.current = false;
+  }, [open]);
+  useEffect(() => {
+    if (!open || !plan || seededRef.current) return;
+    seededRef.current = true;
+    const pre = new Set<string>();
+    for (const r of plan.staleOverdue) pre.add(r.id);
+    for (const g of plan.duplicateGroups) for (const ghost of g.ghosts) pre.add(ghost.id);
+    setSelected(pre);
+  }, [open, plan]);
+
+  const selectedIds = useMemo(() => [...selected], [selected]);
+  const selectedRows = useMemo(
+    () => items.filter((r) => selected.has(r.id)),
+    [items, selected]
+  );
+  const allPersonal = selectedRows.length > 0 && selectedRows.every((r) => r.source === "PERSONAL");
+  const hasSelection = selected.size > 0;
+
+  const toggle = (id: string) => {
+    setSelected((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  };
+
+  const sweep = useMutation({
+    mutationFn: (action: "dismiss" | "done" | "delete") => bulkReminders(action, selectedIds),
+    onSuccess: (res, action) => {
+      qc.invalidateQueries();
+      onOpenChange(false);
+      const verb = action === "delete" ? "deleted" : action === "done" ? "marked done" : "dismissed";
+      const skippedNote =
+        res.skipped.length > 0 ? ` · ${res.skipped.length} skipped (${res.skipped[0].reason})` : "";
+      toast.success(`${res.changed} reminder${res.changed === 1 ? "" : "s"} ${verb}`, {
+        description: `${res.changed} swept in one pass${skippedNote}`,
+      });
+    },
+    onError: (e) => {
+      const msg = e instanceof ApiError ? e.message : e.message;
+      toast.error("The sweep failed — nothing was changed", { description: msg });
+    },
+  });
+
+  if (!plan) return null;
+  const dupGhostIds = new Set(plan.duplicateGroups.flatMap((g) => g.ghosts.map((x) => x.id)));
+  const dupTotal = dupGhostIds.size;
+  const nothingToDo =
+    plan.staleOverdue.length === 0 && plan.recentOverdue.length === 0 && dupTotal === 0;
+
+  const rowShell = (r: Reminder, opts: { tone: "stale" | "recent" | "keep" | "ghost"; checked?: boolean }) => {
+    const checked = !!opts.checked;
+    const isKeep = opts.tone === "keep";
+    return (
+      <li
+        key={r.id}
+        className={cn(
+          "flex items-start gap-2.5 rounded-lg border p-2.5 transition-colors",
+          isKeep
+            ? "border-emerald-500/25 bg-emerald-500/[0.04]"
+            : checked
+              ? opts.tone === "ghost"
+                ? "border-amber-500/45 bg-amber-500/[0.05]"
+                : "border-red-500/45 bg-red-500/[0.05]"
+              : "border-border/50 hover:bg-muted/40"
+        )}
+      >
+        {!isKeep && (
+          <button
+            type="button"
+            role="checkbox"
+            aria-checked={checked}
+            aria-label={`Select ${r.title} for cleanup`}
+            disabled={sweep.isPending}
+            onClick={() => toggle(r.id)}
+            className={cn(
+              "mt-0.5 flex size-4.5 shrink-0 items-center justify-center rounded border transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+              checked
+                ? opts.tone === "ghost"
+                  ? "border-amber-500 bg-amber-500 text-white"
+                  : "border-red-500 bg-red-500 text-white"
+                : "border-muted-foreground/40 bg-background hover:border-foreground/60"
+            )}
+          >
+            {checked && <Check className="size-3" aria-hidden="true" />}
+          </button>
+        )}
+        <div className="min-w-0 flex-1">
+          <p className={cn("text-[13px] font-medium leading-snug", isKeep && "text-emerald-800 dark:text-emerald-300")}>
+            {r.title}
+          </p>
+          <p className="mt-0.5 flex flex-wrap items-center gap-x-2 gap-y-0.5 text-[11px] text-muted-foreground">
+            <span className="tabular-nums">{fmtDay(r.dueAt)}</span>
+            <span aria-hidden="true">·</span>
+            <span className="tabular-nums">{hkOverdueLabel(r.dueAt, pinnedNowMs)}</span>
+            {r.subjectName && (
+              <>
+                <span aria-hidden="true">·</span>
+                <span className="max-w-44 truncate">{r.subjectName}</span>
+              </>
+            )}
+          </p>
+        </div>
+        <div className="flex shrink-0 items-center gap-1">
+          {isKeep && (
+            <Badge className="gap-1 border-emerald-500/40 bg-emerald-500/10 text-[10px] text-emerald-700 dark:text-emerald-300" variant="outline">
+              <ShieldCheck className="size-3" aria-hidden="true" />
+              keep
+            </Badge>
+          )}
+          {opts.tone === "ghost" && (
+            <Badge className="gap-1 border-amber-500/40 bg-amber-500/10 text-[10px] text-amber-700 dark:text-amber-300" variant="outline">
+              <Ghost className="size-3" aria-hidden="true" />
+              ghost
+            </Badge>
+          )}
+          <SourceBadge source={r.source} />
+        </div>
+      </li>
+    );
+  };
+
+  return (
+    <Dialog open={open} onOpenChange={(v) => !sweep.isPending && onOpenChange(v)}>
+      <DialogContent className="max-h-[85vh] overflow-hidden rounded-xl sm:max-w-lg">
+        <DialogHeader>
+          <DialogTitle className="flex items-center gap-2 text-base">
+            <Brush className="size-4 text-red-600 dark:text-red-400" aria-hidden="true" />
+            Housekeeping sweep
+          </DialogTitle>
+          <DialogDescription>
+            Stale deadlines and duplicate ERP rows, gathered for one pass. Nothing on the ERP is
+            touched — a dismissed row stays out of your way and the sync won't bring it back.
+          </DialogDescription>
+        </DialogHeader>
+
+        {nothingToDo ? (
+          <div className="flex flex-col items-center gap-2 rounded-xl border border-dashed border-emerald-500/40 bg-emerald-500/[0.04] px-6 py-8 text-center">
+            <ShieldCheck className="size-7 text-emerald-600 dark:text-emerald-400" aria-hidden="true" />
+            <p className="text-sm font-medium">Nothing to sweep</p>
+            <p className="max-w-xs text-xs text-muted-foreground">
+              No stale overdue rows and no duplicate ghosts in this list — the housekeeping is clean.
+            </p>
+          </div>
+        ) : (
+          <div className="-mx-1 max-h-[46vh] space-y-4 overflow-y-auto px-1 py-1">
+            {plan.staleOverdue.length > 0 && (
+              <section aria-label="Stale overdue reminders">
+                <h4 className="mb-1.5 flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wide text-red-700 dark:text-red-300">
+                  <span className="flex size-4 items-center justify-center rounded bg-red-500/15">
+                    <AlertTriangle className="size-3" aria-hidden="true" />
+                  </span>
+                  Stale overdue
+                  <span className="font-normal tabular-nums text-muted-foreground">({plan.staleOverdue.length})</span>
+                </h4>
+                <ul className="space-y-1.5">
+                  {plan.staleOverdue.map((r) => rowShell(r, { tone: "stale", checked: selected.has(r.id) }))}
+                </ul>
+              </section>
+            )}
+
+            {plan.duplicateGroups.map((g) => (
+              <section key={g.key} aria-label={`Duplicate assignment: ${g.keep.title}`}>
+                <h4 className="mb-1.5 flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wide text-amber-700 dark:text-amber-300">
+                  <span className="flex size-4 items-center justify-center rounded bg-amber-500/15">
+                    <Ghost className="size-3" aria-hidden="true" />
+                  </span>
+                  Likely duplicates
+                  <span className="font-normal tabular-nums text-muted-foreground">({g.ghosts.length} ghost{g.ghosts.length === 1 ? "" : "s"})</span>
+                </h4>
+                <ul className="space-y-1.5">
+                  {rowShell(g.keep, { tone: "keep" })}
+                  {g.ghosts.map((r) => rowShell(r, { tone: "ghost", checked: selected.has(r.id) }))}
+                </ul>
+              </section>
+            ))}
+
+            {plan.recentOverdue.length > 0 && (
+              <section aria-label="Recently overdue reminders">
+                <h4 className="mb-1.5 flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
+                  <span className="flex size-4 items-center justify-center rounded bg-muted">
+                    <Clock className="size-3" aria-hidden="true" />
+                  </span>
+                  Recently overdue
+                  <span className="font-normal tabular-nums">({plan.recentOverdue.length})</span>
+                </h4>
+                <ul className="space-y-1.5">
+                  {plan.recentOverdue.map((r) => rowShell(r, { tone: "recent", checked: selected.has(r.id) }))}
+                </ul>
+              </section>
+            )}
+          </div>
+        )}
+
+        {!nothingToDo && (
+          <>
+            <p className="text-[11px] leading-relaxed text-muted-foreground">
+              <span className="font-medium tabular-nums text-foreground">{selected.size}</span> selected.
+              {dupTotal > 0 && " Ghost rows are the ERP's own re-issued copies — the keep row carries the safer deadline."}
+              {!allPersonal && selected.size > 0 && " Delete is personal-only: ERP rows are sync-owned and would reappear."}
+            </p>
+            <DialogFooter className="gap-2 sm:justify-between">
+              <div className="flex gap-2">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="h-8 gap-1.5 text-xs"
+                  disabled={!hasSelection || sweep.isPending}
+                  onClick={() => sweep.mutate("done")}
+                >
+                  {sweep.isPending ? <Loader2 className="size-3.5 animate-spin" aria-hidden="true" /> : <CheckCircle2 className="size-3.5" aria-hidden="true" />}
+                  Mark done{selected.size > 0 ? ` (${selected.size})` : ""}
+                </Button>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="h-8 gap-1.5 text-xs"
+                  disabled={!allPersonal || sweep.isPending}
+                  title={allPersonal ? "Delete permanently" : "Delete is personal-only — ERP rows are sync-owned"}
+                  onClick={() => sweep.mutate("delete")}
+                >
+                  <Trash2 className="size-3.5" aria-hidden="true" />
+                  Delete{allPersonal && selected.size > 0 ? ` (${selected.size})` : ""}
+                </Button>
+              </div>
+              <Button
+                size="sm"
+                className="h-8 gap-1.5 bg-red-600 text-xs text-white hover:bg-red-700 focus-visible:ring-red-500/50 disabled:opacity-40"
+                disabled={!hasSelection || sweep.isPending}
+                onClick={() => sweep.mutate("dismiss")}
+              >
+                <Brush className="size-3.5" aria-hidden="true" />
+                Dismiss{selected.size > 0 ? ` (${selected.size})` : ""}
+              </Button>
+            </DialogFooter>
+          </>
+        )}
+      </DialogContent>
+    </Dialog>
+  );
+}
+
 function RemindersList({ items }: { items: Reminder[] }) {
   const now = useNow();
   const [doneOpen, setDoneOpen] = useState(false);
+  const [cleanupOpen, setCleanupOpen] = useState(false);
 
   const grouped = useMemo(() => {
     const map = new Map<DueGroup, Reminder[]>();
@@ -2914,9 +3230,31 @@ function RemindersList({ items }: { items: Reminder[] }) {
   }
 
   const doneCount = grouped.get("done")?.length ?? 0;
+  const overdueCount = grouped.get("overdue")?.length ?? 0;
 
   return (
     <div className="space-y-5">
+      {overdueCount >= 2 && (
+        <div className="flex items-center justify-between gap-3 rounded-xl border border-red-500/30 bg-red-500/[0.04] px-3.5 py-2.5">
+          <p className="flex items-center gap-2 text-xs text-red-700 dark:text-red-300">
+            <AlertTriangle className="size-3.5 shrink-0" aria-hidden="true" />
+            <span>
+              <span className="font-semibold tabular-nums">{overdueCount}</span> overdue deadline{overdueCount === 1 ? "" : "s"} in this list.
+              Some may be stale ghosts the ERP left behind.
+            </span>
+          </p>
+          <Button
+            variant="outline"
+            size="sm"
+            className="h-7 shrink-0 gap-1.5 border-red-500/40 text-[11px] text-red-700 hover:bg-red-500/10 hover:text-red-800 dark:text-red-300 dark:hover:text-red-200 focus-visible:ring-red-500/50"
+            onClick={() => setCleanupOpen(true)}
+            aria-label="Open the housekeeping sweep for overdue and duplicate reminders"
+          >
+            <Brush className="size-3" aria-hidden="true" />
+            Clean up
+          </Button>
+        </div>
+      )}
       {GROUP_ORDER.filter((g) => g !== "done").map((g) => {
         const list = grouped.get(g) ?? [];
         if (list.length === 0) return null;
@@ -2959,6 +3297,8 @@ function RemindersList({ items }: { items: Reminder[] }) {
           </CollapsibleContent>
         </Collapsible>
       )}
+
+      <HousekeepingDialog items={items} open={cleanupOpen} onOpenChange={setCleanupOpen} />
     </div>
   );
 }
