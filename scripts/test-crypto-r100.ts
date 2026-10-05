@@ -21,6 +21,16 @@ const ROOT = "/home/z/my-project";
 const KEY_FILE = path.join(ROOT, "db", "encryption.key");
 const KEY = "0925ef65b7708880e3b7781b2168a685fbf25e0bc2021b6b2ad076c6f2fdd10e";
 
+/* r105: this suite DELETES the production key file mid-run and restores it
+ * in finally — an interrupted run (kill/OOM) skips finally and leaves the
+ * file gone, which is the most plausible way the r105 incident's key file
+ * vanished. Self-repair on entry: if it's missing, restore it from the key
+ * this suite already knows (the git-historic key, r100-verified). */
+if (!existsSync(KEY_FILE)) {
+  writeFileSync(KEY_FILE, KEY, { mode: 0o600 });
+  console.log("repaired missing db/encryption.key before the run");
+}
+
 let passed = 0;
 let failed = 0;
 function check(name: string, cond: boolean, extra?: string) {

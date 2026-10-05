@@ -25,6 +25,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { cn } from "@/lib/utils";
+import { syncFreshness, freshnessAgeLabel, syncedBriefLine, type SyncFreshness } from "@/lib/sync-freshness";
 import type { AlaUpcomingRow, AttendanceView, SubjectView, TimetableSlotRow } from "./types";
 import { DAY_NAMES_SHORT, istNow, humanizeMins } from "./shared";
 
@@ -424,8 +425,11 @@ export function buildTodaySms(input: TodaySmsInput): string {
     lines.push(`NOTES ${input.notedCount} private note${input.notedCount === 1 ? "" : "s"} on this device`);
   }
 
-  const synced = input.lastSyncAt ? istParts(new Date(input.lastSyncAt).getTime()).hhmm : null;
-  lines.push(`SYNCED ${synced ?? "not yet"} IST - erp.gmiu.edu.in`);
+  /* r105: the brief carries its OWN freshness — weekday + compact age.
+   * The incident lesson: "SYNCED 23:02 IST" was ambiguous across any
+   * multi-day gap, and a forwarded brief has no header dot to hover. One
+   * rulebook with the header (lib/sync-freshness) — they can never drift. */
+  lines.push(syncedBriefLine(input.now, input.lastSyncAt));
 
   return ascii(lines.join("\n"));
 }
@@ -496,6 +500,44 @@ export const SMS_TONE_CLASS: Record<SmsKeywordTone, string> = {
   violet: "text-violet-700 dark:text-violet-400",
 };
 
+/** r105 — bubble freshness paint, driven by the ONE rulebook
+ *  (lib/sync-freshness). The emerald bubble is the card's identity, but a
+ *  stale-data state wearing emerald reads "all good" — the honest move is
+ *  the same amber/red ladder the header's dot has always used. The frame
+ *  (border+gradient), the tail (the rotated paint square that must share
+ *  the frame's colors), the SYNCED keyword tone and the caption chip tone
+ *  all come from this lookup — four surfaces, one decision. "none" (never
+ *  synced) is deliberately muted: there is no data to be fresh OR stale. */
+export const BUBBLE_FRESH_CLASS: Record<
+  SyncFreshness,
+  { frame: string; tail: string; keyword: string; caption: string }
+> = {
+  fresh: {
+    frame: "border-emerald-500/20 bg-gradient-to-br from-emerald-500/10 via-teal-500/5 to-transparent",
+    tail: "border-emerald-500/20 bg-emerald-500/10",
+    keyword: "text-emerald-700 dark:text-emerald-400",
+    caption: "text-emerald-600 dark:text-emerald-400",
+  },
+  stale: {
+    frame: "border-amber-500/30 bg-gradient-to-br from-amber-500/10 via-amber-500/5 to-transparent",
+    tail: "border-amber-500/30 bg-amber-500/10",
+    keyword: "text-amber-700 dark:text-amber-400",
+    caption: "text-amber-600 dark:text-amber-400",
+  },
+  degraded: {
+    frame: "border-red-500/30 bg-gradient-to-br from-red-500/10 via-red-500/5 to-transparent",
+    tail: "border-red-500/30 bg-red-500/10",
+    keyword: "text-red-700 dark:text-red-400",
+    caption: "text-red-600 dark:text-red-400",
+  },
+  none: {
+    frame: "border-border/60 bg-gradient-to-br from-muted/40 to-transparent",
+    tail: "border-border/60 bg-muted/40",
+    keyword: "text-muted-foreground",
+    caption: "text-muted-foreground",
+  },
+};
+
 /** Legacy clipboard fallback for insecure contexts (plain-HTTP views, older
  *  WebViews where navigator.clipboard is undefined or rejects): an off-screen
  *  textarea + execCommand("copy"). execCommand is deprecated but STILL the
@@ -535,7 +577,7 @@ export function legacyCopy(text: string): boolean {
   }
 }
 
-export function TodayCard(props: TodaySmsInput & { className?: string; /** r93: the full-week attending list — feeds the week-ahead pill (FIFTH surface of the "next up this week" family); null/undefined = no timetable synced → the pill stays honestly absent. */ weekSlots?: TimetableSlotRow[] | null }) {
+export function TodayCard(props: TodaySmsInput & { className?: string; /** r93: the full-week attending list — feeds the week-ahead pill (FIFTH surface of the "next up this week" family); null/undefined = no timetable synced → the pill stays honestly absent. */ weekSlots?: TimetableSlotRow[] | null; /** r105: SyncState.status — "syncing" flips the freshness verdict to fresh (the same rule the header uses); null keeps the age-only verdict. */ syncStatus?: string | null; /** r105: SyncState.consecutiveFailures — > 0 paints the bubble red (degraded), the header's exact escalation. */ syncFailures?: number }) {
   const {
     now,
     overall,
@@ -552,7 +594,25 @@ export function TodayCard(props: TodaySmsInput & { className?: string; /** r93: 
     todayClasses,
     weekSlots,
     className,
+    syncStatus,
+    syncFailures,
   } = props;
+
+  /* r105: the ONE freshness verdict (lib/sync-freshness) — the bubble's
+   * paint, the SYNCED keyword tone and the caption chip all consume this
+   * single value; the header chip runs the SAME pure, so the two surfaces
+   * can never disagree about how old the data is. */
+  const freshness = useMemo(
+    () => syncFreshness(now, lastSyncAt, syncFailures ?? 0, syncStatus === "syncing"),
+    [now, lastSyncAt, syncFailures, syncStatus]
+  );
+  /* The compact age for the caption chip — null when there is no instant
+   * (the "never synced" state has no age to state). */
+  const dataAge = useMemo(() => {
+    if (!lastSyncAt) return null;
+    const t = new Date(lastSyncAt).getTime();
+    return Number.isNaN(t) ? null : freshnessAgeLabel(now, t);
+  }, [now, lastSyncAt]);
 
   const smsText = useMemo(
     () =>
@@ -891,26 +951,52 @@ export function TodayCard(props: TodaySmsInput & { className?: string; /** r93: 
           </TooltipProvider>
         </div>
 
-        {/* the message bubble — WYSIWYG with the clipboard text */}
+        {/* the message bubble — WYSIWYG with the clipboard text. r105: the
+            frame/tail follow the ONE freshness rulebook — the emerald look
+            is earned by fresh data, amber/red is the header's exact ladder
+            landing on the hero surface. */}
         <div
-          className="relative rounded-2xl rounded-br-md border border-emerald-500/20 bg-gradient-to-br from-emerald-500/10 via-teal-500/5 to-transparent px-4 py-3.5 shadow-sm"
+          className={cn(
+            "relative rounded-2xl rounded-br-md border px-4 py-3.5 shadow-sm",
+            BUBBLE_FRESH_CLASS[freshness].frame
+          )}
           role="figure"
-          aria-label="Today's summary written as a plain-text message"
+          aria-label={
+            freshness === "degraded" && dataAge
+              ? `Today's summary written as a plain-text message — sync failing, data ${dataAge}`
+              : freshness === "stale" && dataAge
+                ? `Today's summary written as a plain-text message — data ${dataAge}, may be outdated`
+                : freshness === "none"
+                  ? "Today's summary written as a plain-text message — never synced yet"
+                  : "Today's summary written as a plain-text message"
+          }
         >
           {/* SMS bubble tail — the chat-app cue that this box IS the message
               (pure paint: rotated square sharing the bubble's border/bg). */}
           <span
             aria-hidden="true"
-            className="absolute -bottom-[9px] right-6 size-4 rotate-45 rounded-br-[3px] border-b border-r border-emerald-500/20 bg-emerald-500/10"
+            className={cn(
+              "absolute -bottom-[9px] right-6 size-4 rotate-45 rounded-br-[3px] border-b border-r",
+              BUBBLE_FRESH_CLASS[freshness].tail
+            )}
           />
           <pre className="whitespace-pre-wrap break-words font-mono text-[12px] leading-relaxed text-foreground/90 sm:text-[12.5px]">
             {smsLines.map((ln, i) => {
               const parts = smsLineParts(ln);
+              /* r105: the SYNCED keyword wears the freshness verdict's tone
+                 (emerald/amber/red/muted) — every other keyword keeps its
+                 role color. Same characters either way; paint only. */
+              const keywordClass =
+                parts?.keyword === "SYNCED"
+                  ? BUBBLE_FRESH_CLASS[freshness].keyword
+                  : parts
+                    ? SMS_TONE_CLASS[smsKeywordTone(parts.keyword)]
+                    : undefined;
               return (
                 <span key={i}>
                   {parts ? (
                     <>
-                      <span className={cn("font-semibold", SMS_TONE_CLASS[smsKeywordTone(parts.keyword)])}>
+                      <span className={cn("font-semibold", keywordClass)}>
                         {parts.keyword}
                       </span>
                       {parts.rest}
@@ -929,6 +1015,19 @@ export function TodayCard(props: TodaySmsInput & { className?: string; /** r93: 
         <div className="flex items-center gap-1.5 text-[10px] text-muted-foreground/80" aria-hidden="true">
           <CheckCheck className={cn("size-3", dayDone ? "text-emerald-500" : "text-emerald-500/80")} />
           <span>generated {header.hhmm} IST · updates every minute · never sent anywhere automatically</span>
+          {/* r105: the age chip — the header's honesty ladder landing under
+              the bubble, for the visual reader. The figure's aria-label
+              carries the same voice for screen readers. */}
+          {freshness === "stale" && dataAge && (
+            <span className={cn("font-medium", BUBBLE_FRESH_CLASS[freshness].caption)}>
+              · data {dataAge} — sync is behind
+            </span>
+          )}
+          {freshness === "degraded" && (
+            <span className={cn("font-medium", BUBBLE_FRESH_CLASS[freshness].caption)}>
+              · sync failing{dataAge ? ` — data ${dataAge}` : ""}
+            </span>
+          )}
         </div>
       </CardContent>
 

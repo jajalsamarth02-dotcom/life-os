@@ -15,7 +15,17 @@ import path from "path";
  *   2. db/encryption.key file (survives .env rewrites; gitignored)
  *   3. deterministic fallback (last resort — flagged in the doc comment)
  * The file is WRITTEN by tooling when a historic key is recovered; the app
- * never auto-persists the fallback (that would silently pin a weak key). */
+ * never auto-persists the fallback (that would silently pin a weak key).
+ *
+ * r105 self-heal — the incident recurred (the r104 cron commit stripped .env
+ * again AND the key file vanished mid-life): a keyless boot null-caches the
+ * file probe, and that null was sticky, so restoring the file on disk could
+ * not heal the RUNNING process — every scheduled sync failed until a manual
+ * restart (39h outage). decryptSecret now invalidates the cached file probe
+ * on failure and retries ONCE, so a file restored under a live server heals
+ * on the next attempt with no restart. The env-correct path is untouched
+ * (a failed env key re-derives the same env key and still throws the
+ * original error). */
 
 let cachedFileKey: Buffer | null | undefined;
 
@@ -54,7 +64,26 @@ export function encryptSecret(plain: string): string {
 export function decryptSecret(payload: string): string {
   const [ivB64, tagB64, dataB64] = payload.split(":");
   if (!ivB64 || !tagB64 || !dataB64) throw new Error("Malformed encrypted payload");
-  const decipher = crypto.createDecipheriv("aes-256-gcm", getKey(), Buffer.from(ivB64, "base64"));
-  decipher.setAuthTag(Buffer.from(tagB64, "base64"));
-  return Buffer.concat([decipher.update(Buffer.from(dataB64, "base64")), decipher.final()]).toString("utf8");
+  const attempt = (key: Buffer) => {
+    const decipher = crypto.createDecipheriv("aes-256-gcm", key, Buffer.from(ivB64, "base64"));
+    decipher.setAuthTag(Buffer.from(tagB64, "base64"));
+    return Buffer.concat([decipher.update(Buffer.from(dataB64, "base64")), decipher.final()]).toString("utf8");
+  };
+  try {
+    return attempt(getKey());
+  } catch (err) {
+    // r105 self-heal: a sticky cache (null = "file was missing at first
+    // probe", or a stale buffer) must not outlive the disk state it was
+    // derived from. One invalidation + retry; if it fails again the
+    // ORIGINAL error is rethrown — the caller's message stays honest.
+    if (cachedFileKey !== undefined) {
+      cachedFileKey = undefined;
+      try {
+        return attempt(getKey());
+      } catch {
+        /* fall through to the original error */
+      }
+    }
+    throw err;
+  }
 }

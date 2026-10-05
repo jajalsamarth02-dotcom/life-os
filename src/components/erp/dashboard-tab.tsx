@@ -1462,6 +1462,8 @@ export function DashboardTab({
           nextDue={nextDue}
           notedCount={alaNotesQ.data?.length ?? 0}
           lastSyncAt={data.erp?.sync?.lastSuccessAt ?? null}
+          syncStatus={data.erp?.sync?.status ?? null}
+          syncFailures={data.erp?.sync?.consecutiveFailures ?? 0}
           todayClasses={todayClasses}
           weekSlots={weekSlots}
         />

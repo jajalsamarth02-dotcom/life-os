@@ -36,6 +36,7 @@ import {
 import { cn } from "@/lib/utils";
 import { istFormat } from "@/lib/ist";
 import { applyBatchPicks } from "@/lib/batch-picks";
+import { syncFreshness } from "@/lib/sync-freshness";
 import { promptInstall, useCanInstall } from "./install-prompt";
 import { fetchDashboard, fetchTimetable, markAllNotificationsRead, postSync, qk } from "./api";
 import { DAY_NAMES_SHORT, ago, fmtDT, humanizeMins, istNow, useNow } from "./shared";
@@ -473,20 +474,18 @@ export function AppHeader({ onOpenPalette }: { onOpenPalette?: () => void }) {
   const lastSyncAt = sync?.lastSuccessAt ?? sync?.lastSyncAt ?? null;
   const isSyncing = sync?.status === "syncing";
 
-  // Sync freshness: within one cadence (15 min) + a grace window = fresh;
-  // older = stale; the engine retrying after failures = degraded.
+  // Sync freshness — r105: the decision table moved to lib/sync-freshness
+  // (ONE rulebook; the today-card bubble now runs the same pure). The
+  // verdicts are byte-equal to the inline table that lived here since the
+  // chip was born: syncing → fresh; failures → degraded; no instant →
+  // none; ≤22 min → fresh; else stale.
   const failures = sync?.consecutiveFailures ?? 0;
-  const ageMin =
-    lastSyncAt != null ? (now - new Date(lastSyncAt).getTime()) / 60_000 : null;
-  const freshness: "fresh" | "stale" | "degraded" | "none" = isSyncing
-    ? "fresh"
-    : failures > 0
-      ? "degraded"
-      : ageMin == null
-        ? "none"
-        : ageMin <= 22
-          ? "fresh"
-          : "stale";
+  const freshness: "fresh" | "stale" | "degraded" | "none" = syncFreshness(
+    now,
+    lastSyncAt,
+    failures,
+    isSyncing
+  );
   const freshnessDot = {
     fresh: "bg-emerald-500 erp-pulse-dot",
     stale: "bg-amber-500",
