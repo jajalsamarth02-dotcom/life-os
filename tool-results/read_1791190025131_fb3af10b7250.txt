@@ -1,0 +1,721 @@
+     1→import { db } from "@/lib/db";
+     2→import { createHash } from "crypto";
+     3→import {
+     4→  getSettings,
+     5→  getRawSetting,
+     6→  setRawSetting,
+     7→  isNotifyEnabled,
+     8→  ERP_SEMESTER_KEY,
+     9→  type AppSettings,
+    10→} from "@/lib/settings";
+    11→import { attendancePercentage, classesToReachTarget } from "@/lib/attendance";
+    12→import { fmtDateIST, fmtDateTimeIST } from "@/lib/ist";
+    13→import { compactErrorText } from "@/lib/compact-error";
+    14→import { fetchDemoSnapshot } from "@/lib/erp/demo";
+    15→import { fetchLiveSnapshot, isSubmissionComplete } from "@/lib/erp/live";
+    16→import { ERROR_COPY, ErpSnapshot, SyncError, SyncErrorCode } from "@/lib/erp/types";
+    17→import { decryptSecret, encryptSecret } from "@/lib/crypto";
+    18→import { pruneSnapshots, recordSnapshots } from "@/lib/sync/history";
+    19→import { maybeAutoNotify } from "@/lib/notify/whatsapp";
+    20→import { maybeNtfyAutoNotify } from "@/lib/notify/ntfy";
+    21→
+    22→/**
+    23→ * SYNC ENGINE
+    24→ *
+    25→ *   connector (live ERP | demo simulator)
+    26→ *     → change detection (diff against local DB)
+    27→ *     → update local database (never on parse failure — old data is kept)
+    28→ *     → recalculate derived attendance (always computed, never stored)
+    29→ *     → notifications + auto-managed attendance-warning reminders
+    30→ *     → SyncState / SyncLog bookkeeping
+    31→ */
+    32→
+    33→const LOCK_KEY = "sync.lock";
+    34→const LOCK_STALE_MS = 3 * 60 * 1000;
+    35→/** Setting key holding the cached ERP course-code → course-name map (JSON). */
+    36→const COURSE_NAMES_KEY = "erp.courseNames";
+    37→/** Signature of the last applied class-routine slot set (avoids write churn). */
+    38→const ROUTINE_SIG_KEY = "erp.routineSig";
+    39→/** ExternalId prefix for ERP-synced ALA/assignment reminders. */
+    40→export const ASSIGNMENT_EXT_PREFIX = "erp:assign:";
+    41→
+    42→export interface SyncOutcome {
+    43→  ok: boolean;
+    44→  skipped?: boolean;
+    45→  reason?: string;
+    46→  mode?: "live" | "demo" | "none";
+    47→  changes?: number;
+    48→  errorCode?: SyncErrorCode;
+    49→  message?: string;
+    50→}
+    51→
+    52→export async function getSyncState() {
+    53→  return db.syncState.upsert({
+    54→    where: { id: "singleton" },
+    55→    update: {},
+    56→    create: { id: "singleton" },
+    57→  });
+    58→}
+    59→
+    60→async function acquireLock(): Promise<boolean> {
+    61→  const raw = await getRawSetting(LOCK_KEY);
+    62→  if (raw) {
+    63→    const t = new Date(raw).getTime();
+    64→    if (!Number.isNaN(t) && Date.now() - t < LOCK_STALE_MS) return false;
+    65→  }
+    66→  await setRawSetting(LOCK_KEY, new Date().toISOString());
+    67→  return true;
+    68→}
+    69→
+    70→async function releaseLock(): Promise<void> {
+    71→  await setRawSetting(LOCK_KEY, "");
+    72→}
+    73→
+    74→function backoffMinutes(baseMinutes: number, failures: number): number {
+    75→  return Math.min(baseMinutes * Math.pow(2, Math.min(failures, 5)), 720);
+    76→}
+    77→
+    78→/**
+    79→ * Create an in-app notification — unless the user switched this type off in
+    80→ * Settings → Notifications. Existing notifications are never retroactively
+    81→ * hidden; preferences apply to future events only.
+    82→ */
+    83→async function notify(
+    84→  type: string,
+    85→  title: string,
+    86→  message: string,
+    87→  severity: "info" | "success" | "warning" | "critical" = "info"
+    88→) {
+    89→  const prefs = (await getSettings()).notifyPrefs;
+    90→  if (!isNotifyEnabled(prefs, type)) return;
+    91→  await db.notification.create({ data: { type, title, message, severity } });
+    92→}
+    93→
+    94→async function changeEvent(kind: string, subjectCode: string | null, detail: string) {
+    95→  await db.changeEvent.create({ data: { kind, subjectCode, detail } });
+    96→}
+    97→
+    98→/** Decide which connector to use and fetch a snapshot. */
+    99→async function fetchSnapshot(
+   100→  trigger: "scheduled" | "manual" | "startup"
+   101→): Promise<{ snapshot: ErpSnapshot; mode: "live" | "demo" }> {
+   102→  const settings = await getSettings();
+   103→
+   104→  if (settings.demoMode) {
+   105→    return { snapshot: await fetchDemoSnapshot(false), mode: "demo" };
+   106→  }
+   107→
+   108→  const conn = await db.erpConnection.findFirst({ orderBy: { createdAt: "desc" } });
+   109→  if (!conn) {
+   110→    throw new SyncError("NO_CONNECTION", ERROR_COPY.NO_CONNECTION);
+   111→  }
+   112→
+   113→  // Rate-limit protection for the real ERP (manual syncs are never throttled).
+   114→  if (trigger === "scheduled") {
+   115→    const state = await getSyncState();
+   116→    const gap = settings.minLiveSyncGapMinutes * 60 * 1000;
+   117→    if (state.lastSyncAt && Date.now() - state.lastSyncAt.getTime() < gap) {
+   118→      throw new SyncError("RATE_LIMITED", ERROR_COPY.RATE_LIMITED);
+   119→    }
+   120→  }
+   121→
+   122→  let password: string;
+   123→  let savedCookie: string | null = null;
+   124→  try {
+   125→    password = decryptSecret(conn.secretEnc);
+   126→    if (conn.sessionCookieEnc) savedCookie = decryptSecret(conn.sessionCookieEnc);
+   127→  } catch {
+   128→    throw new SyncError("UNKNOWN", "Stored credentials could not be decrypted (key changed?).");
+   129→  }
+   130→
+   131→  // Cached course-code → course-name pairs (from assignment detail pages).
+   132→  // Unknown codes are resolved lazily during the sync, a couple per run at
+   133→  // most, to stay gentle on the ERP (spec #8).
+   134→  let knownCourseNames: Record<string, string> = {};
+   135→  try {
+   136→    const raw = await getRawSetting(COURSE_NAMES_KEY);
+   137→    if (raw) knownCourseNames = JSON.parse(raw);
+   138→  } catch {
+   139→    knownCourseNames = {};
+   140→  }
+   141→
+   142→  const result = await fetchLiveSnapshot(conn.username, password, savedCookie, {
+   143→    knownCourseNames,
+   144→    // Manual/startup syncs may resolve more names at once; scheduled ones
+   145→    // resolve at most two per run.
+   146→    courseNameBudget: trigger === "scheduled" ? 2 : 8,
+   147→  });
+   148→  if (result.sessionCookie) {
+   149→    // persist refreshed session so future syncs avoid re-login (gentle on the ERP)
+   150→    await db.erpConnection.update({
+   151→      where: { id: conn.id },
+   152→      data: { sessionCookieEnc: encryptSecret(result.sessionCookie) },
+   153→    });
+   154→  }
+   155→  const mergedNames = result.snapshot?.courseNames ?? {};
+   156→  if (Object.keys(mergedNames).length > 0 && JSON.stringify(mergedNames) !== JSON.stringify(knownCourseNames)) {
+   157→    await setRawSetting(COURSE_NAMES_KEY, JSON.stringify(mergedNames));
+   158→  }
+   159→  return { snapshot: result.snapshot!, mode: "live" };
+   160→}
+   161→
+   162→export async function runSync(
+   163→  trigger: "scheduled" | "manual" | "startup"
+   164→): Promise<SyncOutcome> {
+   165→  if (!(await acquireLock())) {
+   166→    return { ok: false, skipped: true, reason: "A synchronization is already running.", errorCode: "SYNC_IN_PROGRESS" };
+   167→  }
+   168→
+   169→  const startedAt = Date.now();
+   170→  const log = await db.syncLog.create({
+   171→    data: { status: "running", trigger, mode: "none" },
+   172→  });
+   173→  await db.syncState.upsert({
+   174→    where: { id: "singleton" },
+   175→    update: { status: "syncing" },
+   176→    create: { id: "singleton", status: "syncing" },
+   177→  });
+   178→
+   179→  try {
+   180→    const settings = await getSettings();
+   181→    const stateBefore = await getSyncState();
+   182→    const prevFailures = stateBefore.consecutiveFailures;
+   183→    const { snapshot, mode } = await fetchSnapshot(trigger);
+   184→
+   185→    const changes = await applySnapshot(snapshot, settings);
+   186→    await recordSnapshots(mode);
+   187→    void pruneSnapshots();
+   188→    const now = new Date();
+   189→
+   190→    await db.syncState.upsert({
+   191→      where: { id: "singleton" },
+   192→      update: {
+   193→        status: "idle",
+   194→        mode,
+   195→        lastSyncAt: now,
+   196→        lastSuccessAt: now,
+   197→        consecutiveFailures: 0,
+   198→        lastErrorCode: null,
+   199→        lastErrorMessage: null,
+   200→        nextScheduledSyncAt: new Date(now.getTime() + settings.syncIntervalMinutes * 60 * 1000),
+   201→      },
+   202→      create: { id: "singleton", status: "idle", mode },
+   203→    });
+   204→
+   205→    // If live sync succeeded, the demo simulator is no longer needed.
+   206→    if (mode === "live" && settings.demoMode) {
+   207→      await setRawSetting(
+   208→        "app.settings",
+   209→        JSON.stringify({ ...settings, demoMode: false })
+   210→      );
+   211→    }
+   212→
+   213→    if (changes > 0) {
+   214→      await notify(
+   215→        "ERP_CHANGE",
+   216→        "ERP data updated",
+   217→        `Synchronized from ${mode === "demo" ? "the demo ERP" : "the college ERP"}: ${changes} change${changes === 1 ? "" : "s"} applied.`,
+   218→        "info"
+   219→      );
+   220→    } else if (mode === "live" && prevFailures > 0) {
+   221→      await notify("SYNC_SUCCESS", "ERP connection restored", "Live synchronization succeeded again.", "success");
+   222→    }
+   223→
+   224→    await db.syncLog.update({
+   225→      where: { id: log.id },
+   226→      data: {
+   227→        status: "success",
+   228→        mode,
+   229→        changes,
+   230→        durationMs: Date.now() - startedAt,
+   231→        finishedAt: new Date(),
+   232→        summary: `${changes} change${changes === 1 ? "" : "s"} applied`,
+   233→      },
+   234→    });
+   235→
+   236→    // refresh notifications badge etc. — nothing else to do
+   237→    // (Auto-digests on both channels: only after scheduled syncs, each
+   238→    // independently throttled inside its own module.)
+   239→    if (trigger === "scheduled") {
+   240→      void maybeAutoNotify();
+   241→      void maybeNtfyAutoNotify();
+   242→    }
+   243→    return { ok: true, mode, changes, message: `Sync complete — ${changes} change${changes === 1 ? "" : "s"}.` };
+   244→  } catch (err) {
+   245→    const syncErr =
+   246→      err instanceof SyncError
+   247→        ? err
+   248→        : new SyncError(
+   249→            "UNKNOWN",
+   250→            compactErrorText(err instanceof Error ? err.message : String(err))
+   251→          );
+   252→
+   253→    const settings = await getSettings();
+   254→    const state = await getSyncState();
+   255→    const failures = state.consecutiveFailures + 1;
+   256→    const now = new Date();
+   257→    const nextAt = new Date(
+   258→      now.getTime() + backoffMinutes(settings.syncIntervalMinutes, failures) * 60 * 1000
+   259→    );
+   260→
+   261→    await db.syncState.upsert({
+   262→      where: { id: "singleton" },
+   263→      update: {
+   264→        status: "failed",
+   265→        mode: state.mode === "none" ? "none" : state.mode,
+   266→        lastSyncAt: now,
+   267→        consecutiveFailures: failures,
+   268→        lastErrorCode: syncErr.code,
+   269→        lastErrorMessage: syncErr.message,
+   270→        nextScheduledSyncAt: nextAt,
+   271→      },
+   272→      create: {
+   273→        id: "singleton",
+   274→        status: "failed",
+   275→        lastSyncAt: now,
+   276→        consecutiveFailures: failures,
+   277→        lastErrorCode: syncErr.code,
+   278→        lastErrorMessage: syncErr.message,
+   279→        nextScheduledSyncAt: nextAt,
+   280→      },
+   281→    });
+   282→
+   283→    if (syncErr.code === "INVALID_CREDENTIALS") {
+   284→      await db.erpConnection.updateMany({ data: { status: "failed", lastError: syncErr.message } });
+   285→    }
+   286→
+   287→    if (failures === 1 || syncErr.code === "INVALID_CREDENTIALS") {
+   288→      await notify(
+   289→        "SYNC_FAILURE",
+   290→        "ERP Sync Failed",
+   291→        `${syncErr.message}\n\nLast successful sync: ${
+   292→          state.lastSuccessAt ? formatDateTime(state.lastSuccessAt) : "never"
+   293→        }. Your previously synchronized data is still being shown.`,
+   294→        failures >= 3 ? "critical" : "warning"
+   295→      );
+   296→    }
+   297→
+   298→    await db.syncLog.update({
+   299→      where: { id: log.id },
+   300→      data: {
+   301→        status: "failed",
+   302→        mode: syncErr.code === "NO_CONNECTION" ? "none" : undefined,
+   303→        durationMs: Date.now() - startedAt,
+   304→        finishedAt: new Date(),
+   305→        errorDetails: `${syncErr.code}: ${syncErr.message}${syncErr.details ? ` — ${syncErr.details}` : ""}`,
+   306→      },
+   307→    });
+   308→
+   309→    return { ok: false, errorCode: syncErr.code, message: syncErr.message };
+   310→  } finally {
+   311→    await releaseLock();
+   312→  }
+   313→}
+   314→
+   315→/**
+   316→ * Diff a fresh snapshot against local data; apply only actual changes.
+   317→ * Returns the number of changes applied.
+   318→ */
+   319→async function applySnapshot(snapshot: ErpSnapshot, settings: AppSettings): Promise<number> {
+   320→  let changes = 0;
+   321→  const previous = await db.subject.findMany({ where: { active: true } });
+   322→  const prevByCode = new Map(previous.map((s) => [s.code, s]));
+   323→
+   324→  // --- subjects ---
+   325→  for (const s of snapshot.subjects) {
+   326→    const prev = prevByCode.get(s.code);
+   327→    // Semester: the row's own value wins, else the page-level current semester.
+   328→    const semester = s.semester ?? snapshot.currentSemester ?? null;
+   329→    if (!prev) {
+   330→      const existedInactive = await db.subject.findUnique({ where: { code: s.code } });
+   331→      if (existedInactive) {
+   332→        await db.subject.update({
+   333→          where: { id: existedInactive.id },
+   334→          data: { name: s.name, present: s.present, total: s.total, semester, active: true },
+   335→        });
+   336→      } else {
+   337→        await db.subject.create({
+   338→          data: { code: s.code, name: s.name, present: s.present, total: s.total, semester },
+   339→        });
+   340→      }
+   341→      await changeEvent("SUBJECT_ADDED", s.code, `${s.name} — ${s.present}/${s.total} classes${semester ? ` · Sem ${semester}` : ""}`);
+   342→      changes++;
+   343→    } else if (prev.present !== s.present || prev.total !== s.total || prev.name !== s.name) {
+   344→      await db.subject.update({
+   345→        where: { id: prev.id },
+   346→        data: { name: s.name, present: s.present, total: s.total, semester },
+   347→      });
+   348→      const oldPct = attendancePercentage(prev.present, prev.total);
+   349→      const newPct = attendancePercentage(s.present, s.total);
+   350→      await changeEvent(
+   351→        "ATTENDANCE_UPDATED",
+   352→        s.code,
+   353→        `${s.name}: Present ${prev.present}→${s.present}, Total ${prev.total}→${s.total} (${oldPct.toFixed(2)}% → ${newPct.toFixed(2)}%)`
+   354→      );
+   355→      changes++;
+   356→    } else if (prev.semester !== semester) {
+   357→      // Semester metadata arrived/changed without any attendance difference —
+   358→      // update quietly (the partition itself is not an "ERP data change").
+   359→      await db.subject.update({ where: { id: prev.id }, data: { semester } });
+   360→    }
+   361→  }
+   362→
+   363→  // Remember the ERP-detected current semester so Settings can offer it
+   364→  // as a one-tap partition choice.
+   365→  if (typeof snapshot.currentSemester === "number" && snapshot.currentSemester >= 1 && snapshot.currentSemester <= 8) {
+   366→    const stored = await getRawSetting(ERP_SEMESTER_KEY);
+   367→    if (stored !== String(snapshot.currentSemester)) {
+   368→      await setRawSetting(ERP_SEMESTER_KEY, String(snapshot.currentSemester));
+   369→    }
+   370→  }
+   371→
+   372→  // --- removals (only when the snapshot is a complete view) ---
+   373→  if (snapshot.complete) {
+   374→    for (const prev of previous) {
+   375→      if (!snapshot.subjects.some((s) => s.code === prev.code)) {
+   376→        await db.subject.update({ where: { id: prev.id }, data: { active: false } });
+   377→        await changeEvent("SUBJECT_REMOVED", prev.code, `${prev.name} no longer on the ERP`);
+   378→        changes++;
+   379→        // its auto-managed warning reminder has no subject left to describe
+   380→        const warn = await db.reminder.findUnique({ where: { externalId: `erp:warn:${prev.code}` } });
+   381→        if (warn) await db.reminder.delete({ where: { id: warn.id } });
+   382→      }
+   383→    }
+   384→  }
+   385→
+   386→  // --- warnings + auto-managed ATTENDANCE_WARNING reminders ---
+   387→  await recomputeAttendanceWarnings(settings.targetPercentage, {
+   388→    prevByCode,
+   389→    subjectTargets: settings.subjectTargets,
+   390→  });
+   391→
+   392→  // --- ERP reminders (exams, assignments, ...) — dedup via externalId ---
+   393→  const seenExternal = new Set<string>();
+   394→  for (const r of snapshot.reminders) {
+   395→    if (r.type === "ATTENDANCE_WARNING") continue; // managed above
+   396→    seenExternal.add(r.externalId);
+   397→    const existing = await db.reminder.findUnique({ where: { externalId: r.externalId } });
+   398→    const dueAt = new Date(r.dueAt);
+   399→    if (!existing) {
+   400→      await db.reminder.create({
+   401→        data: {
+   402→          source: "ERP",
+   403→          externalId: r.externalId,
+   404→          type: r.type,
+   405→          title: r.title,
+   406→          description: r.description,
+   407→          dueAt,
+   408→        },
+   409→      });
+   410→      await changeEvent("REMINDER_UPSERTED", null, `${r.title} — ${formatDateTime(dueAt)}`);
+   411→      changes++;
+   412→    } else {
+   413→      const dueChanged = existing.dueAt.getTime() !== dueAt.getTime();
+   414→      const metaChanged =
+   415→        existing.title !== r.title || existing.description !== r.description || existing.type !== r.type;
+   416→      if (dueChanged || metaChanged) {
+   417→        const oldDue = existing.dueAt;
+   418→        await db.reminder.update({
+   419→          where: { id: existing.id },
+   420→          data: { type: r.type, title: r.title, description: r.description, dueAt },
+   421→        });
+   422→        if (dueChanged) {
+   423→          await changeEvent(
+   424→            "REMINDER_DATE_CHANGED",
+   425→            null,
+   426→            `${r.title}: ${formatDateTime(oldDue)} → ${formatDateTime(dueAt)}`
+   427→          );
+   428→          await notify(
+   429→            "REMINDER_CHANGE",
+   430→            "Deadline updated by ERP",
+   431→            `${r.title} moved from ${formatDateTime(oldDue)} to ${formatDateTime(dueAt)}.`,
+   432→            "warning"
+   433→          );
+   434→        }
+   435→        changes++;
+   436→      }
+   437→    }
+   438→  }
+   439→
+   440→  // remove ERP reminders that disappeared from a complete snapshot (ACTIVE only).
+   441→  // ALA/assignment rows carry the erp:assign: prefix and are managed by the
+   442→  // dedicated block below (they have their own completeness signal).
+   443→  if (snapshot.complete) {
+   444→    const erpReminders = await db.reminder.findMany({ where: { source: "ERP" } });
+   445→    for (const e of erpReminders) {
+   446→      if (e.type === "ATTENDANCE_WARNING") continue;
+   447→      if ((e.externalId ?? "").startsWith(ASSIGNMENT_EXT_PREFIX)) continue;
+   448→      if (!seenExternal.has(e.externalId ?? "") && e.status === "ACTIVE") {
+   449→        await db.reminder.delete({ where: { id: e.id } });
+   450→        await changeEvent("REMINDER_REMOVED", null, `${e.title} — no longer on the ERP`);
+   451→        changes++;
+   452→      }
+   453→    }
+   454→  }
+   455→
+   456→  // --- ERP assignments (ALA) — one ASSIGNMENT reminder per row, dedup via
+   457→  //     externalId `erp:assign:{id}`. The ERP's own Submission Status drives
+   458→  //     ACTIVE/DONE (read-only mirror, spec #14); dueAt is the End Date —
+   459→  //     the "last date" the student must submit by.
+   460→  if ((snapshot.assignments?.length ?? 0) > 0) {
+   461→    const firstImport =
+   462→      (await db.reminder.count({ where: { externalId: { startsWith: ASSIGNMENT_EXT_PREFIX } } })) === 0;
+   463→    let created = 0;
+   464→    const seenAssign = new Set<string>();
+   465→    for (const a of snapshot.assignments!) {
+   466→      const externalId = `${ASSIGNMENT_EXT_PREFIX}${a.externalId}`;
+   467→      seenAssign.add(externalId);
+   468→      const completed = isSubmissionComplete(a.submissionStatus, a.approvalStatus);
+   469→      const status = completed ? "DONE" : "ACTIVE";
+   470→      // Date-only from the ERP → store mid-day UTC so the calendar date is
+   471→      // displayed identically in any timezone and the item only turns overdue
+   472→      // late on the last date.
+   473→      const dueAt = new Date(`${a.endDate}T12:00:00Z`);
+   474→      const descriptionBits = [
+   475→        `Submission: ${a.submissionStatus}`,
+   476→        a.approvalStatus ? `Approval: ${a.approvalStatus}` : null,
+   477→        a.startDate ? `Start: ${a.startDate}` : null,
+   478→        a.session ? `Session: ${a.session}` : null,
+   479→      ].filter((x): x is string => !!x);
+   480→      const description = descriptionBits.join(" · ");
+   481→
+   482→      const existing = await db.reminder.findUnique({ where: { externalId } });
+   483→      if (!existing) {
+   484→        await db.reminder.create({
+   485→          data: {
+   486→            source: "ERP",
+   487→            externalId,
+   488→            type: "ASSIGNMENT",
+   489→            title: a.title,
+   490→            description,
+   491→            subjectCode: a.courseCode,
+   492→            dueAt,
+   493→            status,
+   494→          },
+   495→        });
+   496→        created++;
+   497→        changes++;
+   498→      } else {
+   499→        const dueChanged = existing.dueAt.getTime() !== dueAt.getTime();
+   500→        const metaChanged =
+   501→          existing.title !== a.title ||
+   502→          existing.description !== description ||
+   503→          existing.subjectCode !== a.courseCode;
+   504→        const statusChanged = existing.status !== status && existing.status !== "DISMISSED";
+   505→        if (dueChanged || metaChanged || statusChanged) {
+   506→          await db.reminder.update({
+   507→            where: { id: existing.id },
+   508→            data: { title: a.title, description, subjectCode: a.courseCode, dueAt, status },
+   509→          });
+   510→          if (statusChanged) {
+   511→            await changeEvent(
+   512→              "REMINDER_UPSERTED",
+   513→              a.courseCode,
+   514→              `${a.title} (${a.courseCode}) — ${completed ? "marked Submitted" : "back to Pending"} on the ERP`
+   515→            );
+   516→          }
+   517→          if (dueChanged) {
+   518→            await changeEvent(
+   519→              "REMINDER_DATE_CHANGED",
+   520→              a.courseCode,
+   521→              `${a.title} (${a.courseCode}): last date ${formatDate(existing.dueAt)} → ${formatDate(dueAt)}`
+   522→            );
+   523→            await notify(
+   524→              "REMINDER_CHANGE",
+   525→              "Deadline updated by ERP",
+   526→              `${a.title} (${a.courseCode}) last date moved from ${formatDate(existing.dueAt)} to ${formatDate(dueAt)}.`,
+   527→              "warning"
+   528→            );
+   529→          }
+   530→          if (!statusChanged && !dueChanged) changes++; // quiet metadata refresh
+   531→        }
+   532→      }
+   533→    }
+   534→
+   535→    if (created > 0) {
+   536→      await changeEvent(
+   537→        "REMINDER_UPSERTED",
+   538→        null,
+   539→        `${created} ALA/assignment row${created === 1 ? "" : "s"} ${firstImport ? "imported" : "added"} from the ERP Assignments page`
+   540→      );
+   541→    }
+   542→
+   543→    // Removal — only when the Assignments page itself loaded fully this run.
+   544→    if (snapshot.assignmentsComplete) {
+   545→      const assignReminders = await db.reminder.findMany({
+   546→        where: { source: "ERP", externalId: { startsWith: ASSIGNMENT_EXT_PREFIX } },
+   547→      });
+   548→      for (const e of assignReminders) {
+   549→        if (!seenAssign.has(e.externalId ?? "") && e.status === "ACTIVE") {
+   550→          await db.reminder.delete({ where: { id: e.id } });
+   551→          await changeEvent("REMINDER_REMOVED", null, `${e.title} — no longer on the ERP Assignments page`);
+   552→          changes++;
+   553→        }
+   554→      }
+   555→    }
+   556→  }
+   557→
+   558→  // --- Class routine (weekly timetable from the ERP's Class Routine page) ---
+   559→  // The ERP routine is the authoritative schedule: replace every sync-owned
+   560→  // slot (source "erp" AND legacy stale "demo" rows) with the parsed set,
+   561→  // but only when the applied set actually changed — so a stable week costs
+   562→  // zero writes on the 15-minute cadence. PERSONAL slots the student added
+   563→  // themselves are never touched. Safety rails: slots whose subject has no
+   564→  // ACTIVE Subject row are held back (the attendance sync will create the
+   565→  // subject, then the next sync applies them — nothing is invented); an
+   566→  // empty filtered set (page down / structure change) skips the whole block
+   567→  // and keeps existing slots.
+   568→  if (snapshot.routine && snapshot.routine.length > 0) {
+   569→    const activeCodes = new Set(
+   570→      (
+   571→        await db.subject.findMany({
+   572→          where: { active: true },
+   573→          select: { code: true },
+   574→        })
+   575→      ).map((s) => s.code)
+   576→    );
+   577→    const applied = snapshot.routine.filter((s) => activeCodes.has(s.subjectCode));
+   578→    if (applied.length > 0) {
+   579→      const sorted = [...applied].sort(
+   580→        (a, b) =>
+   581→          a.dayOfWeek - b.dayOfWeek ||
+   582→          a.startMin - b.startMin ||
+   583→          a.endMin - b.endMin ||
+   584→          a.subjectCode.localeCompare(b.subjectCode)
+   585→      );
+   586→      const sig = createHash("sha256").update(JSON.stringify(sorted)).digest("hex").slice(0, 16);
+   587→      const storedSig = await getRawSetting(ROUTINE_SIG_KEY);
+   588→      const syncOwned = await db.timetableSlot.count({ where: { source: { in: ["demo", "erp"] } } });
+   589→      if (sig !== storedSig || syncOwned !== sorted.length) {
+   590→        await db.timetableSlot.deleteMany({ where: { source: { in: ["demo", "erp"] } } });
+   591→        await db.timetableSlot.createMany({
+   592→          data: sorted.map((s) => ({
+   593→            dayOfWeek: s.dayOfWeek,
+   594→            startMin: s.startMin,
+   595→            endMin: s.endMin,
+   596→            subjectCode: s.subjectCode,
+   597→            source: "erp",
+   598→          })),
+   599→        });
+   600→        await setRawSetting(ROUTINE_SIG_KEY, sig);
+   601→        changes += sorted.length;
+   602→        const held = snapshot.routine.length - applied.length;
+   603→        const unknown = snapshot.routineUnknown ?? [];
+   604→        const notes: string[] = [];
+   605→        if (held > 0) notes.push(`${held} slot(s) held back — subject not in the active list yet`);
+   606→        if (unknown.length > 0) notes.push(`unresolved course name(s): ${unknown.join("; ")}`);
+   607→        if (notes.length > 0) console.log(`[erp-sync] routine: ${sorted.length} slots synced (${notes.join(" · ")})`);
+   608→      }
+   609→    }
+   610→  }
+   611→
+   612→  return changes;
+   613→}
+   614→
+   615→/**
+   616→ * Recalculate per-subject warnings without contacting the ERP. Each subject is
+   617→ * measured against its own effective target (per-subject override when set,
+   618→ * otherwise the global target). Used after syncs and whenever the user changes
+   619→ * the global target or a per-subject override.
+   620→ */
+   621→export async function recomputeAttendanceWarnings(
+   622→  targetPct: number,
+   623→  opts?: {
+   624→    prevByCode?: Map<string, { present: number; total: number }>;
+   625→    subjectTargets?: Record<string, number>;
+   626→  }
+   627→): Promise<void> {
+   628→  const overrides = opts?.subjectTargets ?? {};
+   629→  const activeSubjects = await db.subject.findMany({ where: { active: true } });
+   630→  for (const sub of activeSubjects) {
+   631→    if (sub.total <= 0) continue;
+   632→    const override = overrides[sub.code];
+   633→    const effectiveTargetPct =
+   634→      typeof override === "number" && Number.isFinite(override) ? override : targetPct;
+   635→    const pct = attendancePercentage(sub.present, sub.total);
+   636→    const below = pct < effectiveTargetPct;
+   637→    const prevRow = opts?.prevByCode?.get(sub.code);
+   638→    const wasBelow =
+   639→      prevRow && prevRow.total > 0
+   640→        ? attendancePercentage(prevRow.present, prevRow.total) < effectiveTargetPct
+   641→        : false;
+   642→
+   643→    if (below && !wasBelow) {
+   644→      const need = classesToReachTarget(sub.present, sub.total, effectiveTargetPct);
+   645→      await notify(
+   646→        "ATTENDANCE_WARNING",
+   647→        `Attendance Alert — ${sub.name}`,
+   648→        `${sub.name} attendance is now ${pct.toFixed(2)}%.\nTarget: ${effectiveTargetPct}%${override != null ? " (custom for this subject)" : ""}.\nYou need to attend the next ${need} class${need === 1 ? "" : "es"} to reach the target.`,
+   649→        pct < effectiveTargetPct - 10 ? "critical" : "warning"
+   650→      );
+   651→    }
+   652→
+   653→    const externalId = `erp:warn:${sub.code}`;
+   654→    const warnReminder = await db.reminder.findUnique({ where: { externalId } });
+   655→    if (below) {
+   656→      const need = classesToReachTarget(sub.present, sub.total, effectiveTargetPct);
+   657→      const dueAt = endOfToday();
+   658→      const description = `${pct.toFixed(2)}% vs ${effectiveTargetPct}% target${override != null ? " (custom)" : ""}. Attend the next ${need} class${need === 1 ? "" : "es"}.`;
+   659→      if (!warnReminder) {
+   660→        await db.reminder.create({
+   661→          data: {
+   662→            source: "ERP",
+   663→            externalId,
+   664→            type: "ATTENDANCE_WARNING",
+   665→            title: `Attendance below target — ${sub.name}`,
+   666→            description,
+   667→            subjectCode: sub.code,
+   668→            dueAt,
+   669→          },
+   670→        });
+   671→      } else {
+   672→        await db.reminder.update({
+   673→          where: { id: warnReminder.id },
+   674→          data: {
+   675→            title: `Attendance below target — ${sub.name}`,
+   676→            description,
+   677→            subjectCode: sub.code,
+   678→            dueAt,
+   679→          },
+   680→        });
+   681→      }
+   682→    } else if (warnReminder) {
+   683→      await db.reminder.delete({ where: { id: warnReminder.id } });
+   684→    }
+   685→  }
+   686→}
+   687→
+   688→function endOfToday(): Date {
+   689→  const d = new Date();
+   690→  d.setHours(23, 59, 59, 999);
+   691→  return d;
+   692→}
+   693→
+   694→/** Compact date-only rendering for deadline change messages.
+   695→ *  r99: moved to lib/ist — a UTC server shifted every delivered time by -5:30. */
+   696→function formatDate(d: Date): string {
+   697→  return fmtDateIST(d);
+   698→}
+   699→
+   700→function formatDateTime(d: Date): string {
+   701→  return fmtDateTimeIST(d);
+   702→}
+   703→
+   704→/** Called by the background scheduler once a minute. */
+   705→export async function syncIfDue(): Promise<SyncOutcome | null> {
+   706→  try {
+   707→    const settings = await getSettings();
+   708→    if (!settings.autoSyncEnabled) return null;
+   709→    const state = await getSyncState();
+   710→    if (state.status === "syncing") return null;
+   711→    const hasConn = (await db.erpConnection.count()) > 0;
+   712→    if (!hasConn && !settings.demoMode) return null; // nothing to sync from
+   713→    const dueAt = state.nextScheduledSyncAt?.getTime();
+   714→    if (dueAt && Date.now() < dueAt) return null;
+   715→    return await runSync("scheduled");
+   716→  } catch {
+   717→    // DB might not be ready during boot — the next tick will retry.
+   718→    return null;
+   719→  }
+   720→}
+   721→
