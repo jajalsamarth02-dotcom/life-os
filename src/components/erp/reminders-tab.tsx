@@ -120,7 +120,16 @@ import {
 import { dueGroup, ERP_BASE, erpAssignmentUrl, fmtDT, fmtDay, GROUP_META, SourceBadge, TypeIcon, typeLabel, useNow } from "./shared";
 import { downloadCsv } from "./trend-chart";
 import type { DueGroup } from "./shared";
-import type { AlaNoteRow, RemindersFilter, Reminder, ReminderType } from "./types";
+import type { AlaNoteRow, RemindersFilter, Reminder, ReminderType, SubjectView } from "./types";
+import {
+  alaBridge,
+  alaBridgeCounts,
+  bridgeChipText,
+  bridgeSummaryLine,
+  bridgeTitle,
+  type AlaBridge,
+  type BridgeSubject,
+} from "@/lib/ala-bridge";
 
 /* ------------------------------------------------------------------ */
 
@@ -1011,6 +1020,8 @@ function AlaSubjectGroup({
   onOpenChange,
   notes,
   onSaveNote,
+  bridgeMeta = null,
+  onOpenSubject,
 }: {
   group: AlaGroup;
   open: boolean;
@@ -1018,6 +1029,11 @@ function AlaSubjectGroup({
   /** Local note/priority overlays keyed by the row's stable externalId. */
   notes: Map<string, AlaNoteRow>;
   onSaveNote: (externalId: string, note: string, priority: number) => Promise<void>;
+  /** r115 the ALA bridge verdict for this course + the matched live subject
+   *  view (attendance numbers), derived in AlaSection — null = unjudged. */
+  bridgeMeta: { bridge: AlaBridge; subjectView: SubjectView | null } | null;
+  /** r115 open the matched live subject's attendance drawer (page handoff). */
+  onOpenSubject?: (code: string) => void;
 }) {
   const now = useNow();
   const [submitRow, setSubmitRow] = useState<Reminder | null>(null);
@@ -1031,69 +1047,123 @@ function AlaSubjectGroup({
   return (
     <Collapsible open={open} onOpenChange={onOpenChange}>
       <div className="overflow-hidden rounded-xl border border-border/50 bg-card/40 shadow-none transition-all duration-200 hover:border-border/90 hover:shadow-sm">
-        <CollapsibleTrigger asChild>
-          <button
-            type="button"
-            aria-expanded={open}
-            aria-label={`Toggle ${group.name ?? group.code} ALA group`}
-            className="flex w-full items-center gap-2.5 rounded-xl px-3 py-2.5 text-left transition-colors hover:bg-muted/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1"
-          >
-            <ChevronDown
-              className={cn("size-4 shrink-0 text-muted-foreground transition-transform", open && "rotate-180")}
-              aria-hidden="true"
-            />
-            <div className="min-w-0 flex-1">
-              <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5">
-                <p className="min-w-0 truncate text-sm font-semibold leading-tight">
-                  {group.name ?? "Unmapped course"}
-                </p>
-                <Badge
-                  variant="outline"
-                  className="max-w-36 shrink-0 truncate text-[10px] font-medium text-muted-foreground"
-                >
-                  {group.code}
-                </Badge>
-              </div>
-              <div className="mt-1 flex flex-wrap items-center gap-2">
-                <div
-                  role="progressbar"
-                  aria-valuemin={0}
-                  aria-valuemax={100}
-                  aria-valuenow={pct}
-                  aria-label={`${group.name ?? group.code}: ${group.submitted} of ${total} submitted`}
-                  className="h-1 w-24 shrink-0 overflow-hidden rounded-full bg-muted"
-                >
-                  <div
-                    className={cn("h-full rounded-full transition-all", barClass)}
-                    style={{ width: `${pct}%` }}
-                  />
-                </div>
-                <span className="text-[11px] tabular-nums text-muted-foreground">
-                  {group.submitted}/{total} submitted
-                </span>
-                {group.overdue > 0 && (
-                  <span className="rounded-full bg-red-500/10 px-1.5 py-0.5 text-[10px] font-semibold tabular-nums text-red-600 dark:text-red-400">
-                    {group.overdue} overdue
-                  </span>
-                )}
-                {pending > 0 && group.nextPendingMs != null && (
-                  <span
-                    className={cn(
-                      "rounded-full px-1.5 py-0.5 text-[10px] font-semibold tabular-nums",
-                      group.nextPendingMs < now
-                        ? "bg-red-500/10 text-red-600 dark:text-red-400"
-                        : group.nextPendingMs - now < 7 * 86_400_000
-                          ? "bg-amber-500/15 text-amber-700 dark:text-amber-400"
-                          : "bg-muted text-muted-foreground"
-                    )}
+        <div className="flex w-full items-center gap-1.5">
+          <CollapsibleTrigger asChild>
+            <button
+              type="button"
+              aria-expanded={open}
+              aria-label={`Toggle ${group.name ?? group.code} ALA group`}
+              className="flex min-w-0 flex-1 items-center gap-2.5 rounded-xl px-3 py-2.5 text-left transition-colors hover:bg-muted/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1"
+            >
+              <ChevronDown
+                className={cn("size-4 shrink-0 text-muted-foreground transition-transform", open && "rotate-180")}
+                aria-hidden="true"
+              />
+              <div className="min-w-0 flex-1">
+                <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5">
+                  <p className="min-w-0 truncate text-sm font-semibold leading-tight">
+                    {group.name ?? "Unmapped course"}
+                  </p>
+                  <Badge
+                    variant="outline"
+                    className="max-w-36 shrink-0 truncate text-[10px] font-medium text-muted-foreground"
                   >
-                    last date {fmtDay(new Date(group.nextPendingMs).toISOString())}
+                    {group.code}
+                  </Badge>
+                </div>
+                <div className="mt-1 flex flex-wrap items-center gap-2">
+                  <div
+                    role="progressbar"
+                    aria-valuemin={0}
+                    aria-valuemax={100}
+                    aria-valuenow={pct}
+                    aria-label={`${group.name ?? group.code}: ${group.submitted} of ${total} submitted`}
+                    className="h-1 w-24 shrink-0 overflow-hidden rounded-full bg-muted"
+                  >
+                    <div
+                      className={cn("h-full rounded-full transition-all", barClass)}
+                      style={{ width: `${pct}%` }}
+                    />
+                  </div>
+                  <span className="text-[11px] tabular-nums text-muted-foreground">
+                    {group.submitted}/{total} submitted
                   </span>
-                )}
+                  {group.overdue > 0 && (
+                    <span className="rounded-full bg-red-500/10 px-1.5 py-0.5 text-[10px] font-semibold tabular-nums text-red-600 dark:text-red-400">
+                      {group.overdue} overdue
+                    </span>
+                  )}
+                  {pending > 0 && group.nextPendingMs != null && (
+                    <span
+                      className={cn(
+                        "rounded-full px-1.5 py-0.5 text-[10px] font-semibold tabular-nums",
+                        group.nextPendingMs < now
+                          ? "bg-red-500/10 text-red-600 dark:text-red-400"
+                          : group.nextPendingMs - now < 7 * 86_400_000
+                            ? "bg-amber-500/15 text-amber-700 dark:text-amber-400"
+                            : "bg-muted text-muted-foreground"
+                      )}
+                    >
+                      last date {fmtDay(new Date(group.nextPendingMs).toISOString())}
+                    </span>
+                  )}
+                </div>
               </div>
+            </button>
+          </CollapsibleTrigger>
+          {/* r115 the ALA bridge chip — lives OUTSIDE the collapsible trigger
+             (a button must never nest inside a button). live: a tappable link
+             into the matched subject's attendance drawer; orphan/unlabeled:
+             a quiet honest label. */}
+          {bridgeMeta && (
+            <div className="shrink-0 pr-2.5">
+              {bridgeMeta.bridge.kind === "live" && bridgeMeta.subjectView ? (
+                onOpenSubject ? (
+                  <button
+                    type="button"
+                    onClick={() => onOpenSubject(bridgeMeta.subjectView!.code)}
+                    title={bridgeTitle(bridgeMeta.bridge, group.name)}
+                    aria-label={`Open ${bridgeMeta.subjectView.code} attendance for the ${group.name ?? group.code} ALA course`}
+                    className="inline-flex max-w-40 items-center gap-1 rounded-full border border-primary/35 bg-primary/10 px-2 py-0.5 text-[10px] font-semibold text-primary shadow-sm transition-colors hover:bg-primary/20 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                  >
+                    <Link2 className="size-2.5 shrink-0" aria-hidden="true" />
+                    <span className="truncate">{bridgeChipText(bridgeMeta.bridge)}</span>
+                    <span className="shrink-0 tabular-nums text-primary/70">
+                      · {Math.round(bridgeMeta.subjectView.percentage)}%
+                    </span>
+                  </button>
+                ) : (
+                  <span
+                    title={bridgeTitle(bridgeMeta.bridge, group.name)}
+                    className="inline-flex max-w-40 items-center gap-1 rounded-full border border-primary/25 bg-primary/5 px-2 py-0.5 text-[10px] font-semibold text-primary"
+                  >
+                    <Link2 className="size-2.5 shrink-0" aria-hidden="true" />
+                    <span className="truncate">{bridgeChipText(bridgeMeta.bridge)}</span>
+                    <span className="shrink-0 tabular-nums text-primary/70">
+                      · {Math.round(bridgeMeta.subjectView.percentage)}%
+                    </span>
+                  </span>
+                )
+              ) : bridgeMeta.bridge.kind === "orphan" ? (
+                <span
+                  title={bridgeTitle(bridgeMeta.bridge, group.name)}
+                  className="inline-flex max-w-40 items-center gap-1 rounded-full border border-dashed border-border bg-muted/40 px-2 py-0.5 text-[10px] font-medium text-muted-foreground"
+                >
+                  <BookOpen className="size-2.5 shrink-0" aria-hidden="true" />
+                  <span className="truncate">{bridgeChipText(bridgeMeta.bridge)}</span>
+                </span>
+              ) : (
+                <span
+                  title={bridgeTitle(bridgeMeta.bridge, group.name)}
+                  className="inline-flex max-w-40 items-center gap-1 rounded-full border border-dashed border-border bg-muted/40 px-2 py-0.5 text-[10px] font-medium text-muted-foreground"
+                >
+                  <Ghost className="size-2.5 shrink-0" aria-hidden="true" />
+                  <span className="truncate">{bridgeChipText(bridgeMeta.bridge)}</span>
+                </span>
+              )}
             </div>
-          </button>
-        </CollapsibleTrigger>
+          )}
+        </div>
         <CollapsibleContent>
           <ul className="space-y-1.5 px-2.5 pb-2.5">
             {group.items.map((a) => {
@@ -2169,6 +2239,7 @@ function AlaSection({
   onPendingFilterConsumed,
   pendingCleanup = false,
   onPendingCleanupConsumed,
+  onOpenSubject,
 }: {
   /** Cross-tab jump (dashboard flagged-ALA card): applied once on mount, then
    *  reported consumed so later remounts don't re-apply a stale filter. */
@@ -2179,6 +2250,9 @@ function AlaSection({
    *  must not shove a dialog in the student's face uninvited. */
   pendingCleanup?: boolean;
   onPendingCleanupConsumed?: () => void;
+  /** r115 the ALA bridge: open a matched LIVE subject's attendance drawer
+   *  (page-level handoff — same convention as the command palette). */
+  onOpenSubject?: (code: string) => void;
 }) {
   const { data, isPending, isError, error } = useQuery({
     queryKey: qk.assignments,
@@ -2215,6 +2289,33 @@ function AlaSection({
     queryFn: fetchAlaNotes,
     staleTime: 30_000,
   });
+
+  /* r115 the ALA bridge — the ERP keys ALA courses by internal ids
+     (BETCE15xxx) that are NOT subject codes; the Oct 2 rollover orphaned
+     every live row's link. Derive each group's honest bridge (exact
+     normalized name match ONLY — see src/lib/ala-bridge.ts) against the
+     CURRENT attendance registry (shared qk.attendance cache, no extra
+     fetch once the dashboard/attendance tab has loaded). */
+  const { data: att } = useQuery({
+    queryKey: qk.attendance,
+    queryFn: fetchAttendance,
+    staleTime: 60_000,
+  });
+  const bridgeByCode = useMemo(() => {
+    const map = new Map<string, { bridge: AlaBridge; subjectView: SubjectView | null }>();
+    if (!data) return map;
+    const subjects: BridgeSubject[] = (att?.subjects ?? []).map((s) => ({ code: s.code, name: s.name }));
+    const byCode = new Map((att?.subjects ?? []).map((s) => [s.code, s]));
+    for (const g of new Set(data.assignments.map((a) => a.subjectCode ?? "UNKNOWN"))) {
+      const bridge = alaBridge(data.courseNames[g] ?? null, subjects);
+      map.set(g, { bridge, subjectView: bridge.subject ? byCode.get(bridge.subject.code) ?? null : null });
+    }
+    return map;
+  }, [data, att]);
+  const bridgeCounts = useMemo(
+    () => alaBridgeCounts([...bridgeByCode.values()].map((v) => v.bridge)),
+    [bridgeByCode]
+  );
   const noteMap = useMemo(
     () => new Map((alaNotes ?? []).map((n) => [n.externalId, n])),
     [alaNotes]
@@ -2563,6 +2664,14 @@ function AlaSection({
             Subject-wise, synced from the ERP Assignments page — read-only mirror
             {data?.sourceSemester != null && ` · Sem ${data.sourceSemester} (ERP current)`}
           </CardDescription>
+          {bridgeSummaryLine(bridgeCounts) && (
+            <p className="mt-1.5 inline-flex max-w-full items-center gap-1.5 rounded-full border border-primary/25 bg-primary/5 px-2.5 py-0.5 text-[11px] font-medium text-primary">
+              <Link2 className="size-3 shrink-0" aria-hidden="true" />
+              <span className="truncate" title="Exact course-name match between the ERP's ALA page and this term's attendance subjects — no guessing.">
+                {bridgeSummaryLine(bridgeCounts)}
+              </span>
+            </p>
+          )}
         </div>
         {total > 0 && (
           <div className="flex shrink-0 items-center gap-1.5">
@@ -2796,13 +2905,29 @@ function AlaSection({
                 {groups.map((g) => {
                   const active = subject === g.code;
                   const open = g.items.length - g.submitted;
+                  /* r115 style pass: a live-matched course's dot speaks the
+                     attendance status language (safe/below target/at risk);
+                     unmatched groups keep their hashed identity hue. */
+                  const meta = bridgeByCode.get(g.code) ?? null;
+                  const st = meta?.subjectView?.status ?? null;
+                  const stPct = meta?.subjectView ? Math.round(meta.subjectView.percentage) : null;
+                  const stLabel =
+                    st === "safe"
+                      ? "safe"
+                      : st === "warning"
+                        ? "below target"
+                        : st === "danger"
+                          ? "at risk"
+                          : st === "none"
+                            ? "no classes yet"
+                            : null;
                   return (
                     <button
                       key={g.code}
                       type="button"
                       aria-pressed={active}
                       onClick={() => setSubject(active ? null : g.code)}
-                      title={`${g.name ?? "Unmapped course"} (${g.code}) — ${open} open, ${g.overdue} overdue`}
+                      title={`${g.name ?? "Unmapped course"} (${g.code}) — ${open} open, ${g.overdue} overdue${stLabel != null && stPct != null ? ` · this term ${stPct}% (${stLabel})` : ""}`}
                       aria-label={`Filter the ALA list to ${g.name ?? g.code} — ${open} open, ${g.overdue} overdue`}
                       className={cn(
                         "flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-xs font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
@@ -2814,7 +2939,13 @@ function AlaSection({
                       <span
                         className={cn(
                           "size-2 shrink-0 rounded-full",
-                          subjectDot(g.code),
+                          st === "safe"
+                            ? "bg-emerald-500"
+                            : st === "warning"
+                              ? "bg-amber-500"
+                              : st === "danger"
+                                ? "bg-red-500"
+                                : subjectDot(g.code),
                           active && "ring-2 ring-ring/40 ring-offset-1"
                         )}
                         aria-hidden="true"
@@ -2944,6 +3075,8 @@ function AlaSection({
                   }
                   notes={noteMap}
                   onSaveNote={saveNote}
+                  bridgeMeta={bridgeByCode.get(g.code) ?? null}
+                  onOpenSubject={onOpenSubject}
                 />
               ))
             )}
@@ -3626,6 +3759,7 @@ export function RemindersTab({
   onConsumePendingCleanup,
   onConsumePendingAlaFilter,
   pendingCleanup = false,
+  onOpenSubject,
 }: {
   /** Set by the page right before switching to this tab (see page.tsx);
    *  AlaSection applies it once on mount. */
@@ -3635,6 +3769,9 @@ export function RemindersTab({
    *  clicked — AlaSection opens the sweep dialog once on mount. */
   pendingCleanup?: boolean;
   onConsumePendingCleanup?: () => void;
+  /** r115: the ALA bridge's one-tap path from a matched course group to its
+   *  live subject's attendance drawer (page-level tab flip + handoff). */
+  onOpenSubject?: (code: string) => void;
 }) {
   /* Filter + layout hydrate from localStorage after mount (SSR renders the
      defaults; a saved choice swaps in post-paint — no hydration mismatch). */
@@ -3696,6 +3833,7 @@ export function RemindersTab({
         onPendingFilterConsumed={onConsumePendingAlaFilter}
         pendingCleanup={pendingCleanup}
         onPendingCleanupConsumed={onConsumePendingCleanup}
+        onOpenSubject={onOpenSubject}
       />
       <Card className="rounded-xl border-border/60">
         <CardContent className="flex flex-wrap items-center gap-3 p-4">

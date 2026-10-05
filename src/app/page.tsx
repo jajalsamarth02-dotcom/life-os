@@ -38,7 +38,7 @@ import { CommandPalette } from "@/components/erp/command-palette";
 import { useDueNotifications } from "@/components/erp/use-due-notifications";
 import { useOffline } from "@/components/erp/use-offline";
 import { duePersonalCount, useAppBadge } from "@/components/erp/use-app-badge";
-import { fetchAssignments, fetchDashboard, fetchReminders, postSync, qk } from "@/components/erp/api";
+import { fetchAssignments, fetchDashboard, fetchReminders, postSync, qk, type SubjectFocusHandoff } from "@/components/erp/api";
 import { fmtDT } from "@/components/erp/shared";
 
 type TabKey = "dashboard" | "attendance" | "reminders" | "settings";
@@ -241,6 +241,25 @@ export default function Home() {
   const [paletteOpen, setPaletteOpen] = useState(false);
   const qc = useQueryClient();
   const { resolvedTheme, setTheme } = useTheme();
+
+  /* r115 the ALA bridge → attendance drawer handoff: flip to the attendance
+     tab, then write the qk.subjectFocus handoff (the same 120ms convention
+     the command palette established — the handoff survives the tab mount
+     either way, so the drawer opens on arrival). Used by the Reminders tab's
+     ALA wall to jump from a matched course group into that subject's
+     attendance numbers. */
+  const openSubjectFromAnywhere = useCallback(
+    (code: string) => {
+      setTab("attendance");
+      window.setTimeout(() => {
+        qc.setQueryData<SubjectFocusHandoff>(qk.subjectFocus, {
+          code,
+          nonce: Date.now(),
+        });
+      }, 120);
+    },
+    [setTab, qc]
+  );
   const { data } = useQuery({ queryKey: qk.dashboard, queryFn: fetchDashboard, refetchInterval: 20_000 });
 
   /* System notifications when a reminder becomes due (device-local opt-in) */
@@ -445,6 +464,7 @@ export default function Home() {
                       onConsumePendingAlaFilter={consumePendingAlaFilter}
                       pendingCleanup={pendingCleanup}
                       onConsumePendingCleanup={consumePendingCleanup}
+                      onOpenSubject={openSubjectFromAnywhere}
                     />
                   )}
                   {key === "settings" && (
