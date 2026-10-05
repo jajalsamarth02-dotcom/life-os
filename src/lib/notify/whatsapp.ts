@@ -1,6 +1,7 @@
 import { db } from "@/lib/db";
 import { decryptSecret, encryptSecret } from "@/lib/crypto";
 import { ASSIGNMENT_EXT_PREFIX } from "@/lib/sync/engine";
+import { resolveWaSaveInput } from "@/lib/wa-pair";
 
 /**
  * WhatsApp alerts for pending work — personal-project grade via CallMeBot
@@ -78,15 +79,19 @@ export async function getWaConfig(): Promise<WaConfig | null> {
   }
 }
 
-export async function saveWaConfig(input: { phone: string; apikey: string; enabled?: boolean }): Promise<void> {
+export async function saveWaConfig(input: { phone?: string; apikey: string; enabled?: boolean }): Promise<void> {
   // Normalize: digits only; Indian 10-digit numbers get the 91 prefix.
-  const digits = input.phone.replace(/\D/g, "");
-  const phone = digits.length === 10 ? `91${digits}` : digits;
-  if (phone.length < 8 || phone.length > 15) {
-    throw new Error("Phone must be an international number, e.g. 91 98XXXXXXXX.");
-  }
-  if (!input.apikey.trim()) throw new Error("The CallMeBot apikey is required.");
-  await setRawSetting(SETTING_ENC, encryptSecret(JSON.stringify({ phone, apikey: input.apikey.trim() })));
+  // A repair (r109) may omit the phone — the saved one is the student's OWN
+  // paired number and stays unless they type a different one (resolveWaSaveInput
+  // is the test-pinned rulebook; first-time setup still requires a phone).
+  const existing = await getWaConfig();
+  const resolved = resolveWaSaveInput({
+    phone: input.phone ?? null,
+    apikey: input.apikey,
+    existingPhone: existing?.phone ?? null,
+  });
+  const { phone, apikey } = resolved;
+  await setRawSetting(SETTING_ENC, encryptSecret(JSON.stringify({ phone, apikey })));
   if (typeof input.enabled === "boolean") {
     await setRawSetting(SETTING_ENABLED, input.enabled ? "1" : "0");
   }

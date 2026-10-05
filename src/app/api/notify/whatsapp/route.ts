@@ -32,8 +32,11 @@ export async function POST(req: NextRequest) {
   try {
     switch (body.action) {
       case "save": {
-        if (!body.phone || !body.apikey) {
-          return NextResponse.json({ error: "Phone and apikey are both required." }, { status: 400 });
+        // Phone is optional since r109: a repair keeps the SAVED phone
+        // (the student's own paired number) and replaces only the key.
+        // First-time setup without a phone is rejected by saveWaConfig.
+        if (!body.apikey) {
+          return NextResponse.json({ error: "The apikey is required." }, { status: 400 });
         }
         await saveWaConfig({ phone: body.phone, apikey: body.apikey, enabled: body.enabled });
         const status = await getWaStatus();

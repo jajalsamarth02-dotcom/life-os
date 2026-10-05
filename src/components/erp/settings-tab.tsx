@@ -1,7 +1,7 @@
 "use client";
 
 import * as React from "react";
-import { useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   AlertCircle,
@@ -9,11 +9,13 @@ import {
   BellOff,
   BellRing,
   CalendarClock,
+  Check,
   CheckCircle2,
   Copy,
   Dices,
   Database,
   Download,
+  ExternalLink,
   FileJson,
   FileSpreadsheet,
   FlaskConical,
@@ -39,6 +41,16 @@ import {
 } from "lucide-react";
 import { toast } from "sonner";
 import { apikeyShapeHint, parseNotifyHealth, stripProviderHtml, type NotifyHealth } from "@/lib/notify-health";
+import {
+  CALLMEBOT_ACTIVATE_MESSAGE,
+  CALLMEBOT_DEFAULT_ACTIVATE_DIGITS,
+  CALLMEBOT_INSTRUCTIONS_URL,
+  buildWaPairLink,
+  extractApikeyFromReply,
+  formatWaNumber,
+  normalizeWaDigits,
+  waPairFallbackText,
+} from "@/lib/wa-pair";
 import { isIOS, promptInstall, useCanInstall, useIsInstalled } from "./install-prompt";
 import { compactErrorText } from "@/lib/compact-error";
 import {
@@ -56,8 +68,10 @@ import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Textarea } from "@/components/ui/textarea";
 import {
   Select,
   SelectContent,
@@ -120,6 +134,7 @@ import {
   restoreAlaNotes,
   ApiError,
   qk,
+  type WaStatusResponse,
 } from "./api";
 import { CustomTargetChip, erpAssignmentUrl, fmtDT, syncLogIcon } from "./shared";
 import { TextSizeCard } from "./text-size-card";
@@ -2181,11 +2196,455 @@ function ChannelHealthLine({ health, raw }: { health: NotifyHealth; raw: string 
   );
 }
 
+/* WhatsApp repair wizard (r109)                                        */
+/*----------------------------------------------------------------------*/
+/* Pairing is a conversation with CallMeBot's bot: the student sends one */
+/* fixed activation message, the bot replies with a numeric apikey. The  */
+/* wizard turns the three manual rounds (open chat → paste reply → save  */
+/* + test) into guided steps with live validation. NOTHING is saved or   */
+/* sent until the student presses the button themselves — the wizard is  */
+/* a surface, not a sender. The health verdict shown inside is the SAME  */
+/* parseNotifyHealth object the card renders (r106 single-verdict rule). */
+
+const REPAIR_STEPS = ["Open the chat", "Paste the reply", "Save & verify"] as const;
+
+function WaStepDot({
+  state,
+  index,
+  onClick,
+}: {
+  state: "done" | "active" | "pending";
+  index: number;
+  onClick?: () => void;
+}) {
+  const clickable = state === "done" && onClick;
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      disabled={!clickable}
+      aria-label={
+        clickable ? `Back to step ${index + 1}: ${REPAIR_STEPS[index]}` : undefined
+      }
+      aria-current={state === "active" ? "step" : undefined}
+      className={cn(
+        "flex size-7 shrink-0 items-center justify-center rounded-full border text-[11px] font-bold tabular-nums transition-colors",
+        state === "done" &&
+          "border-emerald-500/40 bg-emerald-500/15 text-emerald-700 dark:text-emerald-400",
+        state === "active" &&
+          "border-primary/50 bg-primary/10 text-primary ring-2 ring-primary/20",
+        state === "pending" && "border-border/70 bg-muted/50 text-muted-foreground",
+        clickable ? "cursor-pointer hover:bg-emerald-500/25" : "cursor-default"
+      )}
+    >
+      {state === "done" ? (
+        <Check className="size-3.5" aria-hidden="true" />
+      ) : (
+        index + 1
+      )}
+    </button>
+  );
+}
+
+function WaRepairDialog({
+  open,
+  onOpenChange,
+  status,
+  health,
+}: {
+  open: boolean;
+  onOpenChange: (v: boolean) => void;
+  status: WaStatusResponse;
+  health: NotifyHealth;
+}) {
+  const qc = useQueryClient();
+  const refresh = () => qc.invalidateQueries({ queryKey: qk.waStatus });
+  const [step, setStep] = useState(0);
+  const [activation, setActivation] = useState(CALLMEBOT_DEFAULT_ACTIVATE_DIGITS);
+  const [pasted, setPasted] = useState("");
+  const [apikey, setApikey] = useState("");
+  const [phone, setPhone] = useState("");
+  const [changePhone, setChangePhone] = useState(false);
+  const [busy, setBusy] = useState<null | "save" | "test">(null);
+  const [savedKey, setSavedKey] = useState(false);
+  const [testResult, setTestResult] = useState<null | { ok: boolean; snippet: string }>(null);
+
+  /* One-shot reset per open (r107 convention): a re-open starts a FRESH
+     pairing — stale half-typed keys from the last attempt must not leak. */
+  useEffect(() => {
+    if (open) {
+      setStep(0);
+      setActivation(CALLMEBOT_DEFAULT_ACTIVATE_DIGITS);
+      setPasted("");
+      setApikey("");
+      setPhone("");
+      setChangePhone(!status?.configured);
+      setBusy(null);
+      setSavedKey(false);
+      setTestResult(null);
+    }
+  }, [open, status?.configured]);
+
+  const pairLink = useMemo(() => buildWaPairLink(activation), [activation]);
+  const detectedKey = useMemo(
+    () => (open && pasted.trim() ? extractApikeyFromReply(pasted) : null),
+    [open, pasted]
+  );
+  const keyReady = apikey.trim().length >= 4;
+  const live = health.verdict === "live";
+
+  const saveFreshKey = async () => {
+    setBusy("save");
+    try {
+      await postWaAction("save", {
+        apikey: apikey.trim(),
+        ...(changePhone && phone.trim() ? { phone: phone.trim() } : {}),
+      });
+      setSavedKey(true);
+      toast.success("Fresh apikey saved", {
+        description: "Now press Send test to confirm the pair — nothing is sent automatically.",
+      });
+      refresh();
+    } catch (e) {
+      toast.error("Could not save the key", {
+        description: e instanceof ApiError ? e.message : "Try again.",
+      });
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  const sendTest = async () => {
+    setBusy("test");
+    try {
+      const res = await postWaAction("test");
+      setTestResult({ ok: Boolean(res.ok), snippet: stripProviderHtml(res.snippet ?? "") });
+      (res.ok ? toast.success : toast.error)(
+        res.ok ? "Test message sent — check WhatsApp" : "The provider did not accept the test",
+        { description: stripProviderHtml(res.snippet ?? "") }
+      );
+      refresh();
+    } catch (e) {
+      toast.error("WhatsApp action failed", {
+        description: e instanceof ApiError ? e.message : "Try again.",
+      });
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="max-w-md rounded-xl border-border/60 sm:max-w-md">
+        <DialogHeader>
+          <DialogTitle className="flex items-center gap-2 text-base tracking-tight">
+            <MessageCircle className="size-4 text-emerald-500" aria-hidden="true" />
+            {health.verdict === "failing" ? "Repair the WhatsApp pairing" : "Pair WhatsApp with CallMeBot"}
+          </DialogTitle>
+          <DialogDescription>
+            {health.verdict === "failing"
+              ? "The provider rejected the saved key — a fresh pairing fixes it in about two minutes."
+              : "One conversation with CallMeBot's bot, then every alert lands in your WhatsApp."}
+          </DialogDescription>
+        </DialogHeader>
+
+        {/* Stepper header — done steps navigate back */}
+        <div className="flex items-center gap-1.5" role="list" aria-label="Pairing steps">
+          {REPAIR_STEPS.map((label, i) => (
+            <React.Fragment key={label}>
+              {i > 0 && <div className="h-px flex-1 bg-border/70" aria-hidden="true" />}
+              <div role="listitem" className="flex items-center gap-1.5">
+                <WaStepDot
+                  index={i}
+                  state={i < step ? "done" : i === step ? "active" : "pending"}
+                  onClick={i < step ? () => setStep(i) : undefined}
+                />
+                <span
+                  className={cn(
+                    "hidden text-[11px] font-medium sm:inline",
+                    i === step ? "text-foreground" : "text-muted-foreground"
+                  )}
+                >
+                  {label}
+                </span>
+              </div>
+            </React.Fragment>
+          ))}
+        </div>
+
+        {step === 0 && (
+          <div className="space-y-3">
+            <p className="text-xs leading-relaxed text-muted-foreground">
+              CallMeBot pairs <b className="font-semibold text-foreground">your own WhatsApp</b> once.
+              Send their bot the fixed activation message — the reply carries your apikey.
+            </p>
+            <div className="space-y-1.5">
+              <Label htmlFor="wa-activation" className="text-xs">
+                CallMeBot activation number
+              </Label>
+              <Input
+                id="wa-activation"
+                inputMode="tel"
+                value={activation}
+                onChange={(e) => setActivation(e.target.value)}
+                className="font-mono text-sm"
+                aria-label="CallMeBot activation number"
+              />
+              <div className="flex flex-wrap items-center justify-between gap-1.5">
+                <span className="font-mono text-[11px] text-muted-foreground">
+                  {formatWaNumber(activation) || "—"}
+                </span>
+                <a
+                  href={CALLMEBOT_INSTRUCTIONS_URL}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="inline-flex items-center gap-1 text-[11px] font-medium text-primary underline-offset-2 hover:underline"
+                >
+                  their instructions
+                  <ExternalLink className="size-3" aria-hidden="true" />
+                </a>
+              </div>
+              {activation.trim() !== CALLMEBOT_DEFAULT_ACTIVATE_DIGITS && (
+                <p className="flex items-start gap-1.5 text-[11px] leading-snug text-amber-700 dark:text-amber-400">
+                  <TriangleAlert className="mt-0.5 size-3.5 shrink-0" aria-hidden="true" />
+                  Custom number — only use it if CallMeBot&apos;s instructions page shows a different
+                  bot number. They rotate it occasionally.
+                </p>
+              )}
+            </div>
+            {pairLink ? (
+              <a
+                href={pairLink}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="flex h-10 w-full items-center justify-center gap-2 rounded-md bg-emerald-600 text-sm font-medium text-white shadow-sm transition-colors hover:bg-emerald-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500/50"
+                aria-label="Open WhatsApp with the activation message ready"
+              >
+                <MessageCircle className="size-4" aria-hidden="true" />
+                Open WhatsApp — message ready to send
+              </a>
+            ) : (
+              <div className="flex h-10 w-full items-center justify-center gap-2 rounded-md border border-amber-500/40 bg-amber-500/10 text-xs font-medium text-amber-700 dark:text-amber-400">
+                <TriangleAlert className="size-4 shrink-0" aria-hidden="true" />
+                Enter a valid international bot number to continue
+              </div>
+            )}
+            <Button
+              variant="ghost"
+              size="sm"
+              className="h-8 w-full gap-1.5 text-muted-foreground"
+              onClick={async () => {
+                try {
+                  await navigator.clipboard.writeText(waPairFallbackText(activation));
+                  toast.success("Copied — paste it into any chat with yourself");
+                } catch {
+                  toast.error("Could not copy — long-press the message instead");
+                }
+              }}
+            >
+              <Copy className="size-3.5" aria-hidden="true" />
+              No WhatsApp here? Copy the instructions instead
+            </Button>
+            <Button
+              size="sm"
+              className="h-9 w-full"
+              disabled={!pairLink}
+              onClick={() => setStep(1)}
+            >
+              I&apos;ve sent it — next
+            </Button>
+          </div>
+        )}
+
+        {step === 1 && (
+          <div className="space-y-3">
+            <p className="text-xs leading-relaxed text-muted-foreground">
+              CallMeBot replies with something like{" "}
+              <span className="font-mono text-[11px] text-foreground">
+                API Activated… Your APIKEY is 123456
+              </span>
+              . Paste the <b className="font-semibold text-foreground">whole reply</b> — the key is
+              pulled out of it automatically.
+            </p>
+            <Textarea
+              value={pasted}
+              onChange={(e) => setPasted(e.target.value)}
+              rows={3}
+              placeholder="Paste the bot's reply here…"
+              aria-label="Paste the CallMeBot reply"
+              className="text-sm"
+            />
+            {pasted.trim() && detectedKey && (
+              <div className="flex items-center justify-between gap-2 rounded-lg border border-emerald-500/40 bg-emerald-500/10 px-3 py-2">
+                <span className="flex min-w-0 items-center gap-1.5 text-xs text-emerald-700 dark:text-emerald-400">
+                  <CheckCircle2 className="size-4 shrink-0" aria-hidden="true" />
+                  Key found: <span className="truncate font-mono font-semibold">{detectedKey}</span>
+                </span>
+                <Button
+                  size="sm"
+                  className="h-7 shrink-0 gap-1"
+                  onClick={() => {
+                    setApikey(detectedKey);
+                    setStep(2);
+                  }}
+                >
+                  Use this key
+                </Button>
+              </div>
+            )}
+            {pasted.trim() && !detectedKey && (
+              <p className="flex items-start gap-1.5 text-[11px] leading-snug text-amber-700 dark:text-amber-400">
+                <TriangleAlert className="mt-0.5 size-3.5 shrink-0" aria-hidden="true" />
+                Couldn&apos;t find a key in that. Paste the full reply, or type the key below.
+              </p>
+            )}
+            <div className="flex items-center gap-2 text-[10px] uppercase tracking-wider text-muted-foreground">
+              <span className="h-px flex-1 bg-border/70" aria-hidden="true" />
+              or type it yourself
+              <span className="h-px flex-1 bg-border/70" aria-hidden="true" />
+            </div>
+            <Input
+              value={apikey}
+              onChange={(e) => setApikey(e.target.value)}
+              placeholder="123456"
+              inputMode="numeric"
+              className="font-mono text-sm"
+              aria-label="CallMeBot apikey, typed manually"
+            />
+            {apikeyShapeHint(apikey) && (
+              <p className="flex items-start gap-1.5 text-[11px] leading-snug text-amber-700 dark:text-amber-400">
+                <TriangleAlert className="mt-0.5 size-3.5 shrink-0" aria-hidden="true" />
+                {apikeyShapeHint(apikey)}
+              </p>
+            )}
+            <Button
+              size="sm"
+              className="h-9 w-full"
+              disabled={!keyReady}
+              onClick={() => setStep(2)}
+            >
+              Next — save &amp; verify
+            </Button>
+          </div>
+        )}
+
+        {step === 2 && (
+          <div className="space-y-3">
+            <div className="rounded-lg border border-border/60 bg-muted/40 px-3 py-2.5">
+              <div className="flex items-center justify-between gap-2">
+                <span className="flex min-w-0 items-center gap-1.5 text-xs">
+                  <KeyRound className="size-3.5 shrink-0 text-primary" aria-hidden="true" />
+                  {status?.configured ? "Keeps your saved number" : "Your WhatsApp number"}
+                  {status?.phoneMasked && (
+                    <Badge variant="secondary" className="font-mono text-[10px]">
+                      {status.phoneMasked}
+                    </Badge>
+                  )}
+                </span>
+                {status?.configured && (
+                  <button
+                    type="button"
+                    className="text-[11px] font-medium text-primary underline-offset-2 hover:underline"
+                    onClick={() => setChangePhone((v) => !v)}
+                  >
+                    {changePhone ? "keep saved" : "change"}
+                  </button>
+                )}
+              </div>
+              {(changePhone || !status?.configured) && (
+                <div className="mt-2 space-y-1">
+                  <Input
+                    inputMode="tel"
+                    value={phone}
+                    onChange={(e) => setPhone(e.target.value)}
+                    placeholder="e.g. 91 98XXXXXXXX"
+                    className="h-8 font-mono text-xs"
+                    aria-label="WhatsApp phone number with country code"
+                  />
+                  <p className="text-[10px] leading-snug text-muted-foreground">
+                    The number you sent the activation message FROM — your own WhatsApp. Stored
+                    encrypted, never exported.
+                  </p>
+                </div>
+              )}
+            </div>
+
+            <div className="flex gap-2">
+              <Button
+                size="sm"
+                className="h-9 flex-1 gap-1.5"
+                disabled={!keyReady || busy !== null || savedKey}
+                onClick={saveFreshKey}
+              >
+                {busy === "save" ? (
+                  <Loader2 className="size-3.5 animate-spin" aria-hidden="true" />
+                ) : (
+                  <Save className="size-3.5" aria-hidden="true" />
+                )}
+                {savedKey ? "Saved" : "Save fresh key"}
+              </Button>
+              <Button
+                size="sm"
+                variant="secondary"
+                className="h-9 flex-1 gap-1.5"
+                disabled={!savedKey || busy !== null}
+                onClick={sendTest}
+              >
+                {busy === "test" ? (
+                  <Loader2 className="size-3.5 animate-spin" aria-hidden="true" />
+                ) : (
+                  <MessageCircle className="size-3.5" aria-hidden="true" />
+                )}
+                Send test
+              </Button>
+            </div>
+            {!savedKey && (
+              <p className="text-[11px] leading-snug text-muted-foreground">
+                Saving replaces only the key — your phone and the on/off switch stay as they are.
+                Nothing is sent until you press Send test.
+              </p>
+            )}
+
+            {testResult && (
+              <p
+                className={cn(
+                  "rounded-md border px-2.5 py-1.5 text-[11px] leading-snug",
+                  testResult.ok
+                    ? "border-emerald-500/40 bg-emerald-500/10 text-emerald-700 dark:text-emerald-400"
+                    : "border-red-500/40 bg-red-500/10 text-red-700 dark:text-red-400"
+                )}
+              >
+                {testResult.ok ? "Delivered: " : "Failed: "}
+                {testResult.snippet || (testResult.ok ? "message queued" : "unknown response")}
+              </p>
+            )}
+
+            {live && (
+              <div className="flex items-center gap-2 rounded-lg border border-emerald-500/40 bg-emerald-500/10 px-3 py-2.5">
+                <CheckCircle2 className="size-5 shrink-0 text-emerald-600 dark:text-emerald-400" aria-hidden="true" />
+                <div className="min-w-0">
+                  <p className="text-xs font-semibold text-emerald-700 dark:text-emerald-400">
+                    Paired and verified
+                  </p>
+                  <p className="text-[11px] leading-snug text-emerald-700/80 dark:text-emerald-400/80">
+                    {health.detail} Alerts flow again — you can close this and flip the switch on.
+                  </p>
+                </div>
+              </div>
+            )}
+          </div>
+        )}
+      </DialogContent>
+    </Dialog>
+  );
+}
+
 function WhatsAppCard() {
   const qc = useQueryClient();
   const { data: status } = useQuery({ queryKey: qk.waStatus, queryFn: fetchWaStatus });
   const [phone, setPhone] = useState("");
   const [apikey, setApikey] = useState("");
+  const [repairOpen, setRepairOpen] = useState(false);
   const [digestTime, setDigestTime] = useState("");
   const [busy, setBusy] = useState<null | "save" | "test" | "digest" | "time" | "clearTime">(null);
 
@@ -2295,22 +2754,35 @@ function WhatsAppCard() {
       </CardHeader>
       <CardContent className="space-y-3">
         {!configured ? (
-          <ol className="list-inside list-decimal space-y-1 text-sm text-muted-foreground">
-            <li>
-              Get a free apikey at{" "}
-              <a
-                href="https://www.callmebot.com/blog/free-api-for-send-whatsapp-messages/"
-                target="_blank"
-                rel="noopener noreferrer"
-                className="font-medium text-primary underline-offset-2 hover:underline"
+          <div className="space-y-2">
+            <ol className="list-inside list-decimal space-y-1 text-sm text-muted-foreground">
+              <li>
+                Get a free apikey at{" "}
+                <a
+                  href="https://www.callmebot.com/blog/free-api-for-send-whatsapp-messages/"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="font-medium text-primary underline-offset-2 hover:underline"
+                >
+                  callmebot.com
+                </a>{" "}
+                (one WhatsApp message from your phone to their bot)
+              </li>
+              <li>Paste your number and the apikey below — stored encrypted, never exported</li>
+              <li>Send a test, then flip the switch on</li>
+            </ol>
+            {status && health && (
+              <Button
+                size="sm"
+                variant="outline"
+                className="h-8 gap-1.5 border-emerald-500/40 text-emerald-700 hover:bg-emerald-500/10 hover:text-emerald-700 dark:text-emerald-400 dark:hover:text-emerald-400"
+                onClick={() => setRepairOpen(true)}
               >
-                callmebot.com
-              </a>{" "}
-              (one WhatsApp message from your phone to their bot)
-            </li>
-            <li>Paste your number and the apikey below — stored encrypted, never exported</li>
-            <li>Send a test, then flip the switch on</li>
-          </ol>
+                <MessageCircle className="size-3.5" aria-hidden="true" />
+                Start guided setup
+              </Button>
+            )}
+          </div>
         ) : (
           <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
             <Badge variant="secondary" className="font-mono text-[10px]">{status?.phoneMasked}</Badge>
@@ -2435,11 +2907,21 @@ function WhatsAppCard() {
           <div className="space-y-1.5">
             <ChannelHealthLine health={health} raw={status.lastResult} />
             {health.verdict === "failing" && (
-              <p className="flex items-start gap-1.5 text-[11px] leading-snug text-amber-700 dark:text-amber-400">
-                <TriangleAlert className="mt-0.5 size-3.5 shrink-0" aria-hidden="true" />
-                The provider rejected the saved key — send the pairing message from your WhatsApp again,
-                save the fresh apikey above, then press Send test to confirm the pair.
-              </p>
+              <div className="flex flex-wrap items-center gap-x-2 gap-y-1.5 rounded-lg border border-amber-500/40 bg-amber-500/10 px-2.5 py-2">
+                <p className="flex min-w-0 flex-1 items-start gap-1.5 text-[11px] leading-snug text-amber-700 dark:text-amber-400">
+                  <TriangleAlert className="mt-0.5 size-3.5 shrink-0" aria-hidden="true" />
+                  The provider rejected the saved key — a fresh pairing fixes it. Open the chat,
+                  paste the reply, save the new key, press Send test.
+                </p>
+                <Button
+                  size="sm"
+                  className="h-7 shrink-0 gap-1.5 bg-amber-600 text-white hover:bg-amber-700"
+                  onClick={() => setRepairOpen(true)}
+                >
+                  <KeyRound className="size-3.5" aria-hidden="true" />
+                  Repair pairing
+                </Button>
+              </div>
             )}
           </div>
         )}
@@ -2449,6 +2931,15 @@ function WhatsAppCard() {
           Uses the free CallMeBot relay with YOUR paired phone. Nothing is sent while disabled or unconfigured;
           messages are generated only from real synced ERP data.
         </p>
+
+        {status && health && (
+          <WaRepairDialog
+            open={repairOpen}
+            onOpenChange={setRepairOpen}
+            status={status}
+            health={health}
+          />
+        )}
       </CardContent>
     </Card>
   );
