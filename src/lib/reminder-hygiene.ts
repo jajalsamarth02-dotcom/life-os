@@ -208,3 +208,105 @@ export function nextAssignmentStatus(existingStatus: string, completed: boolean)
   if (existingStatus === "DISMISSED") return "DISMISSED";
   return "ACTIVE";
 }
+
+/* ---------------------------------------------------------------------- */
+/* r108 — the dashboard nudge ("the noise ledger")                         */
+/* ---------------------------------------------------------------------- */
+
+/**
+ * Round 108 origin: a day after the one-pass sweep shipped, the student had
+ * still not touched it — the affordance lived only on the Reminders tab,
+ * but the Dashboard is where the student actually lands. The nudge needed
+ * honest numbers (not "clean up your reminders!") computed by the SAME
+ * rulebook as the sweep dialog, plus a polite dismissal that cannot hide a
+ * CHANGED situation: sweeping a ghost or missing a fresh deadline must
+ * re-arm the nudge even inside its 24h quiet window.
+ *
+ * `buildHousekeepingNudgeSummary` turns a plan into the three numbers the
+ * nudge shows (stale / ghosts / recent), the oldest stale due date (the
+ * "overdue since Jul 16" line — the visceral hook), and a `signature` that
+ * flips the moment any of those numbers change.
+ *
+ * COUNTING BOUNDARY (r108, discovered against the live wall): a duplicate
+ * ghost is usually ALSO stale — it is the same old row seen through two
+ * lenses. The stale/recent counts here EXCLUDE ghost ids so the arithmetic
+ * adds up everywhere exactly once: the nudge chips ("11 stale · 3 ghosts"),
+ * the dialog sections (11 stale rows + 3 ghost rows), the pre-checked
+ * selection (14 ids) and the sweep toast ("14 swept") all describe the same
+ * 14 unique noise rows. The ghost COUNT stays the lens count (3). Only the
+ * oldest-stale hook looks through BOTH lenses — it is about the wall's age,
+ * not the ledger, and the keep row carries the same assignment anyway.
+ *
+ * `nudgeDismissalActive` is the whole dismissal policy in one pure call:
+ *  - no stored dismissal          → show (false);
+ *  - same signature, < TTL        → quiet (true);
+ *  - same signature, ≥ TTL        → show again (false) — daily nag is honest;
+ *  - different signature          → show immediately (false) — the situation
+ *    changed, the old "later" promise no longer describes it;
+ *  - corrupt storage              → show (false) — fail open toward honesty.
+ */
+
+/** How long a dismissal keeps the nudge quiet — one day, then it asks again. */
+export const NUDGE_DISMISS_TTL_MS = 24 * 86_400_000;
+
+export interface HousekeepingNudgeSummary {
+  /** ACTIVE overdue rows past the stale threshold (warnings never counted). */
+  staleCount: number;
+  /** Duplicate ghosts across all groups — the "keep" rows are NOT noise. */
+  ghostCount: number;
+  /** Overdue rows still inside the fresh window ("oops, yesterday"). */
+  recentCount: number;
+  /** All non-warning ACTIVE overdue (stale + recent) — the wall's size. */
+  totalOverdueCount: number;
+  /** Oldest stale dueAt in ms, null when nothing is stale — powers the
+   *  "overdue since …" line. Recent-only walls do not get this hook. */
+  oldestStaleDueMs: number | null;
+  /** `${stale}:${ghosts}:${recent}` — changes the moment the noise does. */
+  signature: string;
+}
+
+export function buildHousekeepingNudgeSummary<T extends HygieneReminder>(
+  plan: HousekeepingPlan<T>,
+): HousekeepingNudgeSummary {
+  const ghostIds = new Set(
+    plan.duplicateGroups.flatMap((g) => g.ghosts.map((x) => x.id)),
+  );
+  const ghostCount = plan.duplicateGroups.reduce((n, g) => n + g.ghosts.length, 0);
+  const staleOverdue = plan.staleOverdue.filter((r) => !ghostIds.has(r.id));
+  const recentOverdue = plan.recentOverdue.filter((r) => !ghostIds.has(r.id));
+  const oldestStale = plan.staleOverdue.reduce<number | null>((min, r) => {
+    const ms = new Date(r.dueAt).getTime();
+    return min === null || ms < min ? ms : min;
+  }, null);
+  return {
+    staleCount: staleOverdue.length,
+    ghostCount,
+    recentCount: recentOverdue.length,
+    totalOverdueCount: staleOverdue.length + ghostCount + recentOverdue.length,
+    oldestStaleDueMs: oldestStale,
+    signature: `${staleOverdue.length}:${ghostCount}:${recentOverdue.length}`,
+  };
+}
+
+/** What localStorage stores when the student presses "Later today". */
+export interface StoredNudgeDismissal {
+  signature: string;
+  at: number;
+}
+
+export function nudgeDismissalActive(
+  stored: string | null,
+  signature: string,
+  nowMs: number,
+): boolean {
+  if (!stored) return false;
+  try {
+    const parsed = JSON.parse(stored) as Partial<StoredNudgeDismissal>;
+    if (typeof parsed !== "object" || parsed === null) return false;
+    if (parsed.signature !== signature) return false;
+    if (typeof parsed.at !== "number" || !Number.isFinite(parsed.at)) return false;
+    return nowMs - parsed.at < NUDGE_DISMISS_TTL_MS;
+  } catch {
+    return false;
+  }
+}

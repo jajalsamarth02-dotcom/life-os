@@ -12,6 +12,7 @@ import {
   CalendarClock,
   CalendarDays,
   CalendarPlus,
+  CalendarX2,
   Check,
   Brush,
   CheckCircle2,
@@ -42,7 +43,7 @@ import {
   XCircle,
 } from "lucide-react";
 import { toast } from "sonner";
-import { buildHousekeepingPlan } from "@/lib/reminder-hygiene";
+import { buildHousekeepingPlan, buildHousekeepingNudgeSummary, type HousekeepingNudgeSummary } from "@/lib/reminder-hygiene";
 import { downloadRemindersIcs } from "@/lib/ics";
 import {
   AlertDialog,
@@ -1389,11 +1390,15 @@ function AlaOverdueDigest({
   groups,
   onViewOverdue,
   onCleanup,
+  noise,
 }: {
   groups: AlaGroup[];
   onViewOverdue: () => void;
   /** r107: present when the ALA list is loaded — opens the housekeeping sweep. */
   onCleanup?: () => void;
+  /** r108: noise ledger from the shared rulebook — stale/ghost chips so the
+   *  banner, the dashboard nudge and the sweep dialog all speak one language. */
+  noise?: HousekeepingNudgeSummary | null;
 }) {
   const [copied, setCopied] = useState(false);
   const now = useNow();
@@ -1438,6 +1443,23 @@ function AlaOverdueDigest({
             {totalOverdue} overdue across {overdueGroups.length} subject
             {overdueGroups.length === 1 ? "" : "s"}
           </p>
+          {(noise && (noise.staleCount > 0 || noise.ghostCount > 0)) && (
+            <div className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1 text-[11px] leading-tight text-muted-foreground">
+              {noise.staleCount > 0 && (
+                <span className="inline-flex items-center gap-1 rounded-full bg-red-500/10 px-2 py-0.5 font-medium text-red-700 dark:text-red-300">
+                  <CalendarX2 className="size-3" aria-hidden="true" />
+                  {noise.staleCount} stale
+                </span>
+              )}
+              {noise.ghostCount > 0 && (
+                <span className="inline-flex items-center gap-1 rounded-full bg-amber-500/10 px-2 py-0.5 font-medium text-amber-700 dark:text-amber-300">
+                  <Ghost className="size-3" aria-hidden="true" />
+                  {noise.ghostCount} duplicate ghost{noise.ghostCount === 1 ? "" : "s"}
+                </span>
+              )}
+              <span className="hidden sm:inline">— Clean up dismisses the noise in one pass</span>
+            </div>
+          )}
           <p className="mt-0.5 truncate text-[11px] text-muted-foreground">
             Worst: {worst.name ?? worst.code} ({worst.overdue})
             {nextUp
@@ -2145,11 +2167,18 @@ function loadAlaSort(): AlaSort {
 function AlaSection({
   pendingFilter = null,
   onPendingFilterConsumed,
+  pendingCleanup = false,
+  onPendingCleanupConsumed,
 }: {
   /** Cross-tab jump (dashboard flagged-ALA card): applied once on mount, then
    *  reported consumed so later remounts don't re-apply a stale filter. */
   pendingFilter?: AlaStatusFilter | null;
   onPendingFilterConsumed?: () => void;
+  /** r108 cross-tab sweep jump (dashboard housekeeping nudge): opens the
+   *  sweep dialog once on mount, then reports consumed — a later remount
+   *  must not shove a dialog in the student's face uninvited. */
+  pendingCleanup?: boolean;
+  onPendingCleanupConsumed?: () => void;
 }) {
   const { data, isPending, isError, error } = useQuery({
     queryKey: qk.assignments,
@@ -2163,6 +2192,22 @@ function AlaSection({
      banner grows a "Clean up" button that opens the SAME dialog the timeline
      uses, fed with the full assignment list (AssignmentRow = Reminder). */
   const [cleanupOpen, setCleanupOpen] = useState(false);
+  /* r108: the dashboard nudge's cross-tab jump — open the sweep once on
+     mount, then consume the signal so a later remount (filter round-trip,
+     tab switch) never re-opens it uninvited. */
+  useEffect(() => {
+    if (pendingCleanup) {
+      setCleanupOpen(true);
+      onPendingCleanupConsumed?.();
+    }
+  }, [pendingCleanup, onPendingCleanupConsumed]);
+  /* r108: the noise ledger for the digest banner — SAME rulebook as the
+     sweep dialog and the dashboard nudge (one heuristic app-wide). Clock is
+     pinned per data version (no ticking surface — r107 lesson). */
+  const hkNoise: HousekeepingNudgeSummary | null = useMemo(() => {
+    if (!data) return null;
+    return buildHousekeepingNudgeSummary(buildHousekeepingPlan(data.assignments, Date.now()));
+  }, [data]);
   /* Local-only note/priority overlay (AlaNote table) — fetched separately so
      ERP sync refetches never churn it; keyed by the row's stable externalId. */
   const { data: alaNotes } = useQuery({
@@ -2847,6 +2892,7 @@ function AlaSection({
                 groups={groups}
                 onViewOverdue={() => setStatus("overdue")}
                 onCleanup={data ? () => setCleanupOpen(true) : undefined}
+                noise={hkNoise}
               />
             )}
 
@@ -3007,6 +3053,12 @@ function HousekeepingDialog({
 
   if (!plan) return null;
   const dupGhostIds = new Set(plan.duplicateGroups.flatMap((g) => g.ghosts.map((x) => x.id)));
+  /* r108: a ghost is usually ALSO stale — showing it in both sections made
+     the same row appear twice (and the counts disagree with the dashboard
+     nudge, which now excludes ghosts from its stale number). One row, one
+     section: the stale wall lists pure stale rows only; ghosts live in
+     their duplicate groups below. The pre-checked union above is unchanged. */
+  const staleSection = plan.staleOverdue.filter((r) => !dupGhostIds.has(r.id));
   const dupTotal = dupGhostIds.size;
   const nothingToDo =
     plan.staleOverdue.length === 0 && plan.recentOverdue.length === 0 && dupTotal === 0;
@@ -3107,17 +3159,17 @@ function HousekeepingDialog({
           </div>
         ) : (
           <div className="-mx-1 max-h-[46vh] space-y-4 overflow-y-auto px-1 py-1">
-            {plan.staleOverdue.length > 0 && (
+            {staleSection.length > 0 && (
               <section aria-label="Stale overdue reminders">
                 <h4 className="mb-1.5 flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wide text-red-700 dark:text-red-300">
                   <span className="flex size-4 items-center justify-center rounded bg-red-500/15">
                     <AlertTriangle className="size-3" aria-hidden="true" />
                   </span>
                   Stale overdue
-                  <span className="font-normal tabular-nums text-muted-foreground">({plan.staleOverdue.length})</span>
+                  <span className="font-normal tabular-nums text-muted-foreground">({staleSection.length})</span>
                 </h4>
                 <ul className="space-y-1.5">
-                  {plan.staleOverdue.map((r) => rowShell(r, { tone: "stale", checked: selected.has(r.id) }))}
+                  {staleSection.map((r) => rowShell(r, { tone: "stale", checked: selected.has(r.id) }))}
                 </ul>
               </section>
             )}
@@ -3230,7 +3282,13 @@ function RemindersList({ items }: { items: Reminder[] }) {
   }
 
   const doneCount = grouped.get("done")?.length ?? 0;
-  const overdueCount = grouped.get("overdue")?.length ?? 0;
+  /* r108: the banner ADVERTISES the sweep — and the sweep never touches
+     ATTENDANCE_WARNING rows (auto-managed, the r107 rulebook). Counting
+     warnings here made the number over-promise what "Clean up" can act on;
+     the wall below keeps showing every overdue row it actually has. */
+  const overdueCount = (grouped.get("overdue") ?? []).filter(
+    (r) => r.type !== "ATTENDANCE_WARNING"
+  ).length;
 
   return (
     <div className="space-y-5">
@@ -3565,12 +3623,18 @@ function loadReminderPrefs(): { filter: RemindersFilter; view: "timeline" | "sub
 
 export function RemindersTab({
   pendingAlaFilter = null,
+  onConsumePendingCleanup,
   onConsumePendingAlaFilter,
+  pendingCleanup = false,
 }: {
   /** Set by the page right before switching to this tab (see page.tsx);
    *  AlaSection applies it once on mount. */
   pendingAlaFilter?: AlaStatusFilter | null;
   onConsumePendingAlaFilter?: () => void;
+  /** r108: set by the page when the dashboard's housekeeping nudge is
+   *  clicked — AlaSection opens the sweep dialog once on mount. */
+  pendingCleanup?: boolean;
+  onConsumePendingCleanup?: () => void;
 }) {
   /* Filter + layout hydrate from localStorage after mount (SSR renders the
      defaults; a saved choice swaps in post-paint — no hydration mismatch). */
@@ -3630,6 +3694,8 @@ export function RemindersTab({
       <AlaSection
         pendingFilter={pendingAlaFilter}
         onPendingFilterConsumed={onConsumePendingAlaFilter}
+        pendingCleanup={pendingCleanup}
+        onPendingCleanupConsumed={onConsumePendingCleanup}
       />
       <Card className="rounded-xl border-border/60">
         <CardContent className="flex flex-wrap items-center gap-3 p-4">

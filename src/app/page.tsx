@@ -182,6 +182,23 @@ export default function Home() {
   }, []);
   const consumePendingAlaFilter = useCallback(() => setPendingAlaFilter(null), []);
 
+  /* r108 cross-tab sweep jump: the dashboard's housekeeping nudge sets a
+     pending-cleanup signal, switches to Reminders, and AlaSection opens the
+     sweep dialog once on mount (same consume-once pattern as the flagged
+     filter above — Radix unmounts inactive tabs, so a plain event would be
+     missed). The dialog lands pre-fed with the ALA list where the ghosts
+     actually live (the timeline GET excludes erp:assign:* rows). */
+  const [pendingCleanup, setPendingCleanup] = useState(false);
+  const openHousekeeping = useCallback(() => {
+    setPendingCleanup(true);
+    setTabState("reminders");
+    if (window.location.hash !== "#reminders") {
+      window.history.replaceState(null, "", "#reminders");
+    }
+    window.scrollTo({ top: 0, behavior: "smooth" });
+  }, []);
+  const consumePendingCleanup = useCallback(() => setPendingCleanup(false), []);
+
   /* Deep link from the dashboard's setup checklist: switch to Settings and
      spotlight the exact card the row points at (consumed once on mount). */
   const [pendingSettingsFocus, setPendingSettingsFocus] = useState<SettingsFocus | null>(null);
@@ -418,6 +435,7 @@ export default function Home() {
                       onOpenReminders={() => setTab("reminders")}
                       onOpenFlaggedAlas={openFlaggedAlas}
                       onOpenSetupStep={openSettingsFocus}
+                      onOpenHousekeeping={openHousekeeping}
                     />
                   )}
                   {key === "attendance" && <AttendanceTab onOpenSettings={() => setTab("settings")} />}
@@ -425,6 +443,8 @@ export default function Home() {
                     <RemindersTab
                       pendingAlaFilter={pendingAlaFilter}
                       onConsumePendingAlaFilter={consumePendingAlaFilter}
+                      pendingCleanup={pendingCleanup}
+                      onConsumePendingCleanup={consumePendingCleanup}
                     />
                   )}
                   {key === "settings" && (

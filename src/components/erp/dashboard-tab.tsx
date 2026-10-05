@@ -29,6 +29,9 @@ import {
   WifiOff,
   XCircle,
   Footprints,
+  Brush,
+  Ghost,
+  CalendarX2,
 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -39,6 +42,12 @@ import { motion } from "framer-motion";
 import { cn } from "@/lib/utils";
 import { applyBatchPicks } from "@/lib/batch-picks";
 import { compactErrorText } from "@/lib/compact-error";
+import {
+  buildHousekeepingPlan,
+  buildHousekeepingNudgeSummary,
+  nudgeDismissalActive,
+  type HousekeepingNudgeSummary,
+} from "@/lib/reminder-hygiene";
 import { fetchAssignments, fetchDashboard, fetchHistory, fetchSyncLogs, fetchAlaNotes, fetchTimetable, qk } from "./api";
 import { WeeklyDigestDialog } from "./digest-dialog";
 import { TodayCard, daysAheadLabel, daysAheadThisWeek, daysAheadQualifierClass, nextUpcomingThisWeek, type TodayClassBrief } from "./today-card";
@@ -56,6 +65,7 @@ import {
   ERP_BASE,
   erpAssignmentUrl,
   fmtDT,
+  fmtDay,
   hueColors,
   CustomTargetChip,
   KindIcon,
@@ -1111,12 +1121,150 @@ function CardSkeletonLight({ className }: { className?: string }) {
   );
 }
 
+/* ------------------------------------------------------------------ */
+/* r108 — the housekeeping nudge ("the noise ledger")                  */
+/* ------------------------------------------------------------------ */
+
+const HK_NUDGE_KEY = "erp:hk-nudge-dismissal";
+
+/**
+ * The dashboard's one honest tap into the sweep. Round 108 origin: the
+ * one-pass sweep shipped on the Reminders tab (r107), a day later the
+ * graveyard was still untouched — the Dashboard, where the student actually
+ * lands, never mentions it. This strip shows the SAME numbers the sweep
+ * dialog will act on, computed by the same pure rulebook
+ * (buildHousekeepingPlan — the r107 convention: no surface re-invents the
+ * heuristic), so the nudge can never promise a cleanup the dialog cannot
+ * perform.
+ *
+ * Clock policy (r107 lesson — review surfaces must not tick): the plan is
+ * memoized on the assignments query identity with Date.now() pinned per
+ * data version; a refetch re-pins. No per-second churn (and no selection
+ * to wipe — that dialog-side fix stays where it belongs).
+ *
+ * Dismissal policy: "Later today" stores {signature, at}; the strip hides
+ * while nudgeDismissalActive() says quiet (same signature, under 24h). The
+ * moment the noise changes — a ghost swept, a fresh deadline gone stale —
+ * the signature flips and the nudge re-arms even inside the quiet window.
+ * A situation the student asked to hear less about deserves to come back
+ * DIFFERENT, not gone.
+ */
+function HousekeepingNudge({
+  assignments,
+  onOpenHousekeeping,
+}: {
+  assignments: Reminder[];
+  onOpenHousekeeping?: () => void;
+}) {
+  const plan = useMemo(() => buildHousekeepingPlan(assignments, Date.now()), [assignments]);
+  const summary: HousekeepingNudgeSummary = useMemo(
+    () => buildHousekeepingNudgeSummary(plan),
+    [plan]
+  );
+
+  const [dismissed, setDismissed] = useState<string | null>(null);
+  useEffect(() => {
+    try {
+      setDismissed(window.localStorage.getItem(HK_NUDGE_KEY));
+    } catch {
+      /* private mode / storage blocked — the nudge simply always shows */
+    }
+  }, []);
+  const quiet = useMemo(
+    () => nudgeDismissalActive(dismissed, summary.signature, Date.now()),
+    [dismissed, summary.signature]
+  );
+
+  if (summary.staleCount + summary.ghostCount === 0 || quiet) return null;
+
+  const dismiss = () => {
+    const payload = JSON.stringify({ signature: summary.signature, at: Date.now() });
+    try {
+      window.localStorage.setItem(HK_NUDGE_KEY, payload);
+    } catch {
+      /* storage unavailable — the dismissal is best-effort, this load keeps showing */
+    }
+    setDismissed(payload);
+  };
+
+  /* staleOverdue is due-ascending (the rulebook sorts it) — [0] is the oldest. */
+  const oldest = plan.staleOverdue[0];
+  const oldestDays =
+    oldest !== undefined
+      ? Math.floor((Date.now() - new Date(oldest.dueAt).getTime()) / 86_400_000)
+      : 0;
+
+  return (
+    <motion.div
+      initial={{ opacity: 0, y: -6 }}
+      animate={{ opacity: 1, y: 0 }}
+      transition={{ duration: 0.25 }}
+      role="status"
+      aria-label={`ALA housekeeping: ${summary.staleCount} stale overdue and ${summary.ghostCount} duplicate ghosts can be swept in one pass. Oldest was due ${oldest ? fmtDay(new Date(oldest.dueAt).toISOString()) : "unknown"}.`}
+      className="flex flex-col gap-2.5 rounded-xl border border-amber-500/30 bg-gradient-to-r from-amber-500/[0.08] via-amber-500/[0.04] to-transparent p-3 sm:flex-row sm:items-center"
+    >
+      <div className="flex min-w-0 flex-1 items-start gap-2.5">
+        <span className="mt-0.5 flex size-7 shrink-0 items-center justify-center rounded-full bg-amber-500/15 text-amber-600 dark:text-amber-400">
+          <Brush className="size-4" aria-hidden="true" />
+        </span>
+        <div className="min-w-0">
+          <p className="text-sm font-semibold leading-tight text-amber-700 dark:text-amber-300">
+            Your ALA wall needs a sweep
+          </p>
+          <div className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1 text-[11px] leading-tight text-muted-foreground">
+            <span className="inline-flex items-center gap-1 rounded-full bg-red-500/10 px-2 py-0.5 font-medium text-red-700 dark:text-red-300">
+              <CalendarX2 className="size-3" aria-hidden="true" />
+              {summary.staleCount} stale
+            </span>
+            <span className="inline-flex items-center gap-1 rounded-full bg-amber-500/10 px-2 py-0.5 font-medium text-amber-700 dark:text-amber-300">
+              <Ghost className="size-3" aria-hidden="true" />
+              {summary.ghostCount} duplicate ghost{summary.ghostCount === 1 ? "" : "s"}
+            </span>
+            {summary.recentCount > 0 && (
+              <span>
+                {summary.recentCount} recent miss{summary.recentCount === 1 ? "" : "es"} stay put
+              </span>
+            )}
+            {oldest && (
+              <span className="tabular-nums">
+                · oldest was due {fmtDay(new Date(oldest.dueAt).toISOString())} ({oldestDays}d ago)
+              </span>
+            )}
+          </div>
+        </div>
+      </div>
+      <div className="flex shrink-0 items-center gap-1.5 pl-9 sm:pl-0">
+        <Button
+          variant="outline"
+          size="sm"
+          className="h-7 gap-1 border-amber-500/40 px-2.5 text-xs text-amber-700 hover:bg-amber-500/10 hover:text-amber-800 dark:text-amber-300 dark:hover:text-amber-200 focus-visible:ring-amber-500/50"
+          onClick={onOpenHousekeeping}
+          aria-label="Open the housekeeping sweep from the reminders tab"
+        >
+          <Brush className="size-3" aria-hidden="true" />
+          Clean up
+        </Button>
+        <Button
+          variant="ghost"
+          size="sm"
+          className="h-7 px-2.5 text-xs text-muted-foreground hover:text-foreground"
+          onClick={dismiss}
+          aria-label="Hide the housekeeping nudge for today (it returns if the noise changes)"
+        >
+          Later today
+        </Button>
+      </div>
+    </motion.div>
+  );
+}
+
 export function DashboardTab({
   onOpenAttendance,
   onOpenSettings,
   onOpenReminders,
   onOpenFlaggedAlas,
   onOpenSetupStep,
+  onOpenHousekeeping,
 }: {
   onOpenAttendance: () => void;
   onOpenSettings: () => void;
@@ -1127,6 +1275,9 @@ export function DashboardTab({
   /** Deep-link a setup-checklist row into the exact Settings card
    *  (page.tsx switches to the Settings tab and spotlights the target). */
   onOpenSetupStep?: (focus: SettingsFocus) => void;
+  /** r108: jump to the Reminders tab AND auto-open the housekeeping sweep
+   *  (page.tsx sets a pending-cleanup signal, AlaSection consumes it once). */
+  onOpenHousekeeping?: () => void;
 }) {
   /* Sort starts at the default and hydrates from localStorage after mount
      (SSR renders "lowest", so a saved preference swaps in post-paint — same
@@ -1716,6 +1867,14 @@ export function DashboardTab({
           </p>
         </StatCard>
       </motion.div>
+
+      {/* r108 — housekeeping nudge: the dashboard's one honest tap into the
+          sweep (numbers from the same rulebook as the dialog; dismissible
+          for the day, re-arms the moment the noise changes). */}
+      <HousekeepingNudge
+        assignments={alaQ.data?.assignments ?? []}
+        onOpenHousekeeping={onOpenHousekeeping}
+      />
 
       {/* Milestones — best ever, days at target, streak (honest from snapshot history) */}
       <MilestonesStrip history={history.data} overallPct={overall.percentage} target={target} present={overall.present} total={overall.total} />
